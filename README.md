@@ -1,2 +1,2 @@
 # shv-rs
-SHV implementation for rust
+SHV implementation in rust
