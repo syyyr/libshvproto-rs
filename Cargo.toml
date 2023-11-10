@@ -1,0 +1,23 @@
+[package]
+name = "shv"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+simple_logger = { path = "../simple_logger" }
+
+futures = "0.3.29"
+async-std = "1.12.0"
+log = "0.4.20"
+structopt = "0.3.26"
+bytes = "1.5.0"
+lazy_static = "1.4.0"
+sha1 = "0.10.6"
+chrono = "0.4.31"
+hex = "0.4.3"
+rand = "0.8.5"
+
+[[bin]]
+name = "broker"
