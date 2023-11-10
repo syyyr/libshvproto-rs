@@ -1,6 +1,5 @@
 use std::{
     collections::hash_map::{Entry, HashMap},
-    sync::Arc,
 };
 use futures::{select, FutureExt, StreamExt};
 use async_std::{channel, io::BufReader, net::{TcpListener, TcpStream, ToSocketAddrs}, prelude::*, task};
@@ -80,7 +79,7 @@ async fn accept_loop(addr: impl ToSocketAddrs) -> Result<()> {
 }
 
 async fn client_loop(client_id: i32, broker: Sender<ClientEvent>, stream: TcpStream) -> Result<()> {
-    let stream = Arc::new(stream);
+    let (socket_reader, mut socket_writer) = (&stream, &stream);
     let (peer_sender, peer_receiver) = channel::unbounded::<PeerEvent>();
     broker
         .send(ClientEvent::NewPeer {
@@ -90,9 +89,8 @@ async fn client_loop(client_id: i32, broker: Sender<ClientEvent>, stream: TcpStr
         .await
         .unwrap();
 
-    let stream_rd = stream.clone();
     //let stream_wr = stream.clone();
-    let mut brd = BufReader::new(&*stream_rd);
+    let mut brd = BufReader::new(socket_reader);
     let mut reader = shv::rpc::FrameReader::new(&mut brd);
     loop {
         select! {
@@ -104,7 +102,6 @@ async fn client_loop(client_id: i32, broker: Sender<ClientEvent>, stream: TcpStr
                             break;
                         }
                         Some(frame) => {
-                            log!(target: "RpcMsg", Level::Debug, "R==> id: {} {}", client_id, frame.to_rpcmesage().unwrap_or_default());
                             broker.send(ClientEvent::Frame { client_id, frame }).await.unwrap();
                         }
                     }
@@ -126,8 +123,7 @@ async fn client_loop(client_id: i32, broker: Sender<ClientEvent>, stream: TcpStr
                             break;
                         }
                         PeerEvent::Message(rpcmsg) => {
-                            log!(target: "RpcMsg", Level::Debug, "S<== id: {} {}", client_id, &rpcmsg.to_cpon());
-                            shv::rpc::send_message(&mut &*stream, &rpcmsg).await?;
+                            shv::rpc::send_message(&mut socket_writer, &rpcmsg).await?;
                         }
                     }
                 }
@@ -233,39 +229,49 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                     continue;
                                 }
                                 PeerStage::Login(nonce) => {
-                                    if rpcmsg.is_request() && rpcmsg.method().unwrap_or("") == "login" {
-                                        if let Some(params) = rpcmsg.params() {
-                                            let login = params.as_map().get("login").unwrap_or(&RpcValue::null()).clone();
-                                            if check_login(login.as_map(), &nonce) {
-                                                let mut resp = match  rpcmsg.prepare_response() {
-                                                    Ok(resp) => {resp}
-                                                    Err(e) => {
-                                                        peer.sender.send(PeerEvent::FatalError(format!("Login error: {}", &e))).await.unwrap();
-                                                        continue;
-                                                    }
-                                                };
-                                                let mut result = Map::new();
-                                                result.insert("clientId".into(), RpcValue::from(client_id));
-                                                resp.set_result(RpcValue::from(result));
-                                                peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
-                                                peer.stage = PeerStage::Run;
+                                    if rpcmsg.is_request() {
+                                        let mut resp = match rpcmsg.prepare_response() {
+                                            Ok(resp) => { resp }
+                                            Err(e) => {
+                                                peer.sender.send(PeerEvent::FatalError(format!("Login error: {}", &e))).await.unwrap();
                                                 continue;
                                             }
-                                        }
+                                        };
+                                        let errmsg = if rpcmsg.method().unwrap_or("") == "login" {
+                                            if let Some(params) = rpcmsg.params() {
+                                                let login = params.as_map().get("login").unwrap_or(&RpcValue::null()).clone();
+                                                if check_login(login.as_map(), &nonce) {
+                                                    let mut result = Map::new();
+                                                    result.insert("clientId".into(), RpcValue::from(client_id));
+                                                    resp.set_result(RpcValue::from(result));
+                                                    peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
+                                                    peer.stage = PeerStage::Run;
+                                                    continue;
+                                                } else {
+                                                    "Wrong user name or password"
+                                                }
+                                            } else {
+                                                "Login params missing"
+                                            }
+                                        } else {
+                                            "login() call expected"
+                                        };
+                                        resp.set_error(RpcError::new(RpcErrorCode::MethodCallException, &errmsg));
+                                        peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
                                     }
-                                    peer.sender.send(PeerEvent::FatalError("Invalid login message".into())).await.unwrap();
+                                    //peer.sender.send(PeerEvent::FatalError("Invalid login message".into())).await.unwrap();
                                     continue;
                                 }
                                 PeerStage::Run => {
-                                    let mut resp = match  rpcmsg.prepare_response() {
-                                        Ok(resp) => {resp}
-                                        Err(e) => {
-                                            warn!("Client id: {} cannot create response error: {}", client_id, &e);
-                                            continue;
-                                        }
-                                    };
-                                    let errmsg = if rpcmsg.is_request() {
-                                        match rpcmsg.shv_path() {
+                                    if rpcmsg.is_request() {
+                                        let mut resp = match  rpcmsg.prepare_response() {
+                                            Ok(resp) => {resp}
+                                            Err(e) => {
+                                                warn!("Client id: {} cannot create response error: {}", client_id, &e);
+                                                continue;
+                                            }
+                                        };
+                                        let errmsg = match rpcmsg.shv_path() {
                                             Some(".app") => {
                                                 match rpcmsg.method() {
                                                     Some("ping") => {
@@ -281,11 +287,10 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                             _ => {
                                                 format!("Invalid path: {:?}", rpcmsg.shv_path())
                                             }
-                                        }
-                                    } else {
-                                        format!("Cannot process message: {:?}", rpcmsg)
+                                        };
+                                        resp.set_error(RpcError::new(RpcErrorCode::MethodCallException, &errmsg));
+                                        peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
                                     };
-                                    resp.set_error(RpcError::new(RpcErrorCode::MethodCallException, &errmsg));
                                     continue;
                                 }
                             }

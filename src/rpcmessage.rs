@@ -76,7 +76,7 @@ impl RpcMessage {
         None
     }
     pub fn set_error(&mut self, err: RpcError) -> &mut Self {
-        self.set_key(Key::Result, Some(err.to_rpcvalue()));
+        self.set_key(Key::Error, Some(err.to_rpcvalue()));
         self
     }
     pub fn is_success(&self) -> bool {
@@ -317,6 +317,7 @@ impl RpcMessageMetaTags for MetaMap {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
 pub enum RpcErrorCode {
     NoError = 0,
     InvalidRequest,	// The JSON sent is not a valid Request object.
@@ -330,26 +331,62 @@ pub enum RpcErrorCode {
     Unknown,
     UserCode = 32
 }
-pub struct RpcError(IMap);
+
+use std::convert::TryFrom;
+impl TryFrom<i32> for RpcErrorCode {
+    type Error = ();
+    fn try_from(v: i32) -> Result<Self, Self::Error> {
+        match v {
+            x if x == RpcErrorCode::NoError as i32 => Ok(RpcErrorCode::NoError),
+            x if x == RpcErrorCode::InvalidRequest as i32 => Ok(RpcErrorCode::InvalidRequest),	// The JSON sent is not a valid Request object.
+            x if x == RpcErrorCode::MethodNotFound as i32 => Ok(RpcErrorCode::MethodNotFound),	// The method does not exist / is not available.
+            x if x == RpcErrorCode::InvalidParams as i32 => Ok(RpcErrorCode::InvalidParams),		// Invalid method parameter(s).
+            x if x == RpcErrorCode::InternalError as i32 => Ok(RpcErrorCode::InternalError),		// Internal JSON-RPC error.
+            x if x == RpcErrorCode::ParseError as i32 => Ok(RpcErrorCode::ParseError),		// Invalid JSON was received by the server. An error occurred on the server while parsing the JSON text.
+            x if x == RpcErrorCode::MethodCallTimeout as i32 => Ok(RpcErrorCode::MethodCallTimeout),
+            x if x == RpcErrorCode::MethodCallCancelled as i32 => Ok(RpcErrorCode::MethodCallCancelled),
+            x if x == RpcErrorCode::MethodCallException as i32 => Ok(RpcErrorCode::MethodCallException),
+            x if x == RpcErrorCode::Unknown as i32 => Ok(RpcErrorCode::Unknown),
+            _ => Err(()),
+        }
+    }
+}
+pub struct RpcError {
+    pub code: RpcErrorCode,
+    pub message: String,
+}
+
+enum RpcErrorKey { Code = 1, Message }
 
 impl RpcError {
     pub fn new(code: RpcErrorCode, msg: &str) -> Self {
-        enum Key {KeyCode = 1, KeyMessage}
-        let mut m = IMap::new();
-        m.insert(Key::KeyCode as i32, RpcValue::from(code as i64));
-        if msg.len() > 0 {
-            m.insert(Key::KeyMessage as i32, RpcValue::from(msg.to_string()));
+        RpcError {
+            code,
+            message: msg.into(),
         }
-        RpcError(m)
     }
     pub fn from_rpcvalue(rv: &RpcValue) -> Option<Self> {
         if rv.is_imap() {
-            return Some(RpcError(rv.as_imap().clone()))
+            let m = rv.as_imap();
+            let code = m.get(&(RpcErrorKey::Code as i32)).unwrap_or(&RpcValue::from(RpcErrorCode::Unknown as i32)).as_i32();
+            let msg = if let Some(msg) = m.get(&(RpcErrorKey::Message as i32)) {
+                msg.as_str().to_string()
+            } else {
+                "".to_string()
+            };
+            Some(RpcError {
+                code: code.try_into().unwrap_or(RpcErrorCode::Unknown),
+                message: msg,
+            })
+        } else {
+            None
         }
-        None
     }
     pub fn to_rpcvalue(&self) -> RpcValue {
-        RpcValue::from(self.0.clone())
+        let mut m = IMap::new();
+        m.insert(RpcErrorKey::Code as i32, RpcValue::from(*&self.code as i32));
+        m.insert(RpcErrorKey::Message as i32, RpcValue::from(&self.message));
+        RpcValue::from(m)
     }
 }
 

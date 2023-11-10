@@ -2,11 +2,13 @@ use crate::writer::Writer;
 use async_std::io;
 use crate::rpcframe::{Protocol, RpcFrame};
 use futures::{AsyncReadExt, AsyncWriteExt};
+use log::*;
 use sha1::{Sha1, Digest};
 use crate::{ChainPackWriter, RpcMessage};
 // use log::*;
 
 async fn send_frame<W: io::Write + std::marker::Unpin>(writer: &mut W, frame: RpcFrame) -> crate::Result<()> {
+    log!(target: "RpcMsg", Level::Debug, "S<== {}", &frame.to_rpcmesage().unwrap_or_default());
     let mut meta_data = Vec::new();
     {
         let mut wr = ChainPackWriter::new(&mut meta_data);
@@ -47,21 +49,24 @@ impl<'a, R: io::BufRead + std::marker::Unpin> FrameReader<'a, R> {
 
     pub async fn receive_frame(&mut self) -> crate::Result<Option<RpcFrame>> {
         loop {
-            let buff = &self.buffer[..];
-            // trace!("parsing: {:?}", buff);
-            match RpcFrame::parse(buff) {
-                Ok(maybe_frame) => {
-                    match maybe_frame {
-                        None => { }
-                        Some((frame_len, frame)) => {
-                            self.buffer = self.buffer[frame_len..].to_vec();
-                            return Ok(Some(frame))
+            while !&self.buffer.is_empty() {
+                let buff = &self.buffer[..];
+                // trace!("parsing: {:?}", buff);
+                match RpcFrame::parse(buff) {
+                    Ok(maybe_frame) => {
+                        match maybe_frame {
+                            None => { break; }
+                            Some((frame_len, frame)) => {
+                                self.buffer = self.buffer[frame_len..].to_vec();
+                                log!(target: "RpcMsg", Level::Debug, "R==> {}", &frame.to_rpcmesage().unwrap_or_default());
+                                return Ok(Some(frame))
+                            }
                         }
                     }
-                }
-                Err(_) => {
-                    // invalid frame will be silently ignored, data will be thrown away
-                    self.buffer.clear();
+                    Err(_) => {
+                        // invalid frame will be silently ignored, data will be thrown away
+                        self.buffer.clear();
+                    }
                 }
             }
             let mut buff = [0u8; 1024];
@@ -80,15 +85,15 @@ impl<'a, R: io::BufRead + std::marker::Unpin> FrameReader<'a, R> {
         }
     }
 
-    // pub async fn receive_message(&mut self) -> crate::Result<Option<RpcMessage>> {
-    //     match self.receive_frame().await? {
-    //         None => { return Ok(None); }
-    //         Some(frame) => {
-    //             let msg = frame.to_rpcmesage()?;
-    //             return Ok(Some(msg));
-    //         }
-    //     }
-    // }
+    pub async fn receive_message(&mut self) -> crate::Result<Option<RpcMessage>> {
+        match self.receive_frame().await? {
+            None => { return Ok(None); }
+            Some(frame) => {
+                let msg = frame.to_rpcmesage()?;
+                return Ok(Some(msg));
+            }
+        }
+    }
 }
 
 

@@ -18,6 +18,10 @@ sha1 = "0.10.6"
 chrono = "0.4.31"
 hex = "0.4.3"
 rand = "0.8.5"
+url = "2.4.1"
+percent-encoding = "2.3.0"
 
 [[bin]]
-name = "broker"
+name = "shvbroker"
+[[bin]]
+name = "shvcall"
