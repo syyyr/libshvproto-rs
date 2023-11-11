@@ -1,14 +1,12 @@
 use async_std::{io,prelude::*};
 use structopt::StructOpt;
-use shv::client::LoginParams;
 use async_std::io::BufReader;
 use async_std::net::TcpStream;
-use shv::{RpcMessage, RpcValue};
+use shv::{client, RpcMessage, RpcValue};
 use async_std::task;
 use log::*;
 use simple_logger::SimpleLogger;
 use url::Url;
-use percent_encoding::percent_decode;
 
 #[derive(StructOpt, Debug)]
 //#[structopt(name = "shvcall", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "SHV call")]
@@ -63,36 +61,13 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     // Establish a connection
     let address = format!("{}:{}", url.host_str().unwrap_or_default(), url.port().unwrap_or(3755));
     let stream = TcpStream::connect(&address).await?;
-    let (reader, mut writer) = (&stream, &stream);
-
-    let mut brd = BufReader::new(reader);
-    let mut reader = shv::connection::FrameReader::new(&mut brd);
+    let (mut reader, mut writer) = (&stream, &stream);
 
     // login
-    {
-        let rq = RpcMessage::create_request("", "hello", None);
-        shv::connection::send_message(&mut writer, &rq).await?;
-        let resp = reader.receive_message().await?.unwrap_or_default();
-        if !resp.is_success() {
-            return Err(resp.error().unwrap().to_rpcvalue().to_cpon().into());
-        }
-        let nonce = resp.result().ok_or("Bad result")?.as_map()
-            .get("nonce").ok_or("Bad nonce")?.as_str();
-        let password = percent_decode(url.password().unwrap_or("").as_bytes()).decode_utf8()?;
-        let hash = shv::connection::sha1_password_hash(password.as_bytes(), nonce.as_bytes());
-        let login_params = LoginParams{
-            user: url.username().to_string(),
-            password: std::str::from_utf8(&hash)?.into(),
-            heartbeat_interval: None,
-            ..Default::default()
-        };
-        let rq = RpcMessage::create_request("", "login", Some(login_params.to_rpcvalue()));
-        shv::connection::send_message(&mut writer, &rq).await?;
-        let resp = reader.receive_message().await?.ok_or("Receive error")?;
-        if !resp.is_success() {
-            return Err(resp.error().unwrap().message.into());
-        }
-    }
+    client::login(&mut reader, &mut writer, url).await?;
+
+    let mut brd = BufReader::new(reader);
+    let mut frame_reader = shv::connection::FrameReader::new(&mut brd);
 
     let params = match &opts.params {
         None => None,
@@ -103,7 +78,7 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     let rpcmsg = RpcMessage::create_request(&opts.path, &opts.method, params);
     shv::connection::send_message(&mut writer, &rpcmsg).await?;
 
-    let resp = reader.receive_message().await?.ok_or("Receive error")?;
+    let resp = frame_reader.receive_message().await?.ok_or("Receive error")?;
     let mut stdout = io::stdout();
     let response_bytes = if opts.chainpack {
         resp.as_rpcvalue().to_chainpack()

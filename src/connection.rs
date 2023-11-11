@@ -7,7 +7,8 @@ use sha1::{Sha1, Digest};
 use crate::{ChainPackWriter, RpcMessage};
 // use log::*;
 
-pub async fn send_frame<W: async_std::io::Write + std::marker::Unpin>(writer: &mut W, frame: RpcFrame) -> crate::Result<()> {
+//pub trait Reader = async_std::io::Write + std::marker::Unpin;
+pub async fn send_frame<W: io::Write + std::marker::Unpin>(writer: &mut W, frame: RpcFrame) -> crate::Result<()> {
     log!(target: "RpcMsg", Level::Debug, "S<== {}", &frame.to_rpcmesage().unwrap_or_default());
     let mut meta_data = Vec::new();
     {

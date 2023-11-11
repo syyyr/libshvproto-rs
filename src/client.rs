@@ -1,5 +1,9 @@
 use std::time::Duration;
-use crate::RpcValue;
+use async_std::io;
+use async_std::io::BufReader;
+use percent_encoding::percent_decode;
+use url::Url;
+use crate::{RpcMessage, RpcValue};
 
 #[derive(Copy, Clone, Debug)]
 pub enum LoginType {
@@ -71,5 +75,41 @@ impl LoginParams {
         }
         map.insert("options".into(), RpcValue::from(options));
         RpcValue::from(map)
+    }
+}
+
+pub async fn login<'a, R, W>(reader: &mut R, writer: &mut W, url: &Url) -> crate::Result<i32>
+where R: io::Read + std::marker::Unpin,
+      W: io::Write + std::marker::Unpin
+{
+    let mut brd = BufReader::new(reader);
+    let mut frame_reader = crate::connection::FrameReader::new(&mut brd);
+
+    let rq = RpcMessage::create_request("", "hello", None);
+    crate::connection::send_message(writer, &rq).await?;
+    let resp = frame_reader.receive_message().await?.unwrap_or_default();
+    if !resp.is_success() {
+        return Err(resp.error().unwrap().to_rpcvalue().to_cpon().into());
+    }
+    let nonce = resp.result().ok_or("Bad result")?.as_map()
+        .get("nonce").ok_or("Bad nonce")?.as_str();
+    let password = percent_decode(url.password().unwrap_or("").as_bytes()).decode_utf8()?;
+    let hash = crate::connection::sha1_password_hash(password.as_bytes(), nonce.as_bytes());
+    let login_params = LoginParams{
+        user: url.username().to_string(),
+        password: std::str::from_utf8(&hash)?.into(),
+        heartbeat_interval: None,
+        ..Default::default()
+    };
+    let rq = RpcMessage::create_request("", "login", Some(login_params.to_rpcvalue()));
+    crate::connection::send_message(writer, &rq).await?;
+    let resp = frame_reader.receive_message().await?.ok_or("Socked closed")?;
+    if let Some(result) = resp.result() {
+        match result.as_map().get("clientId") {
+            None => { Ok(0) }
+            Some(client_id) => { Ok(client_id.as_i32()) }
+        }
+    } else {
+        Err(resp.error().ok_or("Unknown error")?.message.into())
     }
 }
