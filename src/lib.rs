@@ -11,7 +11,7 @@ pub mod reader;
 pub mod writer;
 pub mod cpon;
 pub mod chainpack;
-pub mod rpc;
+pub mod connection;
 pub mod client;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;

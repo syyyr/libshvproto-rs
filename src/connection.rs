@@ -7,7 +7,7 @@ use sha1::{Sha1, Digest};
 use crate::{ChainPackWriter, RpcMessage};
 // use log::*;
 
-async fn send_frame<W: io::Write + std::marker::Unpin>(writer: &mut W, frame: RpcFrame) -> crate::Result<()> {
+pub async fn send_frame<W: async_std::io::Write + std::marker::Unpin>(writer: &mut W, frame: RpcFrame) -> crate::Result<()> {
     log!(target: "RpcMsg", Level::Debug, "S<== {}", &frame.to_rpcmesage().unwrap_or_default());
     let mut meta_data = Vec::new();
     {
@@ -28,18 +28,18 @@ async fn send_frame<W: io::Write + std::marker::Unpin>(writer: &mut W, frame: Rp
     writer.flush().await?;
     Ok(())
 }
-pub async fn send_message<W: io::Write + std::marker::Unpin>(writer: &mut W, msg: &RpcMessage) -> crate::Result<()> {
+pub async fn send_message<W: async_std::io::Write + std::marker::Unpin>(writer: &mut W, msg: &RpcMessage) -> crate::Result<()> {
     let frame = RpcFrame::from_rpcmessage(Protocol::ChainPack, &msg)?;
     send_frame(writer, frame).await?;
     Ok(())
 }
 
-pub struct FrameReader<'a, R: io::BufRead + std::marker::Unpin> {
+pub struct FrameReader<'a, R: async_std::io::Read + std::marker::Unpin> {
     buffer: Vec<u8>,
     reader: &'a mut R,
 }
 
-impl<'a, R: io::BufRead + std::marker::Unpin> FrameReader<'a, R> {
+impl<'a, R: io::Read + std::marker::Unpin> FrameReader<'a, R> {
     pub fn new(reader: &'a mut R) -> FrameReader<'a, R> {
         FrameReader {
             buffer: vec![],

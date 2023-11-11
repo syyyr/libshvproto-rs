@@ -66,12 +66,12 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     let (reader, mut writer) = (&stream, &stream);
 
     let mut brd = BufReader::new(reader);
-    let mut reader = shv::rpc::FrameReader::new(&mut brd);
+    let mut reader = shv::connection::FrameReader::new(&mut brd);
 
     // login
     {
         let rq = RpcMessage::create_request("", "hello", None);
-        shv::rpc::send_message(&mut writer, &rq).await?;
+        shv::connection::send_message(&mut writer, &rq).await?;
         let resp = reader.receive_message().await?.unwrap_or_default();
         if !resp.is_success() {
             return Err(resp.error().unwrap().to_rpcvalue().to_cpon().into());
@@ -79,7 +79,7 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
         let nonce = resp.result().ok_or("Bad result")?.as_map()
             .get("nonce").ok_or("Bad nonce")?.as_str();
         let password = percent_decode(url.password().unwrap_or("").as_bytes()).decode_utf8()?;
-        let hash = shv::rpc::sha1_password_hash(password.as_bytes(), nonce.as_bytes());
+        let hash = shv::connection::sha1_password_hash(password.as_bytes(), nonce.as_bytes());
         let login_params = LoginParams{
             user: url.username().to_string(),
             password: std::str::from_utf8(&hash)?.into(),
@@ -87,7 +87,7 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
             ..Default::default()
         };
         let rq = RpcMessage::create_request("", "login", Some(login_params.to_rpcvalue()));
-        shv::rpc::send_message(&mut writer, &rq).await?;
+        shv::connection::send_message(&mut writer, &rq).await?;
         let resp = reader.receive_message().await?.ok_or("Receive error")?;
         if !resp.is_success() {
             return Err(resp.error().unwrap().message.into());
@@ -101,7 +101,7 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
         },
     };
     let rpcmsg = RpcMessage::create_request(&opts.path, &opts.method, params);
-    shv::rpc::send_message(&mut writer, &rpcmsg).await?;
+    shv::connection::send_message(&mut writer, &rpcmsg).await?;
 
     let resp = reader.receive_message().await?.ok_or("Receive error")?;
     let mut stdout = io::stdout();

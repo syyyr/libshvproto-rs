@@ -71,14 +71,14 @@ async fn accept_loop(addr: impl ToSocketAddrs) -> Result<()> {
         let stream = stream?;
         debug!("Accepting from: {}", stream.peer_addr()?);
         client_id += 1;
-        spawn_and_log_error(client_loop(client_id, broker_sender.clone(), stream));
+        spawn_and_log_error(connection_loop(client_id, broker_sender.clone(), stream));
     }
     drop(broker_sender);
     broker.await;
     Ok(())
 }
 
-async fn client_loop(client_id: i32, broker: Sender<ClientEvent>, stream: TcpStream) -> Result<()> {
+async fn connection_loop(client_id: i32, broker: Sender<ClientEvent>, stream: TcpStream) -> Result<()> {
     let (socket_reader, mut socket_writer) = (&stream, &stream);
     let (peer_sender, peer_receiver) = channel::unbounded::<PeerEvent>();
     broker
@@ -91,7 +91,7 @@ async fn client_loop(client_id: i32, broker: Sender<ClientEvent>, stream: TcpStr
 
     //let stream_wr = stream.clone();
     let mut brd = BufReader::new(socket_reader);
-    let mut reader = shv::rpc::FrameReader::new(&mut brd);
+    let mut reader = shv::connection::FrameReader::new(&mut brd);
     loop {
         select! {
             frame = reader.receive_frame().fuse() => match frame {
@@ -123,7 +123,7 @@ async fn client_loop(client_id: i32, broker: Sender<ClientEvent>, stream: TcpStr
                             break;
                         }
                         PeerEvent::Message(rpcmsg) => {
-                            shv::rpc::send_message(&mut socket_writer, &rpcmsg).await?;
+                            shv::connection::send_message(&mut socket_writer, &rpcmsg).await?;
                         }
                     }
                 }
@@ -180,7 +180,7 @@ fn check_login(login: &Map, nonce: &str) -> bool {
                     return user.as_str() == def_user && password.as_str() == def_password;
                 }
             }
-            let hash = shv::rpc::sha1_password_hash(def_password.as_bytes(), nonce.as_bytes());
+            let hash = shv::connection::sha1_password_hash(def_password.as_bytes(), nonce.as_bytes());
             return user.as_str() == def_user && password.as_str().as_bytes() == &hash;
         }
     }
