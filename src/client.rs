@@ -1,9 +1,9 @@
 use std::time::Duration;
 use async_std::io;
-use async_std::io::BufReader;
 use percent_encoding::percent_decode;
 use url::Url;
 use crate::{RpcMessage, RpcValue};
+use crate::connection::FrameReader;
 
 #[derive(Copy, Clone, Debug)]
 pub enum LoginType {
@@ -78,13 +78,10 @@ impl LoginParams {
     }
 }
 
-pub async fn login<'a, R, W>(reader: &mut R, writer: &mut W, url: &Url) -> crate::Result<i32>
+pub async fn login<'a, R, W>(frame_reader: &mut FrameReader<'a, R>, writer: &mut W, url: &Url) -> crate::Result<i32>
 where R: io::Read + std::marker::Unpin,
       W: io::Write + std::marker::Unpin
 {
-    let mut brd = BufReader::new(reader);
-    let mut frame_reader = crate::connection::FrameReader::new(&mut brd);
-
     let rq = RpcMessage::create_request("", "hello", None);
     crate::connection::send_message(writer, &rq).await?;
     let resp = frame_reader.receive_message().await?.unwrap_or_default();

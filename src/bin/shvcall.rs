@@ -61,13 +61,13 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     // Establish a connection
     let address = format!("{}:{}", url.host_str().unwrap_or_default(), url.port().unwrap_or(3755));
     let stream = TcpStream::connect(&address).await?;
-    let (mut reader, mut writer) = (&stream, &stream);
-
-    // login
-    client::login(&mut reader, &mut writer, url).await?;
+    let (reader, mut writer) = (&stream, &stream);
 
     let mut brd = BufReader::new(reader);
     let mut frame_reader = shv::connection::FrameReader::new(&mut brd);
+
+    // login
+    client::login(&mut frame_reader, &mut writer, url).await?;
 
     let params = match &opts.params {
         None => None,
