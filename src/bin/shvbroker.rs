@@ -171,13 +171,12 @@ struct Peer {
     stage: PeerStage,
 }
 struct Device {
-    clientId: i32,
-    node: Box<dyn ShvNode<MethodIterator=impl ShvNode::MethodIterator>>,
+    client_id: i32,
+    node: Box<dyn ShvNode + Send>,
 }
 struct Broker {
     peers: HashMap<i32, Peer>,
-    
-    mounts: HashMap<String, i32>,
+    mounts: HashMap<String, Device>,
 }
 fn check_login(login: &Map, nonce: &str) -> bool {
     let def_user = "admin";
@@ -200,6 +199,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
         peers: HashMap::new(),
         mounts: HashMap::new(),
     };
+    broker.mounts.insert(".app".into(), Device { client_id: 0, node: Box::new(br::nodes::AppNode{})});
     loop {
         match events.recv().await {
             Err(e) => {
@@ -281,53 +281,29 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                                 continue;
                                             }
                                         };
-                                        let result = match rpcmsg.shv_path() {
-                                            Some(".app") => {
-                                                match rpcmsg.method() {
-                                                    Some("dir") => {
-                                                        let methods = [
-                                                            MetaMethod { name: "dir".into(), param: "DirParam".into(), result: "DirResult".into(), ..Default::default() },
-                                                            MetaMethod { name: "ls".into(), param: "LsParam".into(), result: "LsResult".into(), ..Default::default() },
-                                                            MetaMethod { name: "ping".into(), ..Default::default() },
-                                                        ];
-                                                        Ok(shvnode::dir(methods.iter(), rpcmsg.params().into()))
-                                                    }
-                                                    Some("ls") => {
-                                                        match rpcmsg.params() {
-                                                            None => Ok(List::new().into()),
-                                                            Some(_) => Ok(false.into()),
+                                        let result = if let Some(shv_path) = rpcmsg.shv_path() {
+                                            if let Some(method) = rpcmsg.method() {
+                                                let params = rpcmsg.params();
+                                                if let Some(device) = broker.mounts.get(shv_path) {
+                                                    if let Some(mm) = device.node.methods().iter().find(|&mm| mm.name == method) {
+                                                        // let mm = *mm;
+                                                        if mm.name == "dir" {
+                                                            let result = shvnode::dir(device.node.methods().into_iter(), params.into());
+                                                            Ok(result)
+                                                        } else {
+                                                            Err(format!("Invalid method: {} is not implemented", method))
                                                         }
+                                                    } else {
+                                                        Err(format!("Invalid method: {}", method))
                                                     }
-                                                    Some("ping") => {
-                                                        Ok(RpcValue::null())
-                                                    }
-                                                    Some("name") => {
-                                                        Ok("shvbroker".into())
-                                                    }
-                                                    _ => {
-                                                        Err(format!("Invalid method: {:?}", rpcmsg.method()))
-                                                    }
+                                                } else {
+                                                    Err(format!("Invalid mount point: {}", shv_path))
                                                 }
+                                            } else {
+                                                Err(format!("Empty method"))
                                             }
-                                            Some(shv_path) => {
-                                                match rpcmsg.method() {
-                                                    None => {
-                                                        Err(format!("Empty method"))
-                                                    }
-                                                    Some("ls") => {
-                                                        Err(format!("Invalid path: {:?}", rpcmsg.shv_path()))
-                                                    }
-                                                    Some("dir") => {
-                                                        Err(format!("Invalid path: {:?}", rpcmsg.shv_path()))
-                                                    }
-                                                    Some(method) => {
-                                                        Err(format!("Invalid method: {:?}", method))
-                                                    }
-                                                }
-                                            }
-                                            None => {
-                                                Err(format!("Empty path"))
-                                            }
+                                        } else {
+                                            Err(format!("Empty path"))
                                         };
                                         match result {
                                             Ok(value) => {

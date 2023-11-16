@@ -12,10 +12,9 @@ lazy_static! {
 struct DirNode {
     // methods: Vec<MetaMethod>
 }
-impl<'a> ShvNode<'a> for DirNode {
-    type MethodIterator = std::slice::Iter<'a, MetaMethod>;
-    fn methods(&'a self) -> Self::MethodIterator {
-        DIR_LS.iter()
+impl ShvNode for DirNode {
+    fn methods(&self) -> Vec<&MetaMethod> {
+        DIR_LS.iter().collect()
     }
 }
 
@@ -24,11 +23,10 @@ lazy_static! {
         MetaMethod { name: "ping".into(), ..Default::default() },
     ];
 }
-struct AppNode {
+pub(crate) struct AppNode {
 }
-impl<'a> ShvNode<'a> for AppNode {
-    type MethodIterator = std::iter::Chain<std::slice::Iter<'a, MetaMethod>, std::slice::Iter<'a, MetaMethod>>;
-    fn methods(&'a self) -> Self::MethodIterator {
-        DIR_LS.iter().chain(APP_METHODS.iter())
+impl ShvNode for AppNode {
+    fn methods(&self) -> Vec<&MetaMethod> {
+        DIR_LS.iter().chain(APP_METHODS.iter()).collect()
     }
 }

@@ -53,7 +53,6 @@ pub fn dir<'a>(methods: impl Iterator<Item=&'a MetaMethod>, param: DirParam) -> 
     }
 }
 
-pub trait ShvNode<'a> {
-    type MethodIterator: Iterator<Item=&'a MetaMethod>;
-    fn methods(&'a self) -> Self::MethodIterator;
+pub trait ShvNode {
+    fn methods(&self) -> Vec<&MetaMethod>;
 }
