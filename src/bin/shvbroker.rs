@@ -8,11 +8,15 @@ use rand::distributions::{Alphanumeric, DistString};
 use log::*;
 use structopt::StructOpt;
 use shv::rpcframe::RpcFrame;
-use shv::{RpcMessage, RpcValue};
+use shv::{List, RpcMessage, RpcValue, shvnode};
 use shv::{Map};
 use shv::rpcmessage::{RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
+use shv::metamethod::{MetaMethod};
+use shv::shvnode::ShvNode;
+
+mod br;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 type Sender<T> = async_std::channel::Sender<T>;
@@ -166,9 +170,14 @@ struct Peer {
     sender: Sender<PeerEvent>,
     stage: PeerStage,
 }
-
+struct Device {
+    clientId: i32,
+    node: Box<dyn ShvNode<MethodIterator=impl ShvNode::MethodIterator>>,
+}
 struct Broker {
     peers: HashMap<i32, Peer>,
+    
+    mounts: HashMap<String, i32>,
 }
 fn check_login(login: &Map, nonce: &str) -> bool {
     let def_user = "admin";
@@ -189,6 +198,7 @@ fn check_login(login: &Map, nonce: &str) -> bool {
 async fn broker_loop(events: Receiver<ClientEvent>) {
     let mut broker = Broker {
         peers: HashMap::new(),
+        mounts: HashMap::new(),
     };
     loop {
         match events.recv().await {
@@ -271,24 +281,62 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                                 continue;
                                             }
                                         };
-                                        let errmsg = match rpcmsg.shv_path() {
+                                        let result = match rpcmsg.shv_path() {
                                             Some(".app") => {
                                                 match rpcmsg.method() {
+                                                    Some("dir") => {
+                                                        let methods = [
+                                                            MetaMethod { name: "dir".into(), param: "DirParam".into(), result: "DirResult".into(), ..Default::default() },
+                                                            MetaMethod { name: "ls".into(), param: "LsParam".into(), result: "LsResult".into(), ..Default::default() },
+                                                            MetaMethod { name: "ping".into(), ..Default::default() },
+                                                        ];
+                                                        Ok(shvnode::dir(methods.iter(), rpcmsg.params().into()))
+                                                    }
+                                                    Some("ls") => {
+                                                        match rpcmsg.params() {
+                                                            None => Ok(List::new().into()),
+                                                            Some(_) => Ok(false.into()),
+                                                        }
+                                                    }
                                                     Some("ping") => {
-                                                        resp.set_result(RpcValue::null());
-                                                        peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
-                                                        continue;
+                                                        Ok(RpcValue::null())
+                                                    }
+                                                    Some("name") => {
+                                                        Ok("shvbroker".into())
                                                     }
                                                     _ => {
-                                                        format!("Invalid method: {:?}", rpcmsg.method())
+                                                        Err(format!("Invalid method: {:?}", rpcmsg.method()))
                                                     }
                                                 }
                                             }
-                                            _ => {
-                                                format!("Invalid path: {:?}", rpcmsg.shv_path())
+                                            Some(shv_path) => {
+                                                match rpcmsg.method() {
+                                                    None => {
+                                                        Err(format!("Empty method"))
+                                                    }
+                                                    Some("ls") => {
+                                                        Err(format!("Invalid path: {:?}", rpcmsg.shv_path()))
+                                                    }
+                                                    Some("dir") => {
+                                                        Err(format!("Invalid path: {:?}", rpcmsg.shv_path()))
+                                                    }
+                                                    Some(method) => {
+                                                        Err(format!("Invalid method: {:?}", method))
+                                                    }
+                                                }
+                                            }
+                                            None => {
+                                                Err(format!("Empty path"))
                                             }
                                         };
-                                        resp.set_error(RpcError::new(RpcErrorCode::MethodCallException, &errmsg));
+                                        match result {
+                                            Ok(value) => {
+                                                resp.set_result(value);
+                                            }
+                                            Err(errmsg) => {
+                                                resp.set_error(RpcError::new(RpcErrorCode::MethodCallException, &errmsg));
+                                            }
+                                        }
                                         peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
                                     };
                                     continue;
