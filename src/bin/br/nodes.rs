@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 use shv::metamethod::MetaMethod;
-use shv::RpcMessage;
+use shv::{RpcMessage, RpcMessageMetaTags, RpcValue};
 use shv::shvnode::{ProcessRequestResult, ShvNode};
 
 lazy_static! {
@@ -36,6 +36,13 @@ impl ShvNode for AppNode {
     }
 
     fn process_request(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult {
-        Err(format!("NIY {}", rpcmsg).into())
+        match rpcmsg.method() {
+            Some("ping") => {
+                Ok(Some(RpcValue::from(())))
+            }
+            _ => {
+                ShvNode::process_request_dir(self, rpcmsg)
+            }
+        }
     }
 }

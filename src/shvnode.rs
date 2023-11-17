@@ -1,5 +1,6 @@
+use std::format;
 use crate::metamethod::MetaMethod;
-use crate::{metamethod, RpcMessage, RpcValue, rpcvalue};
+use crate::{metamethod, RpcMessage, RpcMessageMetaTags, RpcValue, rpcvalue};
 
 pub enum DirParam {
     Brief,
@@ -56,4 +57,14 @@ pub type ProcessRequestResult = crate::Result<Option<RpcValue>>;
 pub trait ShvNode {
     fn methods(&self) -> Vec<&MetaMethod>;
     fn process_request(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult;
+    fn process_request_dir(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult {
+        match rpcmsg.method() {
+            Some("dir") => {
+                Ok(Some(dir(self.methods().into_iter(), rpcmsg.params().into())))
+            }
+            _ => {
+                Err(format!("NIY {}", rpcmsg).into())
+            }
+        }
+    }
 }
