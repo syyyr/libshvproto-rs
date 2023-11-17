@@ -1,6 +1,7 @@
 use lazy_static::lazy_static;
 use shv::metamethod::MetaMethod;
-use shv::shvnode::ShvNode;
+use shv::RpcMessage;
+use shv::shvnode::{ProcessRequestResult, ShvNode};
 
 lazy_static! {
     static ref DIR_LS: [MetaMethod; 2] = [
@@ -16,6 +17,10 @@ impl ShvNode for DirNode {
     fn methods(&self) -> Vec<&MetaMethod> {
         DIR_LS.iter().collect()
     }
+
+    fn process_request(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult {
+        Err(format!("NIY {}", rpcmsg).into())
+    }
 }
 
 lazy_static! {
@@ -28,5 +33,9 @@ pub(crate) struct AppNode {
 impl ShvNode for AppNode {
     fn methods(&self) -> Vec<&MetaMethod> {
         DIR_LS.iter().chain(APP_METHODS.iter()).collect()
+    }
+
+    fn process_request(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult {
+        Err(format!("NIY {}", rpcmsg).into())
     }
 }

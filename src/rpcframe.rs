@@ -2,7 +2,7 @@ use std::fmt;
 use std::io::{Cursor, BufReader};
 // use tracing::{instrument};
 use bytes::Buf;
-use crate::{ChainPackReader, ChainPackWriter, CponReader, CponWriter, MetaMap, RpcMessage, RpcMessageMetaTags, RpcValue};
+use crate::{ChainPackReader, ChainPackWriter, CponReader, CponWriter, MetaMap, RpcMessage, RpcMessageMetaTags, rpctype, RpcValue};
 use crate::writer::Writer;
 use crate::reader::Reader;
 use log::*;
@@ -98,6 +98,19 @@ impl RpcFrame {
         // debug!("parse data len: {}", (frame_len - pos));
         let data: Vec<u8> = buff[pos .. frame_len].into();
         return Ok(Some((frame_len, RpcFrame { protocol, meta, data })))
+    }
+    pub fn prepare_response_meta(src: &MetaMap) -> Result<MetaMap, &'static str> {
+        if src.is_request() {
+            if let Some(rqid) = src.request_id() {
+                let mut dest = MetaMap::new();
+                dest.insert(rpctype::Tag::MetaTypeId as i32, RpcValue::from(rpctype::GlobalNS::MetaTypeID::ChainPackRpcMessage as i32));
+                dest.set_request_id(rqid);
+                dest.set_caller_ids(&src.caller_ids());
+                return Ok(dest)
+            }
+            return Err("Request ID is missing")
+        }
+        Err("Not RPC Request")
     }
 }
 

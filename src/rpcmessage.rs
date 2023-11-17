@@ -138,23 +138,9 @@ impl RpcMessage {
         msg
     }
     pub fn prepare_response(&self) -> Result<Self, &'static str> {
-        let meta = Self::prepare_response_meta(self.as_rpcvalue().meta())?;
+        let meta = RpcFrame::prepare_response_meta(self.as_rpcvalue().meta())?;
         Ok(Self::from_meta(meta))
     }
-    pub fn prepare_response_meta(src: &MetaMap) -> Result<MetaMap, &'static str> {
-        if src.is_request() {
-            if let Some(rqid) = src.request_id() {
-                let mut dest = MetaMap::new();
-                dest.insert(rpctype::Tag::MetaTypeId as i32, RpcValue::from(rpctype::GlobalNS::MetaTypeID::ChainPackRpcMessage as i32));
-                dest.set_request_id(rqid);
-                dest.set_caller_ids(&src.caller_ids());
-                return Ok(dest)
-            }
-            return Err("Request ID is missing")
-        }
-        Err("Not RPC Request")
-    }
-
 }
 impl Default for RpcMessage {
     fn default() -> Self {
@@ -333,6 +319,8 @@ pub enum RpcErrorCode {
 }
 
 use std::convert::TryFrom;
+use crate::rpcframe::RpcFrame;
+
 impl TryFrom<i32> for RpcErrorCode {
     type Error = ();
     fn try_from(v: i32) -> Result<Self, Self::Error> {

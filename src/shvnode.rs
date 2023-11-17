@@ -1,5 +1,5 @@
 use crate::metamethod::MetaMethod;
-use crate::{metamethod, RpcValue, rpcvalue};
+use crate::{metamethod, RpcMessage, RpcValue, rpcvalue};
 
 pub enum DirParam {
     Brief,
@@ -52,7 +52,8 @@ pub fn dir<'a>(methods: impl Iterator<Item=&'a MetaMethod>, param: DirParam) -> 
         result
     }
 }
-
+pub type ProcessRequestResult = crate::Result<Option<RpcValue>>;
 pub trait ShvNode {
     fn methods(&self) -> Vec<&MetaMethod>;
+    fn process_request(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult;
 }

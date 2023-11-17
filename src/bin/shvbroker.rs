@@ -1,6 +1,7 @@
 use std::{
     collections::hash_map::{Entry, HashMap},
 };
+use std::collections::BTreeMap;
 use futures::{select, FutureExt, StreamExt};
 use async_std::{channel, io::BufReader, net::{TcpListener, TcpStream, ToSocketAddrs}, prelude::*, task};
 
@@ -8,13 +9,12 @@ use rand::distributions::{Alphanumeric, DistString};
 use log::*;
 use structopt::StructOpt;
 use shv::rpcframe::RpcFrame;
-use shv::{List, RpcMessage, RpcValue, shvnode};
+use shv::{RpcMessage, RpcValue};
 use shv::{Map};
 use shv::rpcmessage::{RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
-use shv::metamethod::{MetaMethod};
-use shv::shvnode::ShvNode;
+use shv::shvnode::{ShvNode};
 
 mod br;
 
@@ -126,6 +126,9 @@ async fn connection_loop(client_id: i32, broker: Sender<ClientEvent>, stream: Tc
                             error!("Fatal client error: {}", errmsg);
                             break;
                         }
+                        PeerEvent::Frame(frame) => {
+                            shv::connection::send_frame(&mut socket_writer, frame).await?;
+                        }
                         PeerEvent::Message(rpcmsg) => {
                             shv::connection::send_message(&mut socket_writer, &rpcmsg).await?;
                         }
@@ -156,10 +159,11 @@ enum ClientEvent {
 
 #[derive(Debug)]
 enum PeerEvent {
+    Frame(RpcFrame),
     Message(RpcMessage),
     FatalError(String),
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum PeerStage {
     Hello,
     Login(String),
@@ -172,11 +176,82 @@ struct Peer {
 }
 struct Device {
     client_id: i32,
-    node: Box<dyn ShvNode + Send>,
 }
+type Node = Box<dyn ShvNode + Send + Sync>;
 struct Broker {
     peers: HashMap<i32, Peer>,
-    mounts: HashMap<String, Device>,
+    devices: BTreeMap<String, Device>,
+    nodes: BTreeMap<String, Node>,
+}
+
+impl Broker {
+    pub fn ls(&self, path: &str) -> Option<Vec<String>> {
+        //let parent_dir = path.to_string();
+        let mut dirs: Vec<String> = Vec::new();
+        let mut dir_exists = false;
+        for (key, _) in self.devices.range(path.to_string()..) {
+            if key.starts_with(path) {
+                dir_exists = true;
+                if path.is_empty()
+                    || key.len() == path.len()
+                    || key.as_bytes()[path.len()] == ('/' as u8)
+                {
+                    if key.len() > path.len() {
+                        let dir_rest_start = if path.is_empty() {
+                            0
+                        } else {
+                            path.len() + 1
+                        };
+                        let mut updirs = key[dir_rest_start..].split('/');
+                        if let Some(dir) = updirs.next() {
+                            dirs.push(dir.to_string());
+                        }
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        if dir_exists {
+            Some(dirs)
+        } else {
+            None
+        }
+    }
+    fn find_longest_prefix<'a, 'b, V>(map: &'a BTreeMap<String, V>, shv_path: &'b str) -> Option<(&'b str, &'b str)> {
+        let mut path = &shv_path[..];
+        let mut rest = "";
+        loop {
+            if map.contains_key(path) {
+                return Some((path, rest))
+            }
+            if path.is_empty() {
+                break;
+            }
+            if let Some(slash_ix) = path.rfind('/') {
+                path = &shv_path[..slash_ix];
+                rest = &shv_path[(slash_ix + 1)..];
+            } else {
+                path = "";
+                rest = shv_path;
+            };
+        }
+        None
+    }
+    pub fn find_device<'a, 'b>(&'a self, shv_path: &'b str) -> Option<(&'a Device, &'b str)> {
+        if let Some((mount_dir, node_dir)) = Self::find_longest_prefix(&self.devices, shv_path) {
+            Some((self.devices.get(mount_dir).unwrap(), node_dir))
+        } else {
+            None
+        }
+    }
+    pub fn find_node<'a, 'b>(&'a mut self, shv_path: &'b str) -> Option<(&'a mut Node, &'b str)> {
+        if let Some((mount_dir, node_dir)) = Self::find_longest_prefix(&self.nodes, shv_path) {
+            Some((self.nodes.get_mut(mount_dir).unwrap(), node_dir))
+        } else {
+            None
+        }
+    }
 }
 fn check_login(login: &Map, nonce: &str) -> bool {
     let def_user = "admin";
@@ -197,9 +272,10 @@ fn check_login(login: &Map, nonce: &str) -> bool {
 async fn broker_loop(events: Receiver<ClientEvent>) {
     let mut broker = Broker {
         peers: HashMap::new(),
-        mounts: HashMap::new(),
+        nodes: BTreeMap::new(),
+        devices: BTreeMap::new(),
     };
-    broker.mounts.insert(".app".into(), Device { client_id: 0, node: Box::new(br::nodes::AppNode{})});
+    broker.nodes.insert(".app".into(), Box::new(br::nodes::AppNode{}));
     loop {
         match events.recv().await {
             Err(e) => {
@@ -209,16 +285,11 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
             Ok(event) => {
                 match event {
                     ClientEvent::Frame { client_id, frame} => {
-                        if let Some(peer) = broker.peers.get_mut(&client_id) {
-                            let rpcmsg = match frame.to_rpcmesage() {
-                                Ok(msg) => { msg }
-                                Err(e) => {
-                                    peer.sender.send(PeerEvent::FatalError(format!("RPC error: {}", &e))).await.unwrap();
-                                    continue;
-                                }
-                            };
-                            match &peer.stage {
-                                PeerStage::Hello => {
+                        let peer_stage = &broker.peers.get(&client_id).unwrap().stage.clone();
+                        match peer_stage {
+                            PeerStage::Hello => {
+                                let peer = broker.peers.get_mut(&client_id).unwrap();
+                                if let Ok(rpcmsg) = frame.to_rpcmesage() {
                                     if rpcmsg.is_request() && rpcmsg.method().unwrap_or("") == "hello" {
                                         let mut resp = match  rpcmsg.prepare_response() {
                                             Ok(resp) => {resp}
@@ -233,78 +304,97 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                         resp.set_result(RpcValue::from(result));
                                         peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
                                         peer.stage = PeerStage::Login(nonce);
-                                        continue;
+                                    } else {
+                                        peer.sender.send(PeerEvent::FatalError("Invalid hello message".into())).await.unwrap();
                                     }
-                                    peer.sender.send(PeerEvent::FatalError("Invalid hello message".into())).await.unwrap();
-                                    continue;
                                 }
-                                PeerStage::Login(nonce) => {
+                                continue;
+                            }
+                            PeerStage::Login(nonce) => {
+                                if let Ok(rpcmsg) = frame.to_rpcmesage() {
                                     if rpcmsg.is_request() {
-                                        let mut resp = match rpcmsg.prepare_response() {
-                                            Ok(resp) => { resp }
-                                            Err(e) => {
-                                                peer.sender.send(PeerEvent::FatalError(format!("Login error: {}", &e))).await.unwrap();
-                                                continue;
-                                            }
-                                        };
-                                        let errmsg = if rpcmsg.method().unwrap_or("") == "login" {
-                                            if let Some(params) = rpcmsg.params() {
-                                                let login = params.as_map().get("login").unwrap_or(&RpcValue::null()).clone();
-                                                if check_login(login.as_map(), &nonce) {
-                                                    let mut result = Map::new();
-                                                    result.insert("clientId".into(), RpcValue::from(client_id));
-                                                    resp.set_result(RpcValue::from(result));
-                                                    peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
-                                                    peer.stage = PeerStage::Run;
-                                                    continue;
-                                                } else {
-                                                    "Wrong user name or password"
-                                                }
-                                            } else {
-                                                "Login params missing"
-                                            }
-                                        } else {
-                                            "login() call expected"
-                                        };
-                                        resp.set_error(RpcError::new(RpcErrorCode::MethodCallException, &errmsg));
-                                        peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
-                                    }
-                                    //peer.sender.send(PeerEvent::FatalError("Invalid login message".into())).await.unwrap();
-                                    continue;
-                                }
-                                PeerStage::Run => {
-                                    if rpcmsg.is_request() {
-                                        let mut resp = match  rpcmsg.prepare_response() {
-                                            Ok(resp) => {resp}
-                                            Err(e) => {
-                                                warn!("Client id: {} cannot create response error: {}", client_id, &e);
-                                                continue;
-                                            }
-                                        };
-                                        let result = if let Some(shv_path) = rpcmsg.shv_path() {
-                                            if let Some(method) = rpcmsg.method() {
-                                                let params = rpcmsg.params();
-                                                if let Some(device) = broker.mounts.get(shv_path) {
-                                                    if let Some(mm) = device.node.methods().iter().find(|&mm| mm.name == method) {
-                                                        // let mm = *mm;
-                                                        if mm.name == "dir" {
-                                                            let result = shvnode::dir(device.node.methods().into_iter(), params.into());
-                                                            Ok(result)
-                                                        } else {
-                                                            Err(format!("Invalid method: {} is not implemented", method))
-                                                        }
+                                        let peer = broker.peers.get_mut(&client_id).unwrap();
+                                        if let Ok(mut resp) = rpcmsg.prepare_response() {
+                                            let errmsg = if rpcmsg.method().unwrap_or("") == "login" {
+                                                if let Some(params) = rpcmsg.params() {
+                                                    let login = params.as_map().get("login").unwrap_or(&RpcValue::null()).clone();
+                                                    if check_login(login.as_map(), &nonce) {
+                                                        let mut result = Map::new();
+                                                        result.insert("clientId".into(), RpcValue::from(client_id));
+                                                        resp.set_result(RpcValue::from(result));
+                                                        peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
+                                                        peer.stage = PeerStage::Run;
+                                                        continue;
                                                     } else {
-                                                        Err(format!("Invalid method: {}", method))
+                                                        "Wrong user name or password"
                                                     }
                                                 } else {
-                                                    Err(format!("Invalid mount point: {}", shv_path))
+                                                    "Login params missing"
                                                 }
                                             } else {
-                                                Err(format!("Empty method"))
+                                                "login() call expected"
+                                            };
+                                            resp.set_error(RpcError::new(RpcErrorCode::MethodCallException, &errmsg));
+                                            peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
+                                        }
+                                    }
+                                }
+                                continue;
+                            }
+                            PeerStage::Run => if frame.is_request() {
+                                let result: Option<std::result::Result<RpcValue, String>> = if let Some(shv_path) = frame.shv_path() {
+                                    if let Some((device, request_path)) = broker.find_device(shv_path) {
+                                        let mut frame2 = frame.clone();
+                                        frame2.push_caller_id(device.client_id);
+                                        frame2.set_shvpath(request_path);
+                                        let _ = broker.peers.get(&device.client_id).unwrap().sender.send(PeerEvent::Frame(frame2)).await;
+                                        None
+                                    } else if let Some((node, node_path)) = broker.find_node(shv_path) {
+                                        if let Ok(rpcmsg) = frame.to_rpcmesage() {
+                                            let mut rpcmsg2 = rpcmsg;
+                                            rpcmsg2.set_shvpath(node_path);
+                                            match node.process_request(&rpcmsg2) {
+                                                Ok(res) => {
+                                                    match res {
+                                                        None => {None}
+                                                        Some(res) => {Some(Ok(res))}
+                                                    }
+                                                }
+                                                Err(err) => { Some(Err(err.to_string())) }
                                             }
                                         } else {
-                                            Err(format!("Empty path"))
-                                        };
+                                            Some(Err(format!("Invalid shv request")))
+                                        }
+                                    } else {
+                                        match frame.method() {
+                                            Some("dir") => {
+                                                Some(Err(format!("Dir on path: {} NIY", shv_path)))
+                                            }
+                                            Some("ls") => {
+                                                match broker.ls(shv_path) {
+                                                    None => {
+                                                        Some(Err(format!("Invalid shv path: {}", shv_path)))
+                                                    }
+                                                    Some(dirs) => {
+                                                        let result: Vec<RpcValue> = dirs.into_iter().map(|s| RpcValue::from(s)).collect();
+                                                        Some(Ok(RpcValue::from(result)))
+                                                    }
+                                                }
+                                            }
+                                            Some(method) => {
+                                                Some(Err(format!("Method {}:{}() is not implemented", shv_path, method)))
+                                            }
+                                            None => {
+                                                Some(Err(format!("Empty method on path: {}", shv_path)))
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Some(Err(format!("Empty shv path")))
+                                };
+                                if let Some(result) = result {
+                                    if let Ok(meta) = RpcFrame::prepare_response_meta(&frame.meta) {
+                                        let mut resp = RpcMessage::from_meta(meta);
                                         match result {
                                             Ok(value) => {
                                                 resp.set_result(value);
@@ -313,11 +403,11 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                                 resp.set_error(RpcError::new(RpcErrorCode::MethodCallException, &errmsg));
                                             }
                                         }
+                                        let peer = broker.peers.get(&client_id).unwrap();
                                         peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
-                                    };
-                                    continue;
+                                    }
                                 }
-                            }
+                            },
                         }
                     }
                     ClientEvent::NewPeer { client_id, sender } => match broker.peers.entry(client_id) {
