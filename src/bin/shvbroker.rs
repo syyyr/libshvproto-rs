@@ -9,11 +9,9 @@ use log::*;
 use structopt::StructOpt;
 use shv::rpcframe::RpcFrame;
 use shv::{RpcMessage, RpcValue};
-use shv::{Map};
 use shv::rpcmessage::{RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
-use shv::connection::FrameReader;
 use shv::shvnode::{ShvNode};
 
 mod br;
@@ -112,24 +110,30 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                     let password = login.get("password").ok_or("Password login param is missing")?.as_str();
                     let login_type = login.get("type").map(|v| v.as_str()).unwrap_or("");
 
-                    broker_writer.send(ClientEvent::GetPassword { user: user.to_string() }).await.unwrap();
+                    broker_writer.send(ClientEvent::GetPassword { client_id, user: user.to_string() }).await.unwrap();
                     match peer_receiver.recv().await? {
                         PeerEvent::PasswordSha1(broker_shapass) => {
                             let client_shapass = shv::connection::sha1_hash(password.as_bytes());
-                            //if let Some(password) = login.get("password") {
-                            //    if let Some(login_type) = login.get("type") {
-                            //        if login_type.as_str() == "PLAIN" {
-                            //            return user.as_str() == def_user && password.as_str() == def_password;
-                            //        }
-                            //    }
-                            //    return user.as_str() == def_user && password.as_str().as_bytes() == &hash;
-                            //}
-                            let mut resp = rpcmsg.prepare_response()?;
-                            let mut result = shv::Map::new();
-                            result.insert("clientId".into(), RpcValue::from(client_id));
-                            resp.set_result(RpcValue::from(result));
-                            shv::connection::send_message(&mut frame_writer, &resp).await?;
-                            crate::Result::Ok(())
+                            let chkpwd = || {
+                                if login_type == "PLAIN" {
+                                    client_shapass == broker_shapass
+                                } else {
+                                    let mut data = nonce.as_bytes().to_vec();
+                                    data.extend_from_slice(&broker_shapass[..]);
+                                    let broker_shapass = shv::connection::sha1_hash(&data);
+                                    client_shapass == broker_shapass
+                                }
+                            };
+                            if chkpwd() {
+                                let mut resp = rpcmsg.prepare_response()?;
+                                let mut result = shv::Map::new();
+                                result.insert("clientId".into(), RpcValue::from(client_id));
+                                resp.set_result(RpcValue::from(result));
+                                shv::connection::send_message(&mut frame_writer, &resp).await?;
+                                crate::Result::Ok(())
+                            } else {
+                                Err(format!("Invalid login password received from: {:?}", frame_writer.peer_addr()).into())
+                            }
                         }
                         _ => {
                             panic!("PeerEvent::PasswordSha1 expected");
@@ -177,17 +181,19 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                 }
                 Ok(event) => {
                     match event {
-                        PeerEvent::FatalError(errmsg) => {
-                            error!("Fatal client error: {}", errmsg);
-                            break;
+                        PeerEvent::PasswordSha1(_) => {
+                            panic!("PasswordSha1 cannot be received here")
                         }
+                        //PeerEvent::FatalError(errmsg) => {
+                        //    error!("Fatal client error: {}", errmsg);
+                        //    break;
+                        //}
                         PeerEvent::Frame(frame) => {
                             shv::connection::send_frame(&mut frame_writer, frame).await?;
                         }
                         PeerEvent::Message(rpcmsg) => {
                             shv::connection::send_message(&mut frame_writer, &rpcmsg).await?;
                         },
-                        PeerEvent::PasswordSha1(_) => todo!()
                     }
                 }
             }
@@ -201,6 +207,7 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
 #[derive(Debug)]
 enum ClientEvent {
     GetPassword {
+        client_id: i32,
         user: String,
     },
     NewClient {
@@ -221,13 +228,7 @@ enum PeerEvent {
     PasswordSha1(Vec<u8>),
     Frame(RpcFrame),
     Message(RpcMessage),
-    FatalError(String),
-}
-#[derive(Debug, Clone)]
-enum PeerStage {
-    Hello,
-    Login(String),
-    Run,
+    //FatalError(String),
 }
 #[derive(Debug)]
 struct Peer {
@@ -307,22 +308,9 @@ impl Broker {
             None
         }
     }
-}
-fn check_login(login: &Map, nonce: &str) -> bool {
-    let def_user = "admin";
-    let def_password = "admin";
-    if let Some(user) = login.get("user") {
-        if let Some(password) = login.get("password") {
-            if let Some(login_type) = login.get("type") {
-                if login_type.as_str() == "PLAIN" {
-                    return user.as_str() == def_user && password.as_str() == def_password;
-                }
-            }
-            let hash = shv::connection::sha1_password_hash(def_password.as_bytes(), nonce.as_bytes());
-            return user.as_str() == def_user && password.as_str().as_bytes() == &hash;
-        }
+    pub fn sha_password(&self, user: &str) -> Vec<u8> {
+        shv::connection::sha1_hash(user.as_bytes())
     }
-    false
 }
 async fn broker_loop(events: Receiver<ClientEvent>) {
     let mut broker = Broker {
@@ -419,7 +407,12 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                     ClientEvent::ClientGone { client_id } => {
                         assert!(broker.peers.remove(&client_id).is_some());
                     }
-                    ClientEvent::GetPassword { .. } => {}
+                    ClientEvent::GetPassword { client_id, user } => {
+                        let shapwd = broker.sha_password(&user);
+                        let peer = broker.peers.get(&client_id).unwrap();
+                        peer.sender.send(PeerEvent::PasswordSha1(shapwd)).await.unwrap();
+
+                    }
                 }
             }
         }
