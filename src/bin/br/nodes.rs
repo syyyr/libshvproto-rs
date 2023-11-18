@@ -1,5 +1,5 @@
 use lazy_static::lazy_static;
-use shv::metamethod::MetaMethod;
+use shv::metamethod::{Flag, MetaMethod};
 use shv::{RpcMessage, RpcMessageMetaTags, RpcValue};
 use shv::shvnode::{ProcessRequestResult, ShvNode};
 
@@ -24,8 +24,9 @@ impl ShvNode for DirNode {
 }
 
 lazy_static! {
-    static ref APP_METHODS: [MetaMethod; 1] = [
+    static ref APP_METHODS: [MetaMethod; 2] = [
         MetaMethod { name: "ping".into(), ..Default::default() },
+        MetaMethod { name: "name".into(), flags: Flag::IsGetter.into(),  ..Default::default() },
     ];
 }
 pub(crate) struct AppNode {
@@ -39,6 +40,9 @@ impl ShvNode for AppNode {
         match rpcmsg.method() {
             Some("ping") => {
                 Ok(Some(RpcValue::from(())))
+            }
+            Some("name") => {
+                Ok(Some(RpcValue::from("shvbroker")))
             }
             _ => {
                 ShvNode::process_request_dir(self, rpcmsg)
