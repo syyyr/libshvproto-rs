@@ -89,9 +89,10 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
     //let stream_wr = stream.clone();
     let mut brd = BufReader::new(socket_reader);
     let mut frame_reader = shv::connection::FrameReader::new(&mut brd);
+    let mut login_socket_closed = false;
     loop {
         let login_fut = async {
-            let frame = frame_reader.receive_frame().await?.ok_or("Socket closed")?;
+            let frame = frame_reader.receive_frame().await?.ok_or("SocketClosed")?;
             let rpcmsg = frame.to_rpcmesage()?;
             if rpcmsg.is_request() && rpcmsg.method().unwrap_or("") == "hello" {
                 let mut resp = rpcmsg.prepare_response()?;
@@ -101,7 +102,7 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                 resp.set_result(RpcValue::from(result));
                 shv::connection::send_message(&mut frame_writer, &resp).await?;
 
-                let frame = frame_reader.receive_frame().await?.ok_or("Socket closed")?;
+                let frame = frame_reader.receive_frame().await?.ok_or("SocketClosed")?;
                 let rpcmsg = frame.to_rpcmesage()?;
                 if rpcmsg.is_request() && rpcmsg.method().unwrap_or("") == "login" {
                     let params = rpcmsg.params().ok_or("No login params")?.as_map();
@@ -113,15 +114,19 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                     broker_writer.send(ClientEvent::GetPassword { client_id, user: user.to_string() }).await.unwrap();
                     match peer_receiver.recv().await? {
                         PeerEvent::PasswordSha1(broker_shapass) => {
-                            let client_shapass = shv::connection::sha1_hash(password.as_bytes());
                             let chkpwd = || {
                                 if login_type == "PLAIN" {
+                                    let client_shapass = shv::connection::sha1_hash(password.as_bytes());
                                     client_shapass == broker_shapass
                                 } else {
+                                    info!("nonce: {}", nonce);
+                                    info!("broker password: {}", std::str::from_utf8(&broker_shapass).unwrap());
+                                    info!("client password: {}", password);
                                     let mut data = nonce.as_bytes().to_vec();
                                     data.extend_from_slice(&broker_shapass[..]);
+                                    info!("data: {}", std::str::from_utf8(&data).unwrap());
                                     let broker_shapass = shv::connection::sha1_hash(&data);
-                                    client_shapass == broker_shapass
+                                    password.as_bytes() == broker_shapass
                                 }
                             };
                             if chkpwd() {
@@ -151,56 +156,62 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                 break;
             }
             Err(errmsg) => {
+                if errmsg.to_string() == "SocketClosed" {
+                    login_socket_closed = true;
+                    break;
+                }
                 warn!("{}", errmsg);
             }
         }
     }
-    loop {
-        select! {
-            frame = frame_reader.receive_frame().fuse() => match frame {
-                Ok(frame) => {
-                    match frame {
-                        None => {
-                            debug!("Client socket closed");
-                            break;
-                        }
-                        Some(frame) => {
-                            broker_writer.send(ClientEvent::Frame { client_id, frame }).await.unwrap();
+    if !login_socket_closed {
+        loop {
+            select! {
+                frame = frame_reader.receive_frame().fuse() => match frame {
+                    Ok(frame) => {
+                        match frame {
+                            None => {
+                                debug!("Client socket closed");
+                                break;
+                            }
+                            Some(frame) => {
+                                broker_writer.send(ClientEvent::Frame { client_id, frame }).await.unwrap();
+                            }
                         }
                     }
-                }
-                Err(e) => {
-                    error!("Read socket error: {}", &e);
-                    break;
-                }
-            },
-            event = peer_receiver.recv().fuse() => match event {
-                Err(e) => {
-                    debug!("Peer channel closed: {}", &e);
-                    break;
-                }
-                Ok(event) => {
-                    match event {
-                        PeerEvent::PasswordSha1(_) => {
-                            panic!("PasswordSha1 cannot be received here")
+                    Err(e) => {
+                        error!("Read socket error: {}", &e);
+                        break;
+                    }
+                },
+                event = peer_receiver.recv().fuse() => match event {
+                    Err(e) => {
+                        debug!("Peer channel closed: {}", &e);
+                        break;
+                    }
+                    Ok(event) => {
+                        match event {
+                            PeerEvent::PasswordSha1(_) => {
+                                panic!("PasswordSha1 cannot be received here")
+                            }
+                            //PeerEvent::FatalError(errmsg) => {
+                            //    error!("Fatal client error: {}", errmsg);
+                            //    break;
+                            //}
+                            PeerEvent::Frame(frame) => {
+                                shv::connection::send_frame(&mut frame_writer, frame).await?;
+                            }
+                            PeerEvent::Message(rpcmsg) => {
+                                shv::connection::send_message(&mut frame_writer, &rpcmsg).await?;
+                            },
                         }
-                        //PeerEvent::FatalError(errmsg) => {
-                        //    error!("Fatal client error: {}", errmsg);
-                        //    break;
-                        //}
-                        PeerEvent::Frame(frame) => {
-                            shv::connection::send_frame(&mut frame_writer, frame).await?;
-                        }
-                        PeerEvent::Message(rpcmsg) => {
-                            shv::connection::send_message(&mut frame_writer, &rpcmsg).await?;
-                        },
                     }
                 }
             }
         }
     }
     broker_writer.send(ClientEvent::ClientGone { client_id }).await.unwrap();
-
+    info!("Client loop exit, client id: {}", client_id);
     Ok(())
 }
 
