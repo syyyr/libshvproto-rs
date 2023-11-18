@@ -9,7 +9,7 @@ use log::*;
 use structopt::StructOpt;
 use shv::rpcframe::RpcFrame;
 use shv::{RpcMessage, RpcValue};
-use shv::rpcmessage::{RpcError, RpcErrorCode};
+use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
 use shv::shvnode::{ShvNode};
@@ -90,6 +90,7 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
     let mut brd = BufReader::new(socket_reader);
     let mut frame_reader = shv::connection::FrameReader::new(&mut brd);
     let mut login_socket_closed = false;
+    let mut device_options = RpcValue::null();
     loop {
         let login_fut = async {
             let frame = frame_reader.receive_frame().await?.ok_or("SocketClosed")?;
@@ -119,12 +120,11 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                                     let client_shapass = shv::connection::sha1_hash(password.as_bytes());
                                     client_shapass == broker_shapass
                                 } else {
-                                    info!("nonce: {}", nonce);
-                                    info!("broker password: {}", std::str::from_utf8(&broker_shapass).unwrap());
-                                    info!("client password: {}", password);
+                                    //info!("nonce: {}", nonce);
+                                    //info!("broker password: {}", std::str::from_utf8(&broker_shapass).unwrap());
+                                    //info!("client password: {}", password);
                                     let mut data = nonce.as_bytes().to_vec();
                                     data.extend_from_slice(&broker_shapass[..]);
-                                    info!("data: {}", std::str::from_utf8(&data).unwrap());
                                     let broker_shapass = shv::connection::sha1_hash(&data);
                                     password.as_bytes() == broker_shapass
                                 }
@@ -135,6 +135,11 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                                 result.insert("clientId".into(), RpcValue::from(client_id));
                                 resp.set_result(RpcValue::from(result));
                                 shv::connection::send_message(&mut frame_writer, &resp).await?;
+                                if let Some(options) = params.get("options") {
+                                    if let Some(device) = options.as_map().get("device") {
+                                        device_options = device.clone();
+                                    }
+                                }
                                 crate::Result::Ok(())
                             } else {
                                 Err(format!("Invalid login password received from: {:?}", frame_writer.peer_addr()).into())
@@ -165,6 +170,12 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
         }
     }
     if !login_socket_closed {
+        let register_device = ClientEvent::RegiterDevice {
+            client_id,
+            device_id: device_options.as_map().get("deviceId").map(|v| v.as_str().to_string()),
+            mount_point: device_options.as_map().get("mountPoint").map(|v| v.as_str().to_string()),
+        };
+        broker_writer.send(register_device).await.unwrap();
         loop {
             select! {
                 frame = frame_reader.receive_frame().fuse() => match frame {
@@ -218,19 +229,24 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
 #[derive(Debug)]
 enum ClientEvent {
     GetPassword {
-        client_id: i32,
+        client_id: CliId,
         user: String,
     },
     NewClient {
-        client_id: i32,
+        client_id: CliId,
         sender: Sender<PeerEvent>,
     },
+    RegiterDevice {
+        client_id: CliId,
+        device_id: Option<String>,
+        mount_point: Option<String>,
+    },
     Frame {
-        client_id: i32,
+        client_id: CliId,
         frame: RpcFrame,
     },
     ClientGone {
-        client_id: i32,
+        client_id: CliId,
     },
 }
 
@@ -246,7 +262,7 @@ struct Peer {
     sender: Sender<PeerEvent>,
 }
 struct Device {
-    client_id: i32,
+    client_id: CliId,
 }
 type Node = Box<dyn ShvNode + Send + Sync>;
 enum Mount {
@@ -254,7 +270,7 @@ enum Mount {
     Node(Node),
 }
 struct Broker {
-    peers: HashMap<i32, Peer>,
+    peers: HashMap<CliId, Peer>,
     mounts: BTreeMap<String, Mount>,
 }
 
@@ -322,6 +338,21 @@ impl Broker {
     pub fn sha_password(&self, user: &str) -> Vec<u8> {
         shv::connection::sha1_hash(user.as_bytes())
     }
+    pub fn mount_device(&mut self, client_id: i32, device_id: Option<String>, mount_point: Option<String>) {
+        if let Some(mount_point) = mount_point {
+            if mount_point.starts_with("test/") {
+                self.mounts.insert(mount_point, Mount::Device(Device { client_id }));
+                return;
+            }
+        }
+        if let Some(device_id) = device_id {
+            let mount_point = "test/".to_owned() + &device_id;
+            if mount_point.starts_with("test/") {
+                self.mounts.insert(mount_point, Mount::Device(Device { client_id }));
+                return;
+            }
+        }
+    }
 }
 async fn broker_loop(events: Receiver<ClientEvent>) {
     let mut broker = Broker {
@@ -337,73 +368,80 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
             }
             Ok(event) => {
                 match event {
-                    ClientEvent::Frame { client_id, frame} => {
-                        let shv_path = frame.shv_path().unwrap_or("");
-                        let result: Option<std::result::Result<RpcValue, String>> = if let Some((mount, node_path)) = broker.find_mount(shv_path) {
-                            match mount {
-                                Mount::Device(device) => {
-                                    let client_id = device.client_id;
-                                    let mut frame2 = frame.clone();
-                                    frame2.push_caller_id(client_id);
-                                    frame2.set_shvpath(node_path);
-                                    let _ = broker.peers.get(&client_id).unwrap().sender.send(PeerEvent::Frame(frame2)).await;
-                                    None
-                                }
-                                Mount::Node(node) => {
-                                    if let Ok(rpcmsg) = frame.to_rpcmesage() {
-                                        let mut rpcmsg2 = rpcmsg;
-                                        rpcmsg2.set_shvpath(node_path);
-                                        match node.process_request(&rpcmsg2) {
-                                            Ok(res) => {
-                                                match res {
-                                                    None => {None}
-                                                    Some(res) => {Some(Ok(res))}
+                    ClientEvent::Frame { client_id, mut frame} => {
+                        if frame.is_request() {
+                            let shv_path = frame.shv_path().unwrap_or("").to_owned();
+                            let response_meta= RpcFrame::prepare_response_meta(&frame.meta);
+                            let result: Option<std::result::Result<RpcValue, String>> = if let Some((mount, node_path)) = broker.find_mount(&shv_path) {
+                                match mount {
+                                    Mount::Device(device) => {
+                                        let client_id = device.client_id;
+                                        frame.push_caller_id(client_id);
+                                        frame.set_shvpath(node_path);
+                                        let _ = broker.peers.get(&client_id).unwrap().sender.send(PeerEvent::Frame(frame)).await;
+                                        None
+                                    }
+                                    Mount::Node(node) => {
+                                        if let Ok(rpcmsg) = frame.to_rpcmesage() {
+                                            let mut rpcmsg2 = rpcmsg;
+                                            rpcmsg2.set_shvpath(node_path);
+                                            match node.process_request(&rpcmsg2) {
+                                                Ok(res) => {
+                                                    match res {
+                                                        None => {None}
+                                                        Some(res) => {Some(Ok(res))}
+                                                    }
                                                 }
+                                                Err(err) => { Some(Err(err.to_string())) }
                                             }
-                                            Err(err) => { Some(Err(err.to_string())) }
+                                        } else {
+                                            Some(Err(format!("Invalid shv request")))
                                         }
-                                    } else {
-                                        Some(Err(format!("Invalid shv request")))
                                     }
+                                }
+                            } else {
+                                match frame.method() {
+                                    Some("dir") => {
+                                        Some(Err(format!("Dir on path: {} NIY", shv_path)))
+                                    }
+                                    Some("ls") => {
+                                        match broker.ls(&shv_path) {
+                                            None => {
+                                                Some(Err(format!("Invalid shv path: {}", shv_path)))
+                                            }
+                                            Some(dirs) => {
+                                                let result: Vec<RpcValue> = dirs.into_iter().map(|s| RpcValue::from(s)).collect();
+                                                Some(Ok(RpcValue::from(result)))
+                                            }
+                                        }
+                                    }
+                                    Some(method) => {
+                                        Some(Err(format!("Method {}:{}() is not implemented", shv_path, method)))
+                                    }
+                                    None => {
+                                        Some(Err(format!("Empty method on path: {}", shv_path)))
+                                    }
+                                }
+                            };
+                            if let Some(result) = result {
+                                if let Ok(meta) = response_meta {
+                                    let mut resp = RpcMessage::from_meta(meta);
+                                    match result {
+                                        Ok(value) => {
+                                            resp.set_result(value);
+                                        }
+                                        Err(errmsg) => {
+                                            resp.set_error(RpcError::new(RpcErrorCode::MethodCallException, &errmsg));
+                                        }
+                                    }
+                                    let peer = broker.peers.get(&client_id).unwrap();
+                                    peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
                                 }
                             }
-                        } else {
-                            match frame.method() {
-                                Some("dir") => {
-                                    Some(Err(format!("Dir on path: {} NIY", shv_path)))
-                                }
-                                Some("ls") => {
-                                    match broker.ls(shv_path) {
-                                        None => {
-                                            Some(Err(format!("Invalid shv path: {}", shv_path)))
-                                        }
-                                        Some(dirs) => {
-                                            let result: Vec<RpcValue> = dirs.into_iter().map(|s| RpcValue::from(s)).collect();
-                                            Some(Ok(RpcValue::from(result)))
-                                        }
-                                    }
-                                }
-                                Some(method) => {
-                                    Some(Err(format!("Method {}:{}() is not implemented", shv_path, method)))
-                                }
-                                None => {
-                                    Some(Err(format!("Empty method on path: {}", shv_path)))
-                                }
-                            }
-                        };
-                        if let Some(result) = result {
-                            if let Ok(meta) = RpcFrame::prepare_response_meta(&frame.meta) {
-                                let mut resp = RpcMessage::from_meta(meta);
-                                match result {
-                                    Ok(value) => {
-                                        resp.set_result(value);
-                                    }
-                                    Err(errmsg) => {
-                                        resp.set_error(RpcError::new(RpcErrorCode::MethodCallException, &errmsg));
-                                    }
-                                }
+                        } else if frame.is_response() {
+                            if let Some(client_id) = frame.pop_caller_id() {
                                 let peer = broker.peers.get(&client_id).unwrap();
-                                peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
+                                peer.sender.send(PeerEvent::Frame(frame)).await.unwrap();
                             }
                         }
                     }
@@ -414,6 +452,9 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                 sender,
                             });
                         }
+                    },
+                    ClientEvent::RegiterDevice { client_id, device_id, mount_point } => {
+                        broker.mount_device(client_id, device_id, mount_point);
                     },
                     ClientEvent::ClientGone { client_id } => {
                         assert!(broker.peers.remove(&client_id).is_some());
