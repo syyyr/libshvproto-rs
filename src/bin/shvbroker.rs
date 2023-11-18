@@ -178,10 +178,13 @@ struct Device {
     client_id: i32,
 }
 type Node = Box<dyn ShvNode + Send + Sync>;
+enum Mount {
+    Device(Device),
+    Node(Node),
+}
 struct Broker {
     peers: HashMap<i32, Peer>,
-    devices: BTreeMap<String, Device>,
-    nodes: BTreeMap<String, Node>,
+    mounts: BTreeMap<String, Mount>,
 }
 
 impl Broker {
@@ -189,7 +192,7 @@ impl Broker {
         //let parent_dir = path.to_string();
         let mut dirs: Vec<String> = Vec::new();
         let mut dir_exists = false;
-        for (key, _) in self.devices.range(path.to_string()..) {
+        for (key, _) in self.mounts.range(path.to_string()..) {
             if key.starts_with(path) {
                 dir_exists = true;
                 if path.is_empty()
@@ -238,16 +241,9 @@ impl Broker {
         }
         None
     }
-    pub fn find_device<'a, 'b>(&'a self, shv_path: &'b str) -> Option<(&'a Device, &'b str)> {
-        if let Some((mount_dir, node_dir)) = Self::find_longest_prefix(&self.devices, shv_path) {
-            Some((self.devices.get(mount_dir).unwrap(), node_dir))
-        } else {
-            None
-        }
-    }
-    pub fn find_node<'a, 'b>(&'a mut self, shv_path: &'b str) -> Option<(&'a mut Node, &'b str)> {
-        if let Some((mount_dir, node_dir)) = Self::find_longest_prefix(&self.nodes, shv_path) {
-            Some((self.nodes.get_mut(mount_dir).unwrap(), node_dir))
+    pub fn find_mount<'a, 'b>(&'a mut self, shv_path: &'b str) -> Option<(&'a mut Mount, &'b str)> {
+        if let Some((mount_dir, node_dir)) = Self::find_longest_prefix(&self.mounts, shv_path) {
+            Some((self.mounts.get_mut(mount_dir).unwrap(), node_dir))
         } else {
             None
         }
@@ -272,10 +268,9 @@ fn check_login(login: &Map, nonce: &str) -> bool {
 async fn broker_loop(events: Receiver<ClientEvent>) {
     let mut broker = Broker {
         peers: HashMap::new(),
-        nodes: BTreeMap::new(),
-        devices: BTreeMap::new(),
+        mounts: BTreeMap::new(),
     };
-    broker.nodes.insert(".app".into(), Box::new(br::nodes::AppNode{}));
+    broker.mounts.insert(".app".into(), Mount::Node(Box::new(br::nodes::AppNode{})));
     loop {
         match events.recv().await {
             Err(e) => {
@@ -343,27 +338,33 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                             }
                             PeerStage::Run => if frame.is_request() {
                                 let result: Option<std::result::Result<RpcValue, String>> = if let Some(shv_path) = frame.shv_path() {
-                                    if let Some((device, request_path)) = broker.find_device(shv_path) {
-                                        let mut frame2 = frame.clone();
-                                        frame2.push_caller_id(device.client_id);
-                                        frame2.set_shvpath(request_path);
-                                        let _ = broker.peers.get(&device.client_id).unwrap().sender.send(PeerEvent::Frame(frame2)).await;
-                                        None
-                                    } else if let Some((node, node_path)) = broker.find_node(shv_path) {
-                                        if let Ok(rpcmsg) = frame.to_rpcmesage() {
-                                            let mut rpcmsg2 = rpcmsg;
-                                            rpcmsg2.set_shvpath(node_path);
-                                            match node.process_request(&rpcmsg2) {
-                                                Ok(res) => {
-                                                    match res {
-                                                        None => {None}
-                                                        Some(res) => {Some(Ok(res))}
-                                                    }
-                                                }
-                                                Err(err) => { Some(Err(err.to_string())) }
+                                    if let Some((mount, node_path)) = broker.find_mount(shv_path) {
+                                        match mount {
+                                            Mount::Device(device) => {
+                                                let client_id = device.client_id;
+                                                let mut frame2 = frame.clone();
+                                                frame2.push_caller_id(client_id);
+                                                frame2.set_shvpath(node_path);
+                                                let _ = broker.peers.get(&client_id).unwrap().sender.send(PeerEvent::Frame(frame2)).await;
+                                                None
                                             }
-                                        } else {
-                                            Some(Err(format!("Invalid shv request")))
+                                            Mount::Node(node) => {
+                                                if let Ok(rpcmsg) = frame.to_rpcmesage() {
+                                                    let mut rpcmsg2 = rpcmsg;
+                                                    rpcmsg2.set_shvpath(node_path);
+                                                    match node.process_request(&rpcmsg2) {
+                                                        Ok(res) => {
+                                                            match res {
+                                                                None => {None}
+                                                                Some(res) => {Some(Ok(res))}
+                                                            }
+                                                        }
+                                                        Err(err) => { Some(Err(err.to_string())) }
+                                                    }
+                                                } else {
+                                                    Some(Err(format!("Invalid shv request")))
+                                                }
+                                            }
                                         }
                                     } else {
                                         match frame.method() {
