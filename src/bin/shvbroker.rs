@@ -92,26 +92,24 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
     let mut brd = BufReader::new(socket_reader);
     let mut frame_reader = shv::connection::FrameReader::new(&mut brd);
     loop {
-        async fn login_fn(frame_reader: &FrameReader<'_, BufReader<&TcpStream>>, mut frame_writer: &TcpStream
-        , peer_receiver: &Receiver<PeerEvent>, broker_writer: &Sender<ClientEvent>
-        , client_id: i32) -> crate::Result<()> {
-            let frame = frame_reader.receive_frame().await?;
+        let login_fut = async {
+            let frame = frame_reader.receive_frame().await?.ok_or("Socket closed")?;
             let rpcmsg = frame.to_rpcmesage()?;
             if rpcmsg.is_request() && rpcmsg.method().unwrap_or("") == "hello" {
-                let resp = rpcmsg.prepare_response()?;
+                let mut resp = rpcmsg.prepare_response()?;
                 let nonce = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
                 let mut result = shv::Map::new();
                 result.insert("nonce".into(), RpcValue::from(&nonce));
                 resp.set_result(RpcValue::from(result));
                 shv::connection::send_message(&mut frame_writer, &resp).await?;
 
-                let frame = frame_reader.receive_frame().await??;
+                let frame = frame_reader.receive_frame().await?.ok_or("Socket closed")?;
                 let rpcmsg = frame.to_rpcmesage()?;
                 if rpcmsg.is_request() && rpcmsg.method().unwrap_or("") == "login" {
-                    let params = rpcmsg.params()?.as_map();
-                    let login = params.get("login")?.as_map();
-                    let user = login.get("user")?.as_str();
-                    let password = login.get("password")?.as_str();
+                    let params = rpcmsg.params().ok_or("No login params")?.as_map();
+                    let login = params.get("login").ok_or("Invalid login params")?.as_map();
+                    let user = login.get("user").ok_or("User login param is missing")?.as_str();
+                    let password = login.get("password").ok_or("Password login param is missing")?.as_str();
                     let login_type = login.get("type").map(|v| v.as_str()).unwrap_or("");
 
                     broker_writer.send(ClientEvent::GetPassword { user: user.to_string() }).await.unwrap();
@@ -126,26 +124,25 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                             //    }
                             //    return user.as_str() == def_user && password.as_str().as_bytes() == &hash;
                             //}
-                            let resp = rpcmsg.prepare_response()?;
+                            let mut resp = rpcmsg.prepare_response()?;
                             let mut result = shv::Map::new();
                             result.insert("clientId".into(), RpcValue::from(client_id));
                             resp.set_result(RpcValue::from(result));
                             shv::connection::send_message(&mut frame_writer, &resp).await?;
-                            Ok::<(), String>(())
+                            crate::Result::Ok(())
                         }
                         _ => {
                             panic!("PeerEvent::PasswordSha1 expected");
                         }
                     }
                 } else {
-                    Err(format!("Invalid login message received from: {:?}", frame_writer.peer_addr()))
+                    Err(format!("Invalid login message received from: {:?}", frame_writer.peer_addr()).into())
                 }
             } else {
-                Err(format!("Invalid hello message received from: {:?}", frame_writer.peer_addr()))
+                Err(format!("Invalid hello message received from: {:?}", frame_writer.peer_addr()).into())
             }
-            //Ok::<(), String>(())
         };
-        match login_fn(&frame_reader, frame_writer, &peer_receiver, &broker_writer, client_id).await {
+        match login_fut.await {
             Ok(_) => {
                 break;
             }

@@ -137,16 +137,15 @@ pub async fn call_rpc_method(&self, request: RpcMessage) -> crate::Result<RpcMes
 }
 
  */
+pub fn sha1_hash(data: &[u8]) -> Vec<u8> {
+    let mut hasher = Sha1::new();
+    hasher.update(data);
+    let result = hasher.finalize();
+    return hex::encode(&result[..]).as_bytes().to_vec();
+}
 pub fn sha1_password_hash(password: &[u8], nonce: &[u8]) -> Vec<u8> {
-    fn do_hash(data: &[u8]) -> Vec<u8> {
-        let mut hasher = Sha1::new();
-        hasher.update(data);
-        let result = hasher.finalize();
-        return hex::encode(&result[..]).as_bytes().to_vec();
-    }
-
-    let mut hash = do_hash(password);
+    let mut hash = sha1_hash(password);
     let mut nonce_pass= nonce.to_vec();
     nonce_pass.append(&mut hash);
-    return do_hash(&nonce_pass);
+    return sha1_hash(&nonce_pass);
 }
