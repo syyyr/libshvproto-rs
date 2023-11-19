@@ -89,11 +89,13 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
     //let stream_wr = stream.clone();
     let mut brd = BufReader::new(socket_reader);
     let mut frame_reader = shv::connection::FrameReader::new(&mut brd);
-    let mut login_socket_closed = false;
     let mut device_options = RpcValue::null();
-    loop {
+    let login_socket_closed = loop {
         let login_fut = async {
-            let frame = frame_reader.receive_frame().await?.ok_or("SocketClosed")?;
+            let frame = match frame_reader.receive_frame().await? {
+                None => return crate::Result::Ok(true),
+                Some(frame) => {frame}
+            };
             let rpcmsg = frame.to_rpcmesage()?;
             if rpcmsg.is_request() && rpcmsg.method().unwrap_or("") == "hello" {
                 let mut resp = rpcmsg.prepare_response()?;
@@ -103,7 +105,10 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                 resp.set_result(RpcValue::from(result));
                 shv::connection::send_message(&mut frame_writer, &resp).await?;
 
-                let frame = frame_reader.receive_frame().await?.ok_or("SocketClosed")?;
+                let frame = match frame_reader.receive_frame().await? {
+                    None => return crate::Result::Ok(true),
+                    Some(frame) => {frame}
+                };
                 let rpcmsg = frame.to_rpcmesage()?;
                 if rpcmsg.is_request() && rpcmsg.method().unwrap_or("") == "login" {
                     let params = rpcmsg.params().ok_or("No login params")?.as_map();
@@ -140,7 +145,7 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                                         device_options = device.clone();
                                     }
                                 }
-                                crate::Result::Ok(())
+                                crate::Result::Ok(false)
                             } else {
                                 Err(format!("Invalid login password received from: {:?}", frame_writer.peer_addr()).into())
                             }
@@ -157,18 +162,14 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
             }
         };
         match login_fut.await {
-            Ok(_) => {
-                break;
+            Ok(socket_closed) => {
+                break socket_closed;
             }
             Err(errmsg) => {
-                if errmsg.to_string() == "SocketClosed" {
-                    login_socket_closed = true;
-                    break;
-                }
                 warn!("{}", errmsg);
             }
         }
-    }
+    };
     if !login_socket_closed {
         let register_device = ClientEvent::RegiterDevice {
             client_id,
