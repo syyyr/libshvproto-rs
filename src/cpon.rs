@@ -855,7 +855,7 @@ mod test
     use crate::{DateTime, MetaMap, RpcValue};
     use crate::Decimal;
     use std::collections::BTreeMap;
-    use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+    use chrono::{Duration, FixedOffset, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
     use crate::cpon::CponReader;
     use crate::reader::Reader;
     use crate::rpcvalue::Map;
@@ -895,32 +895,35 @@ mod test
         assert_eq!(RpcValue::from_cpon(r#"i{1: "foo", -1:"bar", 0:"baz", }"#).unwrap().to_cpon(), r#"i{-1:"bar",0:"baz",1:"foo"}"#);
         assert_eq!(RpcValue::from_cpon("i{").is_err(), true);
 
-        let ndt = NaiveDateTime::new(NaiveDate::from_ymd(2022, 01, 02), NaiveTime::from_hms_milli(12, 59, 06, 0));
+        let ndt = NaiveDateTime::new(NaiveDate::from_ymd_opt(2022, 01, 02).unwrap(), NaiveTime::from_hms_milli_opt(12, 59, 06, 0).unwrap());
         assert_eq!(RpcValue::from_cpon(r#"d"2022-01-02T12:59:06Z""#).unwrap().as_datetime(), DateTime::from_naive_datetime(&ndt));
-        let dt = chrono::DateTime::<Utc>::from_utc(ndt, Utc);
+        let dt = chrono::DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc);
         assert_eq!(RpcValue::from_cpon(r#"d"2022-01-02T12:59:06Z""#).unwrap().as_datetime(), DateTime::from_datetime(&dt));
 
         let minute = 60;
         let hour = 60 * minute;
 
+        fn dt_from_ymd_hms_milli_tz_offset(year: i32, month: u32, day: u32, hour: u32, min: u32, sec: u32, milli: i64, tz_offset: i32) -> chrono::DateTime<FixedOffset> {
+            if let LocalResult::Single(dt) = FixedOffset::east_opt(tz_offset).unwrap()
+                .with_ymd_and_hms(year, month, day, hour, min, sec) {
+                return dt.checked_add_signed(Duration::milliseconds(milli)).unwrap();
+            } else {
+                panic!("Invalid date time");
+            }
+        }
+
         let dt_str = r#"d"2021-11-08T01:02:03+05""#;
-        let dt = FixedOffset::east(5 * hour)
-            .ymd(2021, 11, 08)
-            .and_hms(1, 2, 3);
+        let dt = dt_from_ymd_hms_milli_tz_offset(2021, 11, 8, 1, 2, 3, 0, 5 * hour);
         assert_eq!(RpcValue::from_cpon(dt_str).unwrap().as_datetime(), DateTime::from_datetime(&dt));
         assert_eq!(RpcValue::from_cpon(dt_str).unwrap().to_cpon(), dt_str.to_string());
 
         let dt_str = r#"d"2021-11-08T01:02:03-0815""#;
-        let dt = FixedOffset::west(8 * hour + 15 * minute)
-            .ymd(2021, 11, 08)
-            .and_hms(1, 2, 3);
+        let dt = dt_from_ymd_hms_milli_tz_offset(2021, 11, 8, 1, 2, 3, 0, -8 * hour - 15 * minute);
         assert_eq!(RpcValue::from_cpon(dt_str).unwrap().as_datetime(), DateTime::from_datetime(&dt));
         assert_eq!(RpcValue::from_cpon(dt_str).unwrap().to_cpon(), dt_str.to_string());
 
         let dt_str = r#"d"2021-11-08T01:02:03.456-0815""#;
-        let dt = FixedOffset::west(8 * hour + 15 * minute)
-            .ymd(2021, 11, 08)
-            .and_hms_milli(1, 2, 3, 456);
+        let dt = dt_from_ymd_hms_milli_tz_offset(2021, 11, 8, 1, 2, 3, 456, -8 * hour - 15 * minute);
         assert_eq!(RpcValue::from_cpon(dt_str).unwrap().as_datetime(), DateTime::from_datetime(&dt));
         assert_eq!(RpcValue::from_cpon(dt_str).unwrap().to_cpon(), dt_str.to_string());
 
