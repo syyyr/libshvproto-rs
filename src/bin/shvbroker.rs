@@ -79,7 +79,21 @@ async fn accept_loop(addr: impl ToSocketAddrs) -> Result<()> {
     broker.await;
     Ok(())
 }
-
+enum LoginResult {
+    Ok,
+    ClientSocketClosed,
+    LoginError,
+}
+async fn send_error(request: &RpcFrame, mut writer: &TcpStream, errmsg: &str) -> Result<()> {
+    let mut resp = RpcMessage::prepare_response_from_meta(&request.meta)?;
+    resp.set_error(RpcError{ code: RpcErrorCode::MethodCallException, message: errmsg.into()});
+    shv::connection::send_message(&mut writer, &resp).await
+}
+async fn send_result(request: &RpcFrame, mut writer: &TcpStream, result: RpcValue) -> Result<()> {
+    let mut resp = RpcMessage::prepare_response_from_meta(&request.meta)?;
+    resp.set_result(result);
+    shv::connection::send_message(&mut writer, &resp).await
+}
 async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream: TcpStream) -> Result<()> {
     let (socket_reader, mut frame_writer) = (&stream, &stream);
     let (peer_writer, peer_receiver) = channel::unbounded::<PeerEvent>();
@@ -90,27 +104,27 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
     let mut brd = BufReader::new(socket_reader);
     let mut frame_reader = shv::connection::FrameReader::new(&mut brd);
     let mut device_options = RpcValue::null();
-    let login_socket_closed = loop {
+    let login_result = loop {
         let login_fut = async {
             let frame = match frame_reader.receive_frame().await? {
-                None => return crate::Result::Ok(true),
-                Some(frame) => {frame}
+                None => return crate::Result::Ok(LoginResult::ClientSocketClosed),
+                Some(frame) => { frame }
             };
             let rpcmsg = frame.to_rpcmesage()?;
-            if rpcmsg.is_request() && rpcmsg.method().unwrap_or("") == "hello" {
-                let mut resp = rpcmsg.prepare_response()?;
+            let resp = rpcmsg.prepare_response()?;
+            if rpcmsg.method().unwrap_or("") == "hello" {
                 let nonce = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
                 let mut result = shv::Map::new();
                 result.insert("nonce".into(), RpcValue::from(&nonce));
-                resp.set_result(RpcValue::from(result));
-                shv::connection::send_message(&mut frame_writer, &resp).await?;
+                send_result(&frame, frame_writer, result.into()).await?;
 
                 let frame = match frame_reader.receive_frame().await? {
-                    None => return crate::Result::Ok(true),
-                    Some(frame) => {frame}
+                    None => return crate::Result::Ok(LoginResult::ClientSocketClosed),
+                    Some(frame) => { frame }
                 };
                 let rpcmsg = frame.to_rpcmesage()?;
-                if rpcmsg.is_request() && rpcmsg.method().unwrap_or("") == "login" {
+                let resp = rpcmsg.prepare_response()?;
+                if rpcmsg.method().unwrap_or("") == "login" {
                     let params = rpcmsg.params().ok_or("No login params")?.as_map();
                     let login = params.get("login").ok_or("Invalid login params")?.as_map();
                     let user = login.get("user").ok_or("User login param is missing")?.as_str();
@@ -135,42 +149,43 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                                 }
                             };
                             if chkpwd() {
-                                let mut resp = rpcmsg.prepare_response()?;
                                 let mut result = shv::Map::new();
                                 result.insert("clientId".into(), RpcValue::from(client_id));
-                                resp.set_result(RpcValue::from(result));
-                                shv::connection::send_message(&mut frame_writer, &resp).await?;
+                                send_result(&frame, frame_writer, result.into()).await?;
                                 if let Some(options) = params.get("options") {
                                     if let Some(device) = options.as_map().get("device") {
                                         device_options = device.clone();
                                     }
                                 }
-                                crate::Result::Ok(false)
+                                crate::Result::Ok(LoginResult::Ok)
                             } else {
-                                Err(format!("Invalid login password received from: {:?}", frame_writer.peer_addr()).into())
+                                send_error(&frame, frame_writer, &format!("Invalid login credentials received.")).await?;
+                                Ok(LoginResult::LoginError)
                             }
                         }
                         _ => {
-                            panic!("PeerEvent::PasswordSha1 expected");
+                            panic!("Internal error, PeerEvent::PasswordSha1 expected");
                         }
                     }
                 } else {
-                    Err(format!("Invalid login message received from: {:?}", frame_writer.peer_addr()).into())
+                    send_error(&frame, frame_writer, &format!("login message expected.")).await?;
+                    Ok(LoginResult::LoginError)
                 }
             } else {
-                Err(format!("Invalid hello message received from: {:?}", frame_writer.peer_addr()).into())
+                send_error(&frame, frame_writer, &format!("hello message expected.")).await?;
+                Ok(LoginResult::LoginError)
             }
         };
         match login_fut.await {
-            Ok(socket_closed) => {
-                break socket_closed;
+            Ok(login_result) => {
+                break login_result;
             }
             Err(errmsg) => {
                 warn!("{}", errmsg);
             }
         }
     };
-    if !login_socket_closed {
+    if let LoginResult::Ok = login_result {
         let register_device = ClientEvent::RegiterDevice {
             client_id,
             device_id: device_options.as_map().get("deviceId").map(|v| v.as_str().to_string()),

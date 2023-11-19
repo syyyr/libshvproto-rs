@@ -138,7 +138,10 @@ impl RpcMessage {
         msg
     }
     pub fn prepare_response(&self) -> Result<Self, &'static str> {
-        let meta = RpcFrame::prepare_response_meta(self.as_rpcvalue().meta())?;
+        Self::prepare_response_from_meta(self.as_rpcvalue().meta())
+    }
+    pub fn prepare_response_from_meta(meta: &MetaMap) -> Result<Self, &'static str> {
+        let meta = RpcFrame::prepare_response_meta(meta)?;
         Ok(Self::from_meta(meta))
     }
 }
