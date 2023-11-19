@@ -84,15 +84,13 @@ enum LoginResult {
     ClientSocketClosed,
     LoginError,
 }
-async fn send_error(request: &RpcFrame, mut writer: &TcpStream, errmsg: &str) -> Result<()> {
-    let mut resp = RpcMessage::prepare_response_from_meta(&request.meta)?;
-    resp.set_error(RpcError{ code: RpcErrorCode::MethodCallException, message: errmsg.into()});
-    shv::connection::send_message(&mut writer, &resp).await
+async fn send_error(mut response: RpcMessage, mut writer: &TcpStream, errmsg: &str) -> Result<()> {
+    response.set_error(RpcError{ code: RpcErrorCode::MethodCallException, message: errmsg.into()});
+    shv::connection::send_message(&mut writer, &response).await
 }
-async fn send_result(request: &RpcFrame, mut writer: &TcpStream, result: RpcValue) -> Result<()> {
-    let mut resp = RpcMessage::prepare_response_from_meta(&request.meta)?;
-    resp.set_result(result);
-    shv::connection::send_message(&mut writer, &resp).await
+async fn send_result(mut response: RpcMessage, mut writer: &TcpStream, result: RpcValue) -> Result<()> {
+    response.set_result(result);
+    shv::connection::send_message(&mut writer, &response).await
 }
 async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream: TcpStream) -> Result<()> {
     let (socket_reader, mut frame_writer) = (&stream, &stream);
@@ -116,7 +114,7 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                 let nonce = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
                 let mut result = shv::Map::new();
                 result.insert("nonce".into(), RpcValue::from(&nonce));
-                send_result(&frame, frame_writer, result.into()).await?;
+                send_result(resp, frame_writer, result.into()).await?;
 
                 let frame = match frame_reader.receive_frame().await? {
                     None => return crate::Result::Ok(LoginResult::ClientSocketClosed),
@@ -151,7 +149,7 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                             if chkpwd() {
                                 let mut result = shv::Map::new();
                                 result.insert("clientId".into(), RpcValue::from(client_id));
-                                send_result(&frame, frame_writer, result.into()).await?;
+                                send_result(resp, frame_writer, result.into()).await?;
                                 if let Some(options) = params.get("options") {
                                     if let Some(device) = options.as_map().get("device") {
                                         device_options = device.clone();
@@ -159,7 +157,7 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                                 }
                                 crate::Result::Ok(LoginResult::Ok)
                             } else {
-                                send_error(&frame, frame_writer, &format!("Invalid login credentials received.")).await?;
+                                send_error(resp, frame_writer, &format!("Invalid login credentials received.")).await?;
                                 Ok(LoginResult::LoginError)
                             }
                         }
@@ -168,11 +166,11 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                         }
                     }
                 } else {
-                    send_error(&frame, frame_writer, &format!("login message expected.")).await?;
+                    send_error(resp, frame_writer, &format!("login message expected.")).await?;
                     Ok(LoginResult::LoginError)
                 }
             } else {
-                send_error(&frame, frame_writer, &format!("hello message expected.")).await?;
+                send_error(resp, frame_writer, &format!("hello message expected.")).await?;
                 Ok(LoginResult::LoginError)
             }
         };
