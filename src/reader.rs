@@ -6,13 +6,14 @@ use crate::rpcvalue::Value;
 #[derive(Debug)]
 pub struct ReadError {
     pub msg: String,
+    pub pos: usize,
     pub line: usize,
     pub col: usize,
 }
 
 impl Display for ReadError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ReadError: {}, line: {}, col: {}", self.msg, self.line, self.col)
+        write!(f, "ReadError: {}, pos {}, line: {}, col: {}", self.msg, self.pos, self.line, self.col)
     }
 }
 
@@ -23,6 +24,7 @@ pub(crate) struct ByteReader<'a, R>
     pub read: &'a mut R,
     peeked: Option<u8> ,
     new_line_read: bool,
+    pub pos: usize,
     line: usize,
     col: usize,
 }
@@ -35,6 +37,7 @@ where R: Read
             read,
             peeked: None,
             new_line_read: false,
+            pos: 0,
             line: 0,
             col: 0,
         }
@@ -75,6 +78,7 @@ where R: Read
                 Err(e) => return Err(self.make_error(&e.to_string()))
             }
         }
+        self.pos += 1;
         if self.new_line_read {
             self.new_line_read = false;
             self.line += 1;
@@ -89,7 +93,7 @@ where R: Read
     }
 
     pub(crate) fn make_error(&self, msg: &str) -> ReadError {
-        ReadError { msg: msg.to_string(), line: self.line, col: self.col }
+        ReadError { msg: msg.to_string(), pos: self.pos, line: self.line, col: self.col }
     }
 }
 
