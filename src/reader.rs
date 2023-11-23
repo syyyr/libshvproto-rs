@@ -22,6 +22,7 @@ pub(crate) struct ByteReader<'a, R>
 {
     pub read: &'a mut R,
     peeked: Option<u8> ,
+    new_line_read: bool,
     line: usize,
     col: usize,
 }
@@ -33,6 +34,7 @@ where R: Read
         ByteReader {
             read,
             peeked: None,
+            new_line_read: false,
             line: 0,
             col: 0,
         }
@@ -73,11 +75,15 @@ where R: Read
                 Err(e) => return Err(self.make_error(&e.to_string()))
             }
         }
-        if ret_b == b'\n' {
+        if self.new_line_read {
+            self.new_line_read = false;
             self.line += 1;
             self.col = 0;
         } else {
             self.col += 1;
+        }
+        if ret_b == b'\n' {
+            self.new_line_read = true;
         }
         Ok(ret_b)
     }
