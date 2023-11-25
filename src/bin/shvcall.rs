@@ -18,8 +18,8 @@ struct Opts {
     path: String,
     #[structopt(short = "-m", long = "--method")]
     method: String,
-    #[structopt(short = "-a", long = "--params")]
-    params: Option<String>,
+    #[structopt(short = "-a", long = "--param")]
+    param: Option<String>,
     /// Verbose mode (module, .)
     #[structopt(short = "v", long = "verbose")]
     verbose: Option<String>,
@@ -69,13 +69,13 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     // login
     client::login(&mut frame_reader, &mut writer, url).await?;
 
-    let params = match &opts.params {
+    let param = match &opts.param {
         None => None,
         Some(p) => {
             Some(RpcValue::from_cpon(&p)?)
         },
     };
-    let rpcmsg = RpcMessage::create_request(&opts.path, &opts.method, params);
+    let rpcmsg = RpcMessage::create_request(&opts.path, &opts.method, param);
     shv::connection::send_message(&mut writer, &rpcmsg).await?;
 
     let resp = frame_reader.receive_message().await?.ok_or("Receive error")?;

@@ -65,8 +65,8 @@ impl RpcMessage {
         old_id + 1
     }
 
-    pub fn params(&self) -> Option<&RpcValue> { self.key(Key::Params as i32) }
-    pub fn set_params(&mut self, rv: RpcValue) -> &mut Self  { self.set_key(Key::Params, Some(rv));self }
+    pub fn param(&self) -> Option<&RpcValue> { self.key(Key::Params as i32) }
+    pub fn set_param(&mut self, rv: RpcValue) -> &mut Self  { self.set_key(Key::Params, Some(rv));self }
     pub fn result(&self) -> Option<&RpcValue> { self.key(Key::Result as i32) }
     pub fn set_result(&mut self, rv: RpcValue) -> &mut Self { self.set_key(Key::Result, Some(rv));self }
     pub fn error(&self) -> Option<RpcError> {
@@ -122,18 +122,18 @@ impl RpcMessage {
             panic!("Not RpcMessage")
         }
     }
-    pub fn create_request(shvpath: &str, method: &str, params: Option<RpcValue>) -> Self {
-        Self::create_request_with_id(Self::next_request_id(), shvpath, method, params)
+    pub fn create_request(shvpath: &str, method: &str, param: Option<RpcValue>) -> Self {
+        Self::create_request_with_id(Self::next_request_id(), shvpath, method, param)
     }
-    pub fn create_request_with_id(rq_id: RqId, shvpath: &str, method: &str, params: Option<RpcValue>) -> Self {
+    pub fn create_request_with_id(rq_id: RqId, shvpath: &str, method: &str, param: Option<RpcValue>) -> Self {
         let mut msg = Self::default();
         msg.set_request_id(rq_id);
         if !shvpath.is_empty() {
             msg.set_shvpath(shvpath);
         }
         msg.set_method(method);
-        if let Some(rv) = params {
-            msg.set_params(rv);
+        if let Some(rv) = param {
+            msg.set_param(rv);
         }
         msg
     }
@@ -311,7 +311,7 @@ pub enum RpcErrorCode {
     NoError = 0,
     InvalidRequest,	// The JSON sent is not a valid Request object.
     MethodNotFound,	// The method does not exist / is not available.
-    InvalidParams,		// Invalid method parameter(s).
+    InvalidParam,		// Invalid method parameter(s).
     InternalError,		// Internal JSON-RPC error.
     ParseError,		// Invalid JSON was received by the server. An error occurred on the server while parsing the JSON text.
     MethodCallTimeout,
@@ -331,7 +331,7 @@ impl TryFrom<i32> for RpcErrorCode {
             x if x == RpcErrorCode::NoError as i32 => Ok(RpcErrorCode::NoError),
             x if x == RpcErrorCode::InvalidRequest as i32 => Ok(RpcErrorCode::InvalidRequest),	// The JSON sent is not a valid Request object.
             x if x == RpcErrorCode::MethodNotFound as i32 => Ok(RpcErrorCode::MethodNotFound),	// The method does not exist / is not available.
-            x if x == RpcErrorCode::InvalidParams as i32 => Ok(RpcErrorCode::InvalidParams),		// Invalid method parameter(s).
+            x if x == RpcErrorCode::InvalidParam as i32 => Ok(RpcErrorCode::InvalidParam),		// Invalid method parameter(s).
             x if x == RpcErrorCode::InternalError as i32 => Ok(RpcErrorCode::InternalError),		// Internal JSON-RPC error.
             x if x == RpcErrorCode::ParseError as i32 => Ok(RpcErrorCode::ParseError),		// Invalid JSON was received by the server. An error occurred on the server while parsing the JSON text.
             x if x == RpcErrorCode::MethodCallTimeout as i32 => Ok(RpcErrorCode::MethodCallTimeout),
@@ -404,8 +404,8 @@ mod test {
         let id = RpcMessage::next_request_id();
         let mut rq = RpcMessage::create_request_with_id(id, "foo/bar", "baz", None);
         let params = RpcValue::from(123);
-        rq.set_params(params.clone());
-        assert_eq!(rq.params(), Some(&params));
+        rq.set_param(params.clone());
+        assert_eq!(rq.param(), Some(&params));
         let caller_ids = vec![1,2,3];
         rq.set_caller_ids(&caller_ids);
         assert_eq!(&rq.caller_ids(), &caller_ids);

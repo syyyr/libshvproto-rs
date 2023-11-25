@@ -123,7 +123,7 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                 let rpcmsg = frame.to_rpcmesage()?;
                 let resp = rpcmsg.prepare_response()?;
                 if rpcmsg.method().unwrap_or("") == "login" {
-                    let params = rpcmsg.params().ok_or("No login params")?.as_map();
+                    let params = rpcmsg.param().ok_or("No login params")?.as_map();
                     let login = params.get("login").ok_or("Invalid login params")?.as_map();
                     let user = login.get("user").ok_or("User login param is missing")?.as_str();
                     let password = login.get("password").ok_or("Password login param is missing")?.as_str();

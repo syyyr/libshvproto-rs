@@ -60,7 +60,7 @@ pub trait ShvNode {
     fn process_request_dir(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult {
         match rpcmsg.method() {
             Some("dir") => {
-                Ok(Some(dir(self.methods().into_iter(), rpcmsg.params().into())))
+                Ok(Some(dir(self.methods().into_iter(), rpcmsg.param().into())))
             }
             _ => {
                 Err(format!("NIY {}", rpcmsg).into())
