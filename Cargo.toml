@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-simple_logger = { git = "https://github.com/fvacek/rust-simple_logger.git", branch = "main" }
+simple_logger = { git = "https://github.com/fvacek/rust-simple_logger.git", branch = "main", features = ["stderr"] }
 
 futures = "0.3.29"
 async-std = "1.12.0"
