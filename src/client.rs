@@ -1,7 +1,5 @@
 use std::time::Duration;
 use async_std::io;
-use percent_encoding::percent_decode;
-use url::Url;
 use crate::{RpcMessage, RpcValue};
 use crate::connection::FrameReader;
 
@@ -78,7 +76,7 @@ impl LoginParams {
     }
 }
 
-pub async fn login<'a, R, W>(frame_reader: &mut FrameReader<'a, R>, writer: &mut W, url: &Url) -> crate::Result<i32>
+pub async fn login<'a, R, W>(frame_reader: &mut FrameReader<'a, R>, writer: &mut W, login_params: &LoginParams) -> crate::Result<i32>
 where R: io::Read + std::marker::Unpin,
       W: io::Write + std::marker::Unpin
 {
@@ -90,14 +88,9 @@ where R: io::Read + std::marker::Unpin,
     }
     let nonce = resp.result().ok_or("Bad result")?.as_map()
         .get("nonce").ok_or("Bad nonce")?.as_str();
-    let password = percent_decode(url.password().unwrap_or("").as_bytes()).decode_utf8()?;
-    let hash = crate::connection::sha1_password_hash(password.as_bytes(), nonce.as_bytes());
-    let login_params = LoginParams{
-        user: url.username().to_string(),
-        password: std::str::from_utf8(&hash)?.into(),
-        heartbeat_interval: None,
-        ..Default::default()
-    };
+    let hash = crate::connection::sha1_password_hash(login_params.password.as_bytes(), nonce.as_bytes());
+    let mut login_params = login_params.clone();
+    login_params.password = std::str::from_utf8(&hash)?.into();
     let rq = RpcMessage::create_request("", "login", Some(login_params.to_rpcvalue()));
     crate::connection::send_message(writer, &rq).await?;
     let resp = frame_reader.receive_message().await?.ok_or("Socked closed")?;

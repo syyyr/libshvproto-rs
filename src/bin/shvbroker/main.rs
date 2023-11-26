@@ -8,13 +8,11 @@ use rand::distributions::{Alphanumeric, DistString};
 use log::*;
 use structopt::StructOpt;
 use shv::rpcframe::RpcFrame;
-use shv::{RpcMessage, RpcValue};
+use shv::{RpcMessage, RpcValue, shvnode};
 use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
-use shv::shvnode::{ShvNode};
-
-mod br;
+use shv::shvnode::{find_longest_prefix, shv_dir_methods, ShvNode};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 type Sender<T> = async_std::channel::Sender<T>;
@@ -289,61 +287,8 @@ struct Broker {
 }
 
 impl Broker {
-    pub fn ls(&self, path: &str) -> Option<Vec<String>> {
-        //let parent_dir = path.to_string();
-        let mut dirs: Vec<String> = Vec::new();
-        let mut dir_exists = false;
-        for (key, _) in self.mounts.range(path.to_string()..) {
-            if key.starts_with(path) {
-                dir_exists = true;
-                if path.is_empty()
-                    || key.len() == path.len()
-                    || key.as_bytes()[path.len()] == ('/' as u8)
-                {
-                    if key.len() > path.len() {
-                        let dir_rest_start = if path.is_empty() {
-                            0
-                        } else {
-                            path.len() + 1
-                        };
-                        let mut updirs = key[dir_rest_start..].split('/');
-                        if let Some(dir) = updirs.next() {
-                            dirs.push(dir.to_string());
-                        }
-                    }
-                }
-            } else {
-                break;
-            }
-        }
-        if dir_exists {
-            Some(dirs)
-        } else {
-            None
-        }
-    }
-    fn find_longest_prefix<'a, 'b, V>(map: &'a BTreeMap<String, V>, shv_path: &'b str) -> Option<(&'b str, &'b str)> {
-        let mut path = &shv_path[..];
-        let mut rest = "";
-        loop {
-            if map.contains_key(path) {
-                return Some((path, rest))
-            }
-            if path.is_empty() {
-                break;
-            }
-            if let Some(slash_ix) = path.rfind('/') {
-                path = &shv_path[..slash_ix];
-                rest = &shv_path[(slash_ix + 1)..];
-            } else {
-                path = "";
-                rest = shv_path;
-            };
-        }
-        None
-    }
     pub fn find_mount<'a, 'b>(&'a mut self, shv_path: &'b str) -> Option<(&'a mut Mount, &'b str)> {
-        if let Some((mount_dir, node_dir)) = Self::find_longest_prefix(&self.mounts, shv_path) {
+        if let Some((mount_dir, node_dir)) = find_longest_prefix(&self.mounts, shv_path) {
             Some((self.mounts.get_mut(mount_dir).unwrap(), node_dir))
         } else {
             None
@@ -373,7 +318,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
         peers: HashMap::new(),
         mounts: BTreeMap::new(),
     };
-    broker.mounts.insert(".app".into(), Mount::Node(Box::new(br::nodes::AppNode{})));
+    broker.mounts.insert(".app".into(), Mount::Node(Box::new(shv::shvnode::AppNode { app_name: "shvbroker".to_string() })));
     loop {
         match events.recv().await {
             Err(e) => {
@@ -384,7 +329,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                 match event {
                     ClientEvent::Frame { client_id, mut frame} => {
                         if frame.is_request() {
-                            let shv_path = frame.shv_path().unwrap_or("").to_owned();
+                            let shv_path = frame.shv_path().unwrap_or("").to_string();
                             let response_meta= RpcFrame::prepare_response_meta(&frame.meta);
                             let result: Option<std::result::Result<RpcValue, String>> = if let Some((mount, node_path)) = broker.find_mount(&shv_path) {
                                 match mount {
@@ -416,40 +361,19 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                             } else {
                                 if let Ok(rpcmsg) = frame.to_rpcmesage() {
                                     match rpcmsg.method() {
+                                        None => {
+                                            Some(Err(format!("Shv call method missing.")))
+                                        }
                                         Some("dir") => {
-                                            Some(Err(format!("Dir on path: {} NIY", shv_path)))
+                                            Some(Ok(shvnode::dir(shv_dir_methods().into_iter(), rpcmsg.param().into())))
                                         }
                                         Some("ls") => {
-                                            match broker.ls(&shv_path) {
-                                                None => {
-                                                    Some(Err(format!("Invalid shv path: {}", shv_path)))
-                                                }
-                                                Some(dirs) => {
-                                                    if let Some(pattern) = rpcmsg.param() {
-                                                        let pattern = pattern.as_str();
-                                                        (|| {
-                                                            for dir in dirs.iter() {
-                                                                if pattern == dir {
-                                                                    return Some(Ok(true.into()));
-                                                                }
-                                                            }
-                                                            Some(Ok(false.into()))
-                                                        }) ()
-                                                    } else {
-                                                        let result: Vec<RpcValue> = dirs.into_iter().map(|s| RpcValue::from(s)).collect();
-                                                        Some(Ok(RpcValue::from(result)))
-                                                    }
-                                                }
-                                            }
+                                            Some(shvnode::ls(&broker.mounts, &shv_path, rpcmsg.param().into()))
                                         }
                                         Some(method) => {
-                                            Some(Err(format!("Method {}:{}() is not implemented", shv_path, method)))
+                                            Some(Err(format!("Unknown method {}", method)))
                                         }
-                                        None => {
-                                            Some(Err(format!("Empty method on path: {}", shv_path)))
-                                        }
-                                    }
-                                } else {
+                                    }                                } else {
                                     Some(Err(format!("Invalid shv request")))
                                 }
                             };

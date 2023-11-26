@@ -5,8 +5,10 @@ use async_std::net::TcpStream;
 use shv::{client, RpcMessage, RpcValue};
 use async_std::task;
 use log::*;
+use percent_encoding::percent_decode;
 use simple_logger::SimpleLogger;
 use url::Url;
+use shv::client::LoginParams;
 
 #[derive(StructOpt, Debug)]
 //#[structopt(name = "shvcall", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "SHV call")]
@@ -67,7 +69,14 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     let mut frame_reader = shv::connection::FrameReader::new(&mut brd);
 
     // login
-    client::login(&mut frame_reader, &mut writer, url).await?;
+    let login_params = LoginParams{
+        user: url.username().to_string(),
+        password: percent_decode(url.password().unwrap_or("").as_bytes()).decode_utf8()?.into(),
+        heartbeat_interval: None,
+        ..Default::default()
+    };
+
+    client::login(&mut frame_reader, &mut writer, &login_params).await?;
 
     let param = match &opts.param {
         None => None,
