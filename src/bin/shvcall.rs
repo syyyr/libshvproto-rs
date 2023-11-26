@@ -72,7 +72,11 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     let param = match &opts.param {
         None => None,
         Some(p) => {
-            Some(RpcValue::from_cpon(&p)?)
+            if p.is_empty() {
+                None
+            } else {
+                Some(RpcValue::from_cpon(&p)?)
+            }
         },
     };
     let rpcmsg = RpcMessage::create_request(&opts.path, &opts.method, param);

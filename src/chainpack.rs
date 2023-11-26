@@ -329,7 +329,7 @@ impl<'a, R> ChainPackReader<'a, R>
         self.byte_reader.get_byte()
     }
     fn make_error(&self, msg: &str) -> ReadError {
-        self.byte_reader.make_error(msg)
+        self.byte_reader.make_error(&format!("ChainPack read error - {}", msg))
     }
 
     /// return (n, bitlen)

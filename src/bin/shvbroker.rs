@@ -414,27 +414,43 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                     }
                                 }
                             } else {
-                                match frame.method() {
-                                    Some("dir") => {
-                                        Some(Err(format!("Dir on path: {} NIY", shv_path)))
-                                    }
-                                    Some("ls") => {
-                                        match broker.ls(&shv_path) {
-                                            None => {
-                                                Some(Err(format!("Invalid shv path: {}", shv_path)))
-                                            }
-                                            Some(dirs) => {
-                                                let result: Vec<RpcValue> = dirs.into_iter().map(|s| RpcValue::from(s)).collect();
-                                                Some(Ok(RpcValue::from(result)))
+                                if let Ok(rpcmsg) = frame.to_rpcmesage() {
+                                    match rpcmsg.method() {
+                                        Some("dir") => {
+                                            Some(Err(format!("Dir on path: {} NIY", shv_path)))
+                                        }
+                                        Some("ls") => {
+                                            match broker.ls(&shv_path) {
+                                                None => {
+                                                    Some(Err(format!("Invalid shv path: {}", shv_path)))
+                                                }
+                                                Some(dirs) => {
+                                                    if let Some(pattern) = rpcmsg.param() {
+                                                        let pattern = pattern.as_str();
+                                                        (|| {
+                                                            for dir in dirs.iter() {
+                                                                if pattern == dir {
+                                                                    return Some(Ok(true.into()));
+                                                                }
+                                                            }
+                                                            Some(Ok(false.into()))
+                                                        }) ()
+                                                    } else {
+                                                        let result: Vec<RpcValue> = dirs.into_iter().map(|s| RpcValue::from(s)).collect();
+                                                        Some(Ok(RpcValue::from(result)))
+                                                    }
+                                                }
                                             }
                                         }
+                                        Some(method) => {
+                                            Some(Err(format!("Method {}:{}() is not implemented", shv_path, method)))
+                                        }
+                                        None => {
+                                            Some(Err(format!("Empty method on path: {}", shv_path)))
+                                        }
                                     }
-                                    Some(method) => {
-                                        Some(Err(format!("Method {}:{}() is not implemented", shv_path, method)))
-                                    }
-                                    None => {
-                                        Some(Err(format!("Empty method on path: {}", shv_path)))
-                                    }
+                                } else {
+                                    Some(Err(format!("Invalid shv request")))
                                 }
                             };
                             if let Some(result) = result {

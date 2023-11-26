@@ -392,7 +392,7 @@ impl<'a, R> CponReader<'a, R>
         self.byte_reader.get_byte()
     }
     fn make_error(&self, msg: &str) -> ReadError {
-        self.byte_reader.make_error(msg)
+        self.byte_reader.make_error(&format!("Cpon read error - {}", msg))
     }
 
     fn skip_white_insignificant(&mut self) -> Result<(), ReadError> {
