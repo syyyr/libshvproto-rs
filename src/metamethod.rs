@@ -98,7 +98,7 @@ impl MetaMethod {
 
 // attributes for 'dir' command
 #[derive(Debug, Copy, Clone)]
-enum DirAttribute {
+pub enum DirAttribute {
     Name = 1,
     Flags,
     Param,
