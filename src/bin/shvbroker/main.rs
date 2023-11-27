@@ -318,7 +318,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
         peers: HashMap::new(),
         mounts: BTreeMap::new(),
     };
-    broker.mounts.insert(".app".into(), Mount::Node(Box::new(shv::shvnode::AppNode { app_name: "shvbroker".to_string() })));
+    broker.mounts.insert(".app".into(), Mount::Node(Box::new(shv::shvnode::AppNode { app_name: "shvbroker".to_string(), ..Default::default() })));
     loop {
         match events.recv().await {
             Err(e) => {

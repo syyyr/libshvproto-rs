@@ -4,6 +4,7 @@ use std::process::{Child, Command};
 use std::{thread, time::Duration};
 use shv::{metamethod, RpcMessage, RpcValue};
 use shv::metamethod::{Flag, MetaMethod};
+use shv::shvnode::{METH_DIR, METH_LS, METH_NAME, METH_PING};
 
 struct KillProcessGuard {
     child: Child,
@@ -47,10 +48,10 @@ fn it_works() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(call("", "ls", r#"".app""#)?, RpcValue::from(true));
     {
         let expected_methods = vec![
-            MetaMethod { name: "dir".into(), param: "DirParam".into(), result: "DirResult".into(), ..Default::default() },
-            MetaMethod { name: "ls".into(), param: "LsParam".into(), result: "LsResult".into(), ..Default::default() },
-            MetaMethod { name: "ping".into(), ..Default::default() },
-            MetaMethod { name: "name".into(), flags: Flag::IsGetter.into(),  ..Default::default() }
+            MetaMethod { name: METH_DIR.into(), param: "DirParam".into(), result: "DirResult".into(), ..Default::default() },
+            MetaMethod { name: METH_LS.into(), param: "LsParam".into(), result: "LsResult".into(), ..Default::default() },
+            MetaMethod { name: METH_NAME.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
+            MetaMethod { name: METH_PING.into(), ..Default::default() },
         ];
         {
             let methods = call(".app", "dir", "")?;

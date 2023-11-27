@@ -154,7 +154,7 @@ pub trait ShvNode {
     fn process_request(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult;
     fn process_request_dir(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult {
         match rpcmsg.method() {
-            Some("dir") => {
+            Some(METH_DIR) => {
                 Ok(Some(dir(self.methods().into_iter(), rpcmsg.param().into())))
             }
             _ => {
@@ -164,12 +164,23 @@ pub trait ShvNode {
     }
 }
 
+pub const METH_DIR: &str = "dir";
+pub const METH_LS: &str = "ls";
+pub const METH_GET: &str = "get";
+pub const METH_SET: &str = "set";
+pub const METH_SHV_VERSION_MAJOR: &str = "shvVersionMajor";
+pub const METH_SHV_VERSION_MINOR: &str = "shvVersionMinor";
+pub const METH_NAME: &str = "name";
+pub const METH_PING: &str = "ping";
+
 lazy_static! {
-    static ref APP_METHODS: [MetaMethod; 4] = [
-        MetaMethod { name: "dir".into(), param: "DirParam".into(), result: "DirResult".into(), ..Default::default() },
-        MetaMethod { name: "ls".into(), param: "LsParam".into(), result: "LsResult".into(), ..Default::default() },
-        MetaMethod { name: "ping".into(), ..Default::default() },
-        MetaMethod { name: "name".into(), flags: Flag::IsGetter.into(),  ..Default::default() },
+    static ref APP_METHODS: [MetaMethod; 6] = [
+        MetaMethod { name: METH_DIR.into(), param: "DirParam".into(), result: "DirResult".into(), ..Default::default() },
+        MetaMethod { name: METH_LS.into(), param: "LsParam".into(), result: "LsResult".into(), ..Default::default() },
+        MetaMethod { name: METH_SHV_VERSION_MAJOR.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
+        MetaMethod { name: METH_SHV_VERSION_MINOR.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
+        MetaMethod { name: METH_NAME.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
+        MetaMethod { name: METH_PING.into(), ..Default::default() },
     ];
 }
 
@@ -178,6 +189,17 @@ pub fn shv_dir_methods() -> Vec<&'static MetaMethod> {
 }
 pub struct AppNode {
     pub app_name: String,
+    pub shv_version_major: i32,
+    pub shv_version_minor: i32,
+}
+impl Default for AppNode {
+    fn default() -> Self {
+        AppNode {
+            app_name: "".to_string(),
+            shv_version_major: 3,
+            shv_version_minor: 0,
+        }
+    }
 }
 impl ShvNode for AppNode {
     fn methods(&self) -> Vec<&MetaMethod> {
@@ -186,11 +208,17 @@ impl ShvNode for AppNode {
 
     fn process_request(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult {
         match rpcmsg.method() {
-            Some("ping") => {
+            Some(METH_PING) => {
                 Ok(Some(RpcValue::from(())))
             }
-            Some("name") => {
+            Some(METH_NAME) => {
                 Ok(Some(RpcValue::from(&self.app_name)))
+            }
+            Some(METH_SHV_VERSION_MAJOR) => {
+                Ok(Some(RpcValue::from(self.shv_version_major)))
+            }
+            Some(METH_SHV_VERSION_MINOR) => {
+                Ok(Some(RpcValue::from(self.shv_version_minor)))
             }
             _ => {
                 ShvNode::process_request_dir(self, rpcmsg)

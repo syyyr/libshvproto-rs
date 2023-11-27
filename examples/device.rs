@@ -77,7 +77,7 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     client::login(&mut frame_reader, &mut writer, &login_params).await?;
 
     let mut mounts = BTreeMap::new();
-    mounts.insert(".app".into(), Box::new(AppNode{ app_name: "device".to_string() }));
+    mounts.insert(".app".into(), Box::new(AppNode{ app_name: "device".to_string(), ..Default::default() }));
     loop {
         match frame_reader.receive_frame().await {
             Err(e) => {
