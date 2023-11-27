@@ -1,9 +1,8 @@
 use std::collections::BTreeMap;
-use async_std::{prelude::*};
 use structopt::StructOpt;
 use async_std::io::BufReader;
 use async_std::net::TcpStream;
-use shv::{client, RpcMessage, RpcMessageMetaTags, RpcValue, shvnode};
+use shv::{client, RpcMessage, RpcMessageMetaTags, RpcValue};
 use async_std::task;
 use log::*;
 use percent_encoding::percent_decode;
@@ -12,7 +11,7 @@ use url::Url;
 use shv::client::LoginParams;
 use shv::rpcframe::RpcFrame;
 use shv::rpcmessage::{RpcError, RpcErrorCode};
-use shv::shvnode::{AppNode, find_longest_prefix, shv_dir_methods, ShvNode};
+use shv::shvnode::{DeviceNode, find_longest_prefix, dir_ls, ShvNode};
 
 #[derive(StructOpt, Debug)]
 //#[structopt(name = "device", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "SHV call")]
@@ -77,7 +76,7 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     client::login(&mut frame_reader, &mut writer, &login_params).await?;
 
     let mut mounts = BTreeMap::new();
-    mounts.insert(".app".into(), Box::new(AppNode{ app_name: "device".to_string(), ..Default::default() }));
+    mounts.insert(".app".into(), Box::new(DeviceNode{ name: "device", ..Default::default() }));
     loop {
         match frame_reader.receive_frame().await {
             Err(e) => {
@@ -102,20 +101,7 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
                                 Err(err) => { Err(err.to_string()) }
                             }
                         } else {
-                            match rpcmsg.method() {
-                                None => {
-                                    Err(format!("Shv call method missing."))
-                                }
-                                Some("dir") => {
-                                    Ok(shvnode::dir(shv_dir_methods().into_iter(), rpcmsg.param().into()))
-                                }
-                                Some("ls") => {
-                                    shvnode::ls(&mounts, shv_path, rpcmsg.param().into())
-                                }
-                                Some(method) => {
-                                    Err(format!("Unknown method {}", method))
-                                }
-                            }
+                            dir_ls(&mounts, rpcmsg)
                         };
                         if let Ok(meta) = response_meta {
                             let mut resp = RpcMessage::from_meta(meta);
@@ -127,9 +113,7 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
                                     resp.set_error(RpcError::new(RpcErrorCode::MethodCallException, &errmsg));
                                 }
                             }
-                            let bytes = resp.as_rpcvalue().to_chainpack();
-                            writer.write_all(&bytes).await?;
-                            writer.flush().await?;
+                            shv::connection::send_message(&mut writer, &resp).await?;
                         }
                     } else {
                         warn!("Invalid shv request");

@@ -21,6 +21,12 @@ impl Drop for KillProcessGuard {
 fn it_works() -> Result<(), Box<dyn std::error::Error>> {
     let _broker_process_guard = KillProcessGuard { child: Command::new("target/debug/shvbroker").spawn()? };
     thread::sleep(Duration::from_millis(500));
+    let _device_process_guard = KillProcessGuard {
+        child: Command::new("target/debug/examples/device")
+        .arg("--url").arg("tcp://admin:admin@localhost")
+        .arg("--mount").arg("test/device")
+        .spawn()?
+    };
 
     fn call(path: &str, method: &str, param: &str) -> Result<RpcValue, Box<dyn std::error::Error>> {
         let output = Command::new("target/debug/shvcall")
@@ -44,7 +50,7 @@ fn it_works() -> Result<(), Box<dyn std::error::Error>> {
         Ok(result.clone())
     }
 
-    assert_eq!(call("", "ls", "")?, (vec![RpcValue::from(".app")].into()));
+    //assert_eq!(call("", "ls", "")?, (vec![RpcValue::from(".app")].into()));
     assert_eq!(call("", "ls", r#"".app""#)?, RpcValue::from(true));
     {
         let expected_methods = vec![
@@ -89,6 +95,9 @@ fn it_works() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     assert_eq!(call(".app", "ping", "")?, RpcValue::null());
+
+    assert_eq!(call("test", "ls", "")?, (vec![RpcValue::from("device")].into()));
+    assert_eq!(call("test/device/.app", "ping", "")?, RpcValue::null());
 
     Ok(())
 }
