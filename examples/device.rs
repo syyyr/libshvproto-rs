@@ -4,14 +4,16 @@ use async_std::io::BufReader;
 use async_std::net::TcpStream;
 use shv::{client, RpcMessage, RpcMessageMetaTags, RpcValue};
 use async_std::task;
+use lazy_static::lazy_static;
 use log::*;
 use percent_encoding::percent_decode;
 use simple_logger::SimpleLogger;
 use url::Url;
 use shv::client::LoginParams;
+use shv::metamethod::{Access, Flag, MetaMethod};
 use shv::rpcframe::RpcFrame;
 use shv::rpcmessage::{RpcError, RpcErrorCode};
-use shv::shvnode::{DeviceNode, find_longest_prefix, dir_ls, ShvNode};
+use shv::shvnode::{AppDeviceNode, find_longest_prefix, dir_ls, ShvNode, DirLsNode, ProcessRequestResult, Signal, AppNode};
 
 #[derive(StructOpt, Debug)]
 //#[structopt(name = "device", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "SHV call")]
@@ -75,8 +77,10 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     };
     client::login(&mut frame_reader, &mut writer, &login_params).await?;
 
-    let mut mounts = BTreeMap::new();
-    mounts.insert(".app".into(), Box::new(DeviceNode{ name: "device", ..Default::default() }));
+    let mut mounts: BTreeMap<String, Box<dyn ShvNode>> = BTreeMap::new();
+    mounts.insert(".app".into(), Box::new(AppNode { app_name: "device", ..Default::default() }));
+    mounts.insert(".app/device".into(), Box::new(AppDeviceNode { device_name: "example", ..Default::default() }));
+    mounts.insert("number".into(), Box::new(IntPropertyNode::new(0)));
     loop {
         match frame_reader.receive_frame().await {
             Err(e) => {
@@ -92,28 +96,28 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
                     if let Ok(rpcmsg) = frame.to_rpcmesage() {
                         let shv_path = frame.shv_path().unwrap_or("");
                         let response_meta= RpcFrame::prepare_response_meta(&frame.meta);
-                        let result = if let Some((mount, path)) = find_longest_prefix(&mounts, &shv_path) {
+                        let result = if let Some((mount, _path)) = find_longest_prefix(&mounts, &shv_path) {
                             let node = mounts.get_mut(mount).unwrap();
-                            let mut rpcmsg2 = rpcmsg;
-                            rpcmsg2.set_shvpath(path);
-                            match node.process_request(&rpcmsg2) {
-                                Ok(res) => Ok(res.unwrap_or(RpcValue::null())),
-                                Err(err) => { Err(err.to_string()) }
-                            }
+                            node.process_request(&rpcmsg)
                         } else {
                             dir_ls(&mounts, rpcmsg)
                         };
                         if let Ok(meta) = response_meta {
                             let mut resp = RpcMessage::from_meta(meta);
                             match result {
-                                Ok(value) => {
+                                Ok((value, signal)) => {
                                     resp.set_result(value);
+                                    shv::connection::send_message(&mut writer, &resp).await?;
+                                    if let Some(signal) = signal {
+                                        let sig = RpcMessage::new_signal(shv_path, signal.method, Some(signal.value));
+                                        shv::connection::send_message(&mut writer, &sig).await?;
+                                    }
                                 }
                                 Err(errmsg) => {
-                                    resp.set_error(RpcError::new(RpcErrorCode::MethodCallException, &errmsg));
+                                    resp.set_error(errmsg);
+                                    shv::connection::send_message(&mut writer, &resp).await?;
                                 }
                             }
-                            shv::connection::send_message(&mut writer, &resp).await?;
                         }
                     } else {
                         warn!("Invalid shv request");
@@ -125,4 +129,58 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
 
     Ok(())
 }
+pub const METH_SET: &str = "set";
+pub const METH_GET: &str = "get";
+pub const SIG_CHNG: &str = "chng";
 
+lazy_static! {
+    static ref PROPERTY_METHODS: [MetaMethod; 3] = [
+        MetaMethod { name: METH_GET.into(), flags: Flag::IsGetter.into(), result: "Int".into(), access: Access::Read, ..Default::default() },
+        MetaMethod { name: METH_SET.into(), flags: Flag::IsSetter.into(), param: "Int".into(), access: Access::Write, ..Default::default() },
+        MetaMethod { name: SIG_CHNG.into(), flags: Flag::IsSignal.into(), result: "Int".into(), access: Access::Read, ..Default::default() },
+    ];
+}
+
+struct IntPropertyNode {
+    val: i32,
+    dirls: DirLsNode,
+}
+impl IntPropertyNode {
+    fn new(val: i32) -> Self {
+        IntPropertyNode { val, dirls: DirLsNode {} }
+    }
+}
+impl ShvNode for IntPropertyNode {
+    fn methods(&self) -> Vec<&MetaMethod> {
+        self.dirls.methods().into_iter().chain(PROPERTY_METHODS.iter()).collect()
+    }
+
+    fn process_request(&mut self, rq: &RpcMessage) -> ProcessRequestResult {
+        match rq.method() {
+            Some(METH_GET) => {
+                Ok((self.val.into(), None))
+            }
+            Some(METH_SET) => {
+                match rq.param() {
+                    None => Err(RpcError::new(RpcErrorCode::InvalidParam, "Invalid parameter")),
+                    Some(v) => {
+                        if v.is_int() {
+                            let v = v.as_i32();
+                            if v == self.val {
+                                Ok((RpcValue::from(false), None))
+                            } else {
+                                self.val = v;
+                                Ok((RpcValue::from(true), Some(Signal{ value: v.into(), method: SIG_CHNG })))
+                            }
+                        } else {
+                            Err(RpcError::new(RpcErrorCode::InvalidParam, "Invalid parameter"))
+                        }
+                    }
+                }
+            }
+            _ => {
+                self.dirls.process_request(rq)
+            }
+        }
+    }
+}

@@ -26,20 +26,20 @@ impl From<u8> for Flag {
     }
 }
 #[derive(Debug, Copy, Clone)]
-pub enum Access { Bws = 0, Rd, Wr, Cmd, Cfg, Srv, Ssrv, Dev, Su }
+pub enum Access { Browse = 0, Read, Write, Command, Config, Service, SuperService, Developer, Superuser }
 impl From<&str> for Access {
     fn from(value: &str) -> Self {
         match value {
-            "bws" => Access::Bws,
-            "rd" => Access::Rd,
-            "wr" => Access::Wr,
-            "cmd" => Access::Cmd,
-            "cfg" => Access::Cfg,
-            "srv" => Access::Srv,
-            "ssrv" => Access::Ssrv,
-            "dev" => Access::Dev,
-            "su" => Access::Su,
-            _ => Access::Bws,
+            "bws" => Access::Browse,
+            "rd" => Access::Read,
+            "wr" => Access::Write,
+            "cmd" => Access::Command,
+            "cfg" => Access::Config,
+            "srv" => Access::Service,
+            "ssrv" => Access::SuperService,
+            "dev" => Access::Developer,
+            "su" => Access::Superuser,
+            _ => Access::Browse,
         }
     }
 }
@@ -58,7 +58,7 @@ impl Default for MetaMethod {
         MetaMethod {
             name: "".to_string(),
             flags: 0,
-            access: Access::Bws,
+            access: Access::Browse,
             param: "".to_string(),
             result: "".to_string(),
             description: "".to_string(),

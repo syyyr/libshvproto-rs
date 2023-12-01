@@ -5,6 +5,9 @@ use crate::rpcvalue::{IMap, List};
 // use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::fmt;
+use std::convert::TryFrom;
+use std::fmt::{Debug, Display, Formatter};
+use crate::rpcframe::RpcFrame;
 
 static G_RPC_REQUEST_COUNT: AtomicI64 = AtomicI64::new(0);
 
@@ -66,9 +69,20 @@ impl RpcMessage {
     }
 
     pub fn param(&self) -> Option<&RpcValue> { self.key(Key::Params as i32) }
-    pub fn set_param(&mut self, rv: RpcValue) -> &mut Self  { self.set_key(Key::Params, Some(rv));self }
-    pub fn result(&self) -> Option<&RpcValue> { self.key(Key::Result as i32) }
-    pub fn set_result(&mut self, rv: RpcValue) -> &mut Self { self.set_key(Key::Result, Some(rv));self }
+    pub fn set_param(&mut self, rv: RpcValue) -> &mut Self  { self.set_key(Key::Params, Some(rv)); self }
+    pub fn set_param_opt(&mut self, rv: Option<RpcValue>) -> &mut Self  { self.set_key(Key::Params, rv); self }
+    pub fn result(&self) -> Result<&RpcValue, RpcError> {
+        match self.key(Key::Result as i32) {
+            None => {
+                match self.error() {
+                    None => {Err(RpcError{ code: RpcErrorCode::InternalError, message: "Invalid result".to_string() })}
+                    Some(err) => {Err(err)}
+                }
+            }
+            Some(rv) => {Ok(rv)}
+        }
+    }
+    pub fn set_result(&mut self, rv: RpcValue) -> &mut Self { self.set_key(Key::Result, Some(rv)); self }
     pub fn error(&self) -> Option<RpcError> {
         if let Some(rv) = self.key(Key::Error as i32) {
             return RpcError::from_rpcvalue(rv)
@@ -80,10 +94,7 @@ impl RpcMessage {
         self
     }
     pub fn is_success(&self) -> bool {
-        match self.result() {
-            Some(_) => true,
-            None => false,
-        }
+        self.result().is_ok()
     }
 
     fn tag<Idx>(&self, key: Idx) -> Option<&RpcValue>
@@ -122,8 +133,15 @@ impl RpcMessage {
             panic!("Not RpcMessage")
         }
     }
-    pub fn create_request(shvpath: &str, method: &str, param: Option<RpcValue>) -> Self {
+    pub fn new_request(shvpath: &str, method: &str, param: Option<RpcValue>) -> Self {
         Self::create_request_with_id(Self::next_request_id(), shvpath, method, param)
+    }
+    pub fn new_signal(shvpath: &str, method: &str, param: Option<RpcValue>) -> Self {
+        let mut msg = Self::default();
+        msg.set_shvpath(shvpath);
+        msg.set_method(method);
+        msg.set_param_opt(param);
+        msg
     }
     pub fn create_request_with_id(rq_id: RqId, shvpath: &str, method: &str, param: Option<RpcValue>) -> Self {
         let mut msg = Self::default();
@@ -320,10 +338,24 @@ pub enum RpcErrorCode {
     Unknown,
     UserCode = 32
 }
-
-use std::convert::TryFrom;
-use crate::rpcframe::RpcFrame;
-
+impl Display for RpcErrorCode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            RpcErrorCode::NoError => {"NoError"}
+            RpcErrorCode::InvalidRequest => {"InvalidRequest"}
+            RpcErrorCode::MethodNotFound => {"MethodNotFound"}
+            RpcErrorCode::InvalidParam => {"InvalidParam"}
+            RpcErrorCode::InternalError => {"InternalError"}
+            RpcErrorCode::ParseError => {"ParseError"}
+            RpcErrorCode::MethodCallTimeout => {"MethodCallTimeout"}
+            RpcErrorCode::MethodCallCancelled => {"MethodCallCancelled"}
+            RpcErrorCode::MethodCallException => {"MethodCallException"}
+            RpcErrorCode::Unknown => {"Unknown"}
+            RpcErrorCode::UserCode => {"UserCode"}
+        };
+        write!(f, "{}", s)
+    }
+}
 impl TryFrom<i32> for RpcErrorCode {
     type Error = ();
     fn try_from(v: i32) -> Result<Self, Self::Error> {
@@ -381,6 +413,20 @@ impl RpcError {
     }
 }
 
+impl Debug for RpcError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "code: {}, message: {}", self.code, self.message)
+    }
+}
+
+impl Display for RpcError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{} - {}", self.code, self.message)
+    }
+}
+
+impl std::error::Error for RpcError {
+}
 impl fmt::Display for RpcMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_rpcvalue().to_cpon())

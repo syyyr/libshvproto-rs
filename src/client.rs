@@ -80,26 +80,22 @@ pub async fn login<'a, R, W>(frame_reader: &mut FrameReader<'a, R>, writer: &mut
 where R: io::Read + std::marker::Unpin,
       W: io::Write + std::marker::Unpin
 {
-    let rq = RpcMessage::create_request("", "hello", None);
+    let rq = RpcMessage::new_request("", "hello", None);
     crate::connection::send_message(writer, &rq).await?;
     let resp = frame_reader.receive_message().await?.unwrap_or_default();
     if !resp.is_success() {
         return Err(resp.error().unwrap().to_rpcvalue().to_cpon().into());
     }
-    let nonce = resp.result().ok_or("Bad result")?.as_map()
+    let nonce = resp.result()?.as_map()
         .get("nonce").ok_or("Bad nonce")?.as_str();
     let hash = crate::connection::sha1_password_hash(login_params.password.as_bytes(), nonce.as_bytes());
     let mut login_params = login_params.clone();
     login_params.password = std::str::from_utf8(&hash)?.into();
-    let rq = RpcMessage::create_request("", "login", Some(login_params.to_rpcvalue()));
+    let rq = RpcMessage::new_request("", "login", Some(login_params.to_rpcvalue()));
     crate::connection::send_message(writer, &rq).await?;
     let resp = frame_reader.receive_message().await?.ok_or("Socked closed")?;
-    if let Some(result) = resp.result() {
-        match result.as_map().get("clientId") {
-            None => { Ok(0) }
-            Some(client_id) => { Ok(client_id.as_i32()) }
-        }
-    } else {
-        Err(resp.error().ok_or("Unknown error")?.message.into())
+    match resp.result()?.as_map().get("clientId") {
+        None => { Ok(0) }
+        Some(client_id) => { Ok(client_id.as_i32()) }
     }
 }

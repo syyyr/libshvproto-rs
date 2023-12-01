@@ -3,6 +3,7 @@ use std::format;
 use lazy_static::lazy_static;
 use crate::metamethod::{Flag, MetaMethod};
 use crate::{metamethod, RpcMessage, RpcMessageMetaTags, RpcValue, rpcvalue};
+use crate::rpcmessage::{RpcError, RpcErrorCode};
 
 pub enum DirParam {
     Brief,
@@ -76,38 +77,38 @@ impl From<Option<&RpcValue>> for LsParam {
         }
     }
 }
-pub fn dir_ls<V>(mounts: &BTreeMap<String, V>, rpcmsg: RpcMessage) -> Result<RpcValue, String> {
+pub fn dir_ls<V>(mounts: &BTreeMap<String, V>, rpcmsg: RpcMessage) -> ProcessRequestResult {
     let shv_path = rpcmsg.shv_path().unwrap_or("");
     match rpcmsg.method() {
         None => {
-            Err(format!("Shv call method missing."))
+            Err(RpcError::new(RpcErrorCode::InvalidParam, &format!("Shv call method missing.")))
         }
         Some("dir") => {
-            Ok(dir(DIR_LS_METHODS.iter().into_iter(), rpcmsg.param().into()))
+            Ok((dir(DIR_LS_METHODS.iter().into_iter(), rpcmsg.param().into()), None))
         }
         Some("ls") => {
             ls(&mounts, shv_path, rpcmsg.param().into())
         }
         Some(method) => {
-            Err(format!("Unknown method {}", method))
+            Err(RpcError::new(RpcErrorCode::MethodCallException, &format!("Unknown method {}", method)))
         }
     }
 }
-pub fn ls<V>(mounts: &BTreeMap<String, V>, shv_path: &str, param: LsParam) -> Result<RpcValue, String> {
+pub fn ls<V>(mounts: &BTreeMap<String, V>, shv_path: &str, param: LsParam) -> ProcessRequestResult {
     match param {
         LsParam::List => {
             match ls_mounts(mounts, shv_path) {
                 None => {
-                    Err(format!("Invalid shv path: {}", shv_path))
+                    Err(RpcError::new(RpcErrorCode::MethodCallException, &format!("Invalid shv path: {}", shv_path)))
                 }
                 Some(dirs) => {
                     let res: rpcvalue::List = dirs.iter().map(|d| RpcValue::from(d)).collect();
-                    Ok(res.into())
+                    Ok((res.into(), None))
                 }
             }
         }
         LsParam::Exists(path) => {
-            Ok(mounts.contains_key(&path).into())
+            Ok((mounts.contains_key(&path).into(), None))
         }
     }
 }
@@ -151,9 +152,13 @@ mod tests {
     fn ls_mounts() {
         let mut mounts = BTreeMap::new();
         mounts.insert("a".into(), ());
-        mounts.insert("b/b/c".into(), ());
-        mounts.insert("b/b/d".into(), ());
+        mounts.insert("a/1".into(), ());
+        mounts.insert("b/2/C".into(), ());
+        mounts.insert("b/2/D".into(), ());
+        mounts.insert("b/3/E".into(), ());
         assert_eq!(super::ls_mounts(&mounts, ""), Some(vec!["a".to_string(), "b".to_string()]));
+        assert_eq!(super::ls_mounts(&mounts, "a"), Some(vec!["1".to_string()]));
+        assert_eq!(super::ls_mounts(&mounts, "b/2"), Some(vec!["C".to_string(), "D".to_string()]));
     }
 }
 pub fn find_longest_prefix<'a, 'b, V>(map: &'a BTreeMap<String, V>, shv_path: &'b str) -> Option<(&'b str, &'b str)> {
@@ -176,30 +181,45 @@ pub fn find_longest_prefix<'a, 'b, V>(map: &'a BTreeMap<String, V>, shv_path: &'
     }
     None
 }
-
-pub type ProcessRequestResult = crate::Result<Option<RpcValue>>;
+pub struct Signal {
+    pub value: RpcValue,
+    pub method: &'static str,
+}
+pub type ProcessRequestResult = std::result::Result<(RpcValue, Option<Signal>), RpcError>;
+pub fn process_request_dir_ls<'a, 'b>(methods: impl Iterator<Item=&'a MetaMethod>, mut children: impl Iterator<Item=&'b str>, rpcmsg: &RpcMessage) -> ProcessRequestResult {
+    match rpcmsg.method() {
+        Some(METH_DIR) => {
+            Ok((dir(methods, rpcmsg.param().into()), None))
+        }
+        Some(METH_LS) => {
+            match LsParam::from(rpcmsg.param()) {
+                LsParam::List => {
+                    let res: rpcvalue::List = children.map(|d| RpcValue::from(d)).collect();
+                    Ok((res.into(), None))
+                }
+                LsParam::Exists(path) => {
+                    match children.find(|ch| *ch == &path) {
+                        None => Ok((false.into(), None)),
+                        Some(_) => Ok((true.into(), None)),
+                    }
+                }
+            }
+        }
+        _ => {
+            Err(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Unknown method '{}:{}()' NIY", rpcmsg.shv_path().unwrap_or(""), rpcmsg.method().unwrap_or(""))))
+        }
+    }
+}
 pub trait ShvNode {
     fn methods(&self) -> Vec<&MetaMethod>;
     fn process_request(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult;
-    fn process_request_dir_ls(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult {
-        match rpcmsg.method() {
-            Some(METH_DIR) => {
-                Ok(Some(dir(self.methods().into_iter(), rpcmsg.param().into())))
-            }
-            Some(METH_LS) => {
-                Ok(Some(rpcvalue::List::new().into()))
-            }
-            _ => {
-                Err(format!("Method '{}:{}()' NIY", rpcmsg.shv_path().unwrap_or(""), rpcmsg.method().unwrap_or("")).into())
-            }
-        }
-    }
 }
 
 pub const METH_DIR: &str = "dir";
 pub const METH_LS: &str = "ls";
 pub const METH_GET: &str = "get";
 pub const METH_SET: &str = "set";
+pub const SIG_CHNG: &str = "chng";
 pub const METH_SHV_VERSION_MAJOR: &str = "shvVersionMajor";
 pub const METH_SHV_VERSION_MINOR: &str = "shvVersionMinor";
 pub const METH_NAME: &str = "name";
@@ -208,9 +228,14 @@ pub const METH_VERSION: &str = "version";
 pub const METH_SERIAL_NUMBER: &str = "serialNumber";
 
 lazy_static! {
-    static ref DIR_LS_METHODS: [MetaMethod; 2] = [
+    pub static ref DIR_LS_METHODS: [MetaMethod; 2] = [
         MetaMethod { name: METH_DIR.into(), param: "DirParam".into(), result: "DirResult".into(), ..Default::default() },
         MetaMethod { name: METH_LS.into(), param: "LsParam".into(), result: "LsResult".into(), ..Default::default() },
+    ];
+    static ref PROPERTY_METHODS: [MetaMethod; 3] = [
+        MetaMethod { name: METH_GET.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
+        MetaMethod { name: METH_SET.into(), flags: Flag::IsSetter.into(),  ..Default::default() },
+        MetaMethod { name: SIG_CHNG.into(), flags: Flag::IsSignal.into(),  ..Default::default() },
     ];
     static ref APP_METHODS: [MetaMethod; 4] = [
         MetaMethod { name: METH_SHV_VERSION_MAJOR.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
@@ -224,81 +249,97 @@ lazy_static! {
         MetaMethod { name: METH_SERIAL_NUMBER.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
     ];
 }
+pub struct DirLsNode {
+}
+impl DirLsNode {}
+impl ShvNode for DirLsNode {
+    fn methods(&self) -> Vec<&MetaMethod> {
+        DIR_LS_METHODS.iter().collect()
+    }
+
+    fn process_request(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult {
+        process_request_dir_ls(self.methods().into_iter(), vec![].into_iter(), rpcmsg)
+    }
+}
 
 pub struct AppNode {
-    pub name: &'static str,
+    pub app_name: &'static str,
     pub shv_version_major: i32,
     pub shv_version_minor: i32,
+    pub dirls: DirLsNode,
 }
 impl Default for AppNode {
     fn default() -> Self {
         AppNode {
-            name: "",
+            app_name: "",
             shv_version_major: 3,
             shv_version_minor: 0,
+            dirls: DirLsNode {},
         }
     }
 }
 impl ShvNode for AppNode {
     fn methods(&self) -> Vec<&MetaMethod> {
-        DIR_LS_METHODS.iter().chain(APP_METHODS.iter()).collect()
+        self.dirls.methods().into_iter().chain(APP_METHODS.iter()).collect()
     }
 
     fn process_request(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult {
         match rpcmsg.method() {
             Some(METH_PING) => {
-                Ok(Some(RpcValue::from(())))
+                Ok((RpcValue::from(()), None))
             }
             Some(METH_NAME) => {
-                Ok(Some(RpcValue::from(self.name)))
+                Ok((RpcValue::from(self.app_name), None))
             }
             Some(METH_SHV_VERSION_MAJOR) => {
-                Ok(Some(RpcValue::from(self.shv_version_major)))
+                Ok((RpcValue::from(self.shv_version_major), None))
             }
             Some(METH_SHV_VERSION_MINOR) => {
-                Ok(Some(RpcValue::from(self.shv_version_minor)))
+                Ok((RpcValue::from(self.shv_version_minor), None))
             }
             _ => {
-                ShvNode::process_request_dir_ls(self, rpcmsg)
+                self.dirls.process_request(rpcmsg)
             }
         }
     }
 }
 
-pub struct DeviceNode {
-    pub name: &'static str,
+pub struct AppDeviceNode {
+    pub device_name: &'static str,
     pub version: &'static str,
     pub serial_number: Option<String>,
+    pub dirls: DirLsNode,
 }
-impl Default for DeviceNode {
+impl Default for AppDeviceNode {
     fn default() -> Self {
-        DeviceNode {
-            name: "",
+        AppDeviceNode {
+            device_name: "",
             version: "",
             serial_number: None,
+            dirls: DirLsNode {},
         }
     }
 }
-impl ShvNode for DeviceNode {
+impl ShvNode for AppDeviceNode {
     fn methods(&self) -> Vec<&MetaMethod> {
-        DIR_LS_METHODS.iter().chain(DEVICE_METHODS.iter()).collect()
+        self.dirls.methods().into_iter().chain(DEVICE_METHODS.iter()).collect()
     }
     fn process_request(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult {
         match rpcmsg.method() {
             Some(METH_NAME) => {
-                Ok(Some(RpcValue::from(self.name)))
+                Ok((RpcValue::from(self.device_name), None))
             }
             Some(METH_VERSION) => {
-                Ok(Some(RpcValue::from(self.version)))
+                Ok((RpcValue::from(self.version), None))
             }
             Some(METH_SERIAL_NUMBER) => {
                 match &self.serial_number {
-                    None => {Ok(None)}
-                    Some(sn) => {Ok(Some(RpcValue::from(sn)))}
+                    None => {Ok((RpcValue::null(), None))}
+                    Some(sn) => {Ok((RpcValue::from(sn), None))}
                 }
             }
             _ => {
-                ShvNode::process_request_dir_ls(self, rpcmsg)
+                self.dirls.process_request(rpcmsg)
             }
         }
     }

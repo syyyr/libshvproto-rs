@@ -88,7 +88,7 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
             }
         },
     };
-    let rpcmsg = RpcMessage::create_request(&opts.path, &opts.method, param);
+    let rpcmsg = RpcMessage::new_request(&opts.path, &opts.method, param);
     shv::connection::send_message(&mut writer, &rpcmsg).await?;
 
     let resp = frame_reader.receive_message().await?.ok_or("Receive error")?;

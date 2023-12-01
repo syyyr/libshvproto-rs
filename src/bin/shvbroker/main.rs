@@ -12,7 +12,7 @@ use shv::{RpcMessage, RpcValue};
 use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
-use shv::shvnode::{find_longest_prefix, dir_ls, ShvNode};
+use shv::shvnode::{find_longest_prefix, dir_ls, ShvNode, ProcessRequestResult};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 type Sender<T> = async_std::channel::Sender<T>;
@@ -321,7 +321,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
         peers: HashMap::new(),
         mounts: BTreeMap::new(),
     };
-    broker.mounts.insert(".app".into(), Mount::Node(Box::new(shv::shvnode::AppNode { name: "shvbroker", ..Default::default() })));
+    broker.mounts.insert(".app".into(), Mount::Node(Box::new(shv::shvnode::AppNode { app_name: "shvbroker", ..Default::default() })));
     loop {
         match events.recv().await {
             Err(e) => {
@@ -334,7 +334,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                         if frame.is_request() {
                             let shv_path = frame.shv_path().unwrap_or("").to_string();
                             let response_meta= RpcFrame::prepare_response_meta(&frame.meta);
-                            let result: Option<std::result::Result<RpcValue, String>> = if let Some((mount, node_path)) = broker.find_mount(&shv_path) {
+                            let result: Option<ProcessRequestResult> = if let Some((mount, node_path)) = broker.find_mount(&shv_path) {
                                 match mount {
                                     Mount::Device(device) => {
                                         let device_client_id = device.client_id;
@@ -347,17 +347,9 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                         if let Ok(rpcmsg) = frame.to_rpcmesage() {
                                             let mut rpcmsg2 = rpcmsg;
                                             rpcmsg2.set_shvpath(node_path);
-                                            match node.process_request(&rpcmsg2) {
-                                                Ok(res) => {
-                                                    match res {
-                                                        None => {None}
-                                                        Some(res) => {Some(Ok(res))}
-                                                    }
-                                                }
-                                                Err(err) => { Some(Err(err.to_string())) }
-                                            }
+                                            Some(node.process_request(&rpcmsg2))
                                         } else {
-                                            Some(Err(format!("Invalid shv request")))
+                                            Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
                                         }
                                     }
                                 }
@@ -365,18 +357,18 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                 if let Ok(rpcmsg) = frame.to_rpcmesage() {
                                     Some(dir_ls(&broker.mounts, rpcmsg))
                                 } else {
-                                    Some(Err(format!("Invalid shv message")))
+                                    Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
                                 }
                             };
                             if let Some(result) = result {
                                 if let Ok(meta) = response_meta {
                                     let mut resp = RpcMessage::from_meta(meta);
                                     match result {
-                                        Ok(value) => {
+                                        Ok((value, _signal)) => {
                                             resp.set_result(value);
                                         }
-                                        Err(errmsg) => {
-                                            resp.set_error(RpcError::new(RpcErrorCode::MethodCallException, &errmsg));
+                                        Err(err) => {
+                                            resp.set_error(err);
                                         }
                                     }
                                     let peer = broker.peers.get(&client_id).unwrap();
