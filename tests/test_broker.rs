@@ -2,7 +2,7 @@ extern crate shv;
 
 use std::process::{Child, Command};
 use std::{thread, time::Duration};
-use shv::{metamethod, RpcMessage, RpcValue};
+use shv::{metamethod, RpcMessage, RpcValue, rpcvalue};
 use shv::metamethod::{Flag, MetaMethod};
 use shv::shvnode::{METH_DIR, METH_LS, METH_NAME, METH_PING};
 
@@ -34,14 +34,6 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
     let mut broker_process_guard = KillProcessGuard::new(Command::new("target/debug/shvbroker").spawn()?);
     thread::sleep(Duration::from_millis(100));
     assert!(broker_process_guard.is_running());
-    let mut device_process_guard = KillProcessGuard {
-        child: Command::new("target/debug/examples/device")
-        .arg("--url").arg("tcp://admin:admin@localhost")
-        .arg("--mount").arg("test/device")
-        .spawn()?
-    };
-    thread::sleep(Duration::from_millis(100));
-    assert!(device_process_guard.is_running());
 
     fn call(path: &str, method: &str, param: &str) -> Result<RpcValue, Box<dyn std::error::Error>> {
         let output = Command::new("target/debug/shvcall")
@@ -65,10 +57,11 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
         Ok(result.clone())
     }
 
-    println!("---TEST---: .app:ls()");
+    println!("====== broker =====");
+    println!("---broker---: .app:ls()");
     assert_eq!(call("", "ls", r#"".app""#)?, RpcValue::from(true));
     {
-        println!("---TEST---: .app:dir()");
+        println!("---broker---: .app:dir()");
         let expected_methods = vec![
             MetaMethod { name: METH_DIR.into(), param: "DirParam".into(), result: "DirResult".into(), ..Default::default() },
             MetaMethod { name: METH_LS.into(), param: "LsParam".into(), result: "LsResult".into(), ..Default::default() },
@@ -89,7 +82,7 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
                 panic!("Method name '{}' is not found", xmm.name);
             }
         }
-        println!("---TEST---: .app:dir(true)");
+        println!("---broker---: .app:dir(true)");
         {
             let methods = call(".app", "dir", "true")?;
             let methods = methods.as_list();
@@ -104,7 +97,7 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
                 panic!("Method name '{}' is not found", xmm.name);
             }
         }
-        println!("---TEST---: .app:dir(\"ping\")");
+        println!("---broker---: .app:dir(\"ping\")");
         {
             let method = call(".app", "dir", r#""ping""#)?;
             assert!(method.is_imap());
@@ -112,15 +105,28 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
             assert_eq!(name, "ping");
         }
     }
-    println!("---TEST---: .app:ping()");
+    println!("---broker---: .app:ping()");
     assert_eq!(call(".app", "ping", "")?, RpcValue::null());
 
-    println!("---TEST---: test:ls()");
+
+    println!("====== device =====");
+    let mut device_process_guard = KillProcessGuard {
+        child: Command::new("target/debug/examples/device")
+            .arg("--url").arg("tcp://admin:admin@localhost")
+            .arg("--mount").arg("test/device")
+            .spawn()?
+    };
+    thread::sleep(Duration::from_millis(100));
+    assert!(device_process_guard.is_running());
+
+    println!("---broker---: test:ls()");
     assert_eq!(call("test", "ls", "")?, (vec![RpcValue::from("device")].into()));
-    println!("---TEST---: test/device:ls()");
+    println!("---broker---: test/device:ls()");
     assert_eq!(call("test/device", "ls", "")?, (vec![RpcValue::from(".app"), RpcValue::from("number")].into()));
-    println!("---TEST---: test/device/.app:ping()");
+    println!("---broker---: test/device/.app:ping()");
     assert_eq!(call("test/device/.app", "ping", "")?, RpcValue::null());
+    println!("---broker---: test/device/number:ls()");
+    assert_eq!(call("test/device/number", "ls", "")?, (rpcvalue::List::new().into()));
 
     Ok(())
 }

@@ -7,7 +7,7 @@ use async_std::{channel, io::BufReader, net::{TcpListener, TcpStream, ToSocketAd
 use rand::distributions::{Alphanumeric, DistString};
 use log::*;
 use structopt::StructOpt;
-use shv::rpcframe::RpcFrame;
+use shv::rpcframe::{join_path, RpcFrame};
 use shv::{RpcMessage, RpcValue};
 use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
@@ -275,6 +275,7 @@ enum PeerEvent {
 #[derive(Debug)]
 struct Peer {
     sender: Sender<PeerEvent>,
+    mount_point: Option<String>,
 }
 struct Device {
     client_id: CliId,
@@ -301,18 +302,30 @@ impl Broker {
         shv::connection::sha1_hash(user.as_bytes())
     }
     pub fn mount_device(&mut self, client_id: i32, device_id: Option<String>, mount_point: Option<String>) {
-        if let Some(mount_point) = mount_point {
-            if mount_point.starts_with("test/") {
-                info!("Client id: {} mounted on path: '{}'", client_id, &mount_point);
-                self.mounts.insert(mount_point, Mount::Device(Device { client_id }));
-                return;
+        if let Some(mount_path) = loop {
+            if let Some(ref mount_point) = mount_point {
+                if mount_point.starts_with("test/") {
+                    info!("Client id: {} mounted on path: '{}'", client_id, &mount_point);
+                    break Some(mount_point.clone());
+                }
             }
+            if let Some(device_id) = device_id {
+                let mount_point = "test/".to_owned() + &device_id;
+                info!("Client id: {}, device id: {} mounted on path: '{}'", client_id, device_id, &mount_point);
+                break Some(mount_point);
+            }
+            break None;
+        } {
+            if let Some(peer) = self.peers.get_mut(&client_id) {
+                peer.mount_point = Some(mount_path.clone());
+            }
+            self.mounts.insert(mount_path, Mount::Device(Device { client_id }));
         }
-        if let Some(device_id) = device_id {
-            let mount_point = "test/".to_owned() + &device_id;
-            info!("Client id: {}, device id: {} mounted on path: '{}'", client_id, device_id, &mount_point);
-            self.mounts.insert(mount_point, Mount::Device(Device { client_id }));
-            return;
+    }
+    pub fn client_id_to_mount_point(&self, client_id: CliId) -> Option<String> {
+        match self.peers.get(&client_id) {
+            None => None,
+            Some(peer) => peer.mount_point.clone()
         }
     }
 }
@@ -332,7 +345,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                 match event {
                     ClientEvent::Frame { client_id, mut frame} => {
                         if frame.is_request() {
-                            let shv_path = frame.shv_path().unwrap_or("").to_string();
+                            let shv_path = frame.shv_path_or_empty().to_string();
                             let response_meta= RpcFrame::prepare_response_meta(&frame.meta);
                             let result: Option<ProcessRequestResult> = if let Some((mount, node_path)) = broker.find_mount(&shv_path) {
                                 match mount {
@@ -380,6 +393,18 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                 let peer = broker.peers.get(&client_id).unwrap();
                                 peer.sender.send(PeerEvent::Frame(frame)).await.unwrap();
                             }
+                        } else if frame.is_signal() {
+                            // send signal to all clients until subscribe method will be implemented
+                            if let Some(mount_point) = broker.client_id_to_mount_point(client_id) {
+                                let new_path = join_path(&mount_point, frame.shv_path_or_empty());
+                                for (cli_id, peer) in broker.peers.iter() {
+                                    let mut frame = frame.clone();
+                                    frame.set_shvpath(&new_path);
+                                    if &client_id != cli_id {
+                                        peer.sender.send(PeerEvent::Frame(frame)).await.unwrap();
+                                    }
+                                }
+                            }
                         }
                     }
                     ClientEvent::NewClient { client_id, sender } => match broker.peers.entry(client_id) {
@@ -387,6 +412,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                         Entry::Vacant(entry) => {
                             entry.insert(Peer {
                                 sender,
+                                mount_point: None,
                             });
                         }
                     },
@@ -395,18 +421,8 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                     },
                     ClientEvent::ClientGone { client_id } => {
                         broker.peers.remove(&client_id);
-                        let mount = if let Some((path, _)) = broker.mounts.iter().find(|(_, v)| {
-                            match v {
-                                Mount::Device(dev) => {dev.client_id == client_id}
-                                Mount::Node(_) => {false}
-                            }
-                        }) {
-                            Some(path.clone())
-                        } else {
-                            None
-                        };
-                        if let Some(path) = mount {
-                            info!("Client id: {} disconnected, unmounting path: '{}'", client_id, &path);
+                        if let Some(path) = broker.client_id_to_mount_point(client_id) {
+                            info!("Client id: {} disconnected, unmounting path: '{}'", client_id, path);
                             broker.mounts.remove(&path);
                         }
                     }
@@ -414,7 +430,6 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                         let shapwd = broker.sha_password(&user);
                         let peer = broker.peers.get(&client_id).unwrap();
                         peer.sender.send(PeerEvent::PasswordSha1(shapwd)).await.unwrap();
-
                     }
                 }
             }
