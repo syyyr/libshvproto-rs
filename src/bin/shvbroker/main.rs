@@ -13,14 +13,13 @@ use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
 use shv::shvnode::{find_longest_prefix, dir_ls, ShvNode, ProcessRequestResult};
+use crate::config::{Config, default_config};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 type Sender<T> = async_std::channel::Sender<T>;
 type Receiver<T> = async_std::channel::Receiver<T>;
 
-#[derive(Debug)]
-enum Void {}
-
+mod config;
 #[derive(StructOpt, Debug)]
 #[structopt()]
 struct Opt {
@@ -276,6 +275,17 @@ enum PeerEvent {
 struct Peer {
     sender: Sender<PeerEvent>,
     mount_point: Option<String>,
+    subscriptions: Vec<Subscription>,
+}
+impl Peer {
+    fn is_signal_subscribed(&self, path: &str, method: &str) -> bool {
+        for subs in self.subscriptions.iter() {
+            if subs.match_signal(path, method) {
+                return true;
+            }
+        }
+        false
+    }
 }
 struct Device {
     client_id: CliId,
@@ -285,9 +295,34 @@ enum Mount {
     Device(Device),
     Node(Node),
 }
+#[derive(Debug)]
+struct PathPattern(String);
+impl PathPattern {
+    fn match_glob(&self, _: &str) -> bool {
+        return true
+    }
+}
+#[derive(Debug)]
+struct MethodPattern(String);
+impl MethodPattern {
+    fn match_glob(&self, _: &str) -> bool {
+        return true
+    }
+}
+#[derive(Debug)]
+struct Subscription {
+    path: PathPattern,
+    method: MethodPattern,
+}
+impl Subscription {
+    fn match_signal(&self, path: &str, method: &str) -> bool {
+        self.path.match_glob(path) && self.method.match_glob(method)
+    }
+}
 struct Broker {
     peers: HashMap<CliId, Peer>,
     mounts: BTreeMap<String, Mount>,
+    config: Config,
 }
 
 impl Broker {
@@ -333,6 +368,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
     let mut broker = Broker {
         peers: HashMap::new(),
         mounts: BTreeMap::new(),
+        config: default_config(),
     };
     broker.mounts.insert(".app".into(), Mount::Node(Box::new(shv::shvnode::AppNode { app_name: "shvbroker", ..Default::default() })));
     loop {
@@ -398,10 +434,12 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                             if let Some(mount_point) = broker.client_id_to_mount_point(client_id) {
                                 let new_path = join_path(&mount_point, frame.shv_path_or_empty());
                                 for (cli_id, peer) in broker.peers.iter() {
-                                    let mut frame = frame.clone();
-                                    frame.set_shvpath(&new_path);
                                     if &client_id != cli_id {
-                                        peer.sender.send(PeerEvent::Frame(frame)).await.unwrap();
+                                        if peer.is_signal_subscribed(frame.shv_path_or_empty(), frame.method().unwrap_or("")) {
+                                            let mut frame = frame.clone();
+                                            frame.set_shvpath(&new_path);
+                                            peer.sender.send(PeerEvent::Frame(frame)).await.unwrap();
+                                        }
                                     }
                                 }
                             }
@@ -413,6 +451,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                             entry.insert(Peer {
                                 sender,
                                 mount_point: None,
+                                subscriptions: vec![],
                             });
                         }
                     },
