@@ -22,8 +22,7 @@ pub enum Tag {
     CallerIds, // 11
     ProtocolType, //needed when destination client is using different version than source one to translate raw message data to correct format
     RevCallerIds,
-    AccessGrant,
-    TunnelCtl,
+    Access,
     UserId,
     MAX
 }
@@ -249,6 +248,16 @@ pub trait RpcMessageMetaTags {
     fn set_method(&mut self, method: &str) -> &mut Self::Target {
         self.set_tag(Tag::Method as i32, Some(RpcValue::from(method)))
     }
+    fn access(&self) -> Option<&str> {
+        let t = self.tag(Tag::Access as i32);
+        match t {
+            None => None,
+            Some(rv) => Some(rv.as_str()),
+        }
+    }
+    fn set_access(&mut self, grant: &str) -> &mut Self::Target {
+        self.set_tag(Tag::Access as i32, Some(RpcValue::from(grant)))
+    }
 
     fn caller_ids(&self) -> Vec<CliId> {
         let t = self.tag(Tag::CallerIds as i32);
@@ -338,6 +347,7 @@ pub enum RpcErrorCode {
     MethodCallTimeout,
     MethodCallCancelled,
     MethodCallException,
+    PermissionDenied,
     Unknown,
     UserCode = 32
 }
@@ -353,6 +363,7 @@ impl Display for RpcErrorCode {
             RpcErrorCode::MethodCallTimeout => {"MethodCallTimeout"}
             RpcErrorCode::MethodCallCancelled => {"MethodCallCancelled"}
             RpcErrorCode::MethodCallException => {"MethodCallException"}
+            RpcErrorCode::PermissionDenied => {"PermissionDenied"}
             RpcErrorCode::Unknown => {"Unknown"}
             RpcErrorCode::UserCode => {"UserCode"}
         };
