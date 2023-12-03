@@ -113,17 +113,6 @@ impl RpcFrame {
         Err("Not RPC Request")
     }
 }
-pub fn join_path(p1: &str, p2: &str) -> String {
-    if p1.is_empty() && p2.is_empty() {
-        "".to_string()
-    } else if p1.is_empty() {
-        p2.to_string()
-    } else if p2.is_empty() {
-        p1.to_string()
-    } else {
-        p1.to_string() + "/" + p2
-    }
-}
 impl fmt::Display for RpcFrame {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         write!(fmt, "{{proto:{}, meta:{}, data len: {}}}", self.protocol, self.meta, self.data.len())

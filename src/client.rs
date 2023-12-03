@@ -2,6 +2,7 @@ use std::time::Duration;
 use async_std::io;
 use crate::{RpcMessage, RpcValue};
 use crate::connection::FrameReader;
+use crate::util::sha1_password_hash;
 
 #[derive(Copy, Clone, Debug)]
 pub enum LoginType {
@@ -88,7 +89,7 @@ where R: io::Read + std::marker::Unpin,
     }
     let nonce = resp.result()?.as_map()
         .get("nonce").ok_or("Bad nonce")?.as_str();
-    let hash = crate::connection::sha1_password_hash(login_params.password.as_bytes(), nonce.as_bytes());
+    let hash = sha1_password_hash(login_params.password.as_bytes(), nonce.as_bytes());
     let mut login_params = login_params.clone();
     login_params.password = std::str::from_utf8(&hash)?.into();
     let rq = RpcMessage::new_request("", "login", Some(login_params.to_rpcvalue()));

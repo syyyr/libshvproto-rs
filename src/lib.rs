@@ -6,7 +6,7 @@ pub mod rpcvalue;
 pub mod rpctype;
 pub mod rpcframe;
 pub mod rpcmessage;
-
+pub mod util;
 pub mod reader;
 pub mod writer;
 pub mod cpon;

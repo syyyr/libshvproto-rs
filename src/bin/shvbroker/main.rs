@@ -7,13 +7,14 @@ use async_std::{channel, io::BufReader, net::{TcpListener, TcpStream, ToSocketAd
 use rand::distributions::{Alphanumeric, DistString};
 use log::*;
 use structopt::StructOpt;
-use shv::rpcframe::{join_path, RpcFrame};
-use shv::{RpcMessage, RpcValue};
+use shv::rpcframe::{RpcFrame};
+use shv::{RpcMessage, RpcValue, util};
 use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
 use shv::shvnode::{find_longest_prefix, dir_ls, ShvNode, ProcessRequestResult};
-use crate::config::{Config, default_config};
+use shv::util::{glob_match, sha1_hash};
+use crate::config::{Config, default_config, Password};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 type Sender<T> = async_std::channel::Sender<T>;
@@ -130,17 +131,22 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                     match peer_receiver.recv().await? {
                         PeerEvent::PasswordSha1(broker_shapass) => {
                             let chkpwd = || {
-                                if login_type == "PLAIN" {
-                                    let client_shapass = shv::connection::sha1_hash(password.as_bytes());
-                                    client_shapass == broker_shapass
-                                } else {
-                                    //info!("nonce: {}", nonce);
-                                    //info!("broker password: {}", std::str::from_utf8(&broker_shapass).unwrap());
-                                    //info!("client password: {}", password);
-                                    let mut data = nonce.as_bytes().to_vec();
-                                    data.extend_from_slice(&broker_shapass[..]);
-                                    let broker_shapass = shv::connection::sha1_hash(&data);
-                                    password.as_bytes() == broker_shapass
+                                match broker_shapass {
+                                    None => {false}
+                                    Some(broker_shapass) => {
+                                        if login_type == "PLAIN" {
+                                            let client_shapass = sha1_hash(password.as_bytes());
+                                            client_shapass == broker_shapass
+                                        } else {
+                                            //info!("nonce: {}", nonce);
+                                            //info!("broker password: {}", std::str::from_utf8(&broker_shapass).unwrap());
+                                            //info!("client password: {}", password);
+                                            let mut data = nonce.as_bytes().to_vec();
+                                            data.extend_from_slice(&broker_shapass[..]);
+                                            let broker_shapass = sha1_hash(&data);
+                                            password.as_bytes() == broker_shapass
+                                        }
+                                    }
                                 }
                             };
                             if chkpwd() {
@@ -154,7 +160,7 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                                 }
                                 crate::Result::Ok(LoginResult::Ok)
                             } else {
-                                send_error(resp, frame_writer, &format!("Invalid login credentials received.")).await?;
+                                send_error(resp, frame_writer, &format!("Invalid login credentials.")).await?;
                                 Ok(LoginResult::LoginError)
                             }
                         }
@@ -266,7 +272,7 @@ enum ClientEvent {
 
 #[derive(Debug)]
 enum PeerEvent {
-    PasswordSha1(Vec<u8>),
+    PasswordSha1(Option<Vec<u8>>),
     Frame(RpcFrame),
     Message(RpcMessage),
     //FatalError(String),
@@ -334,8 +340,20 @@ impl Broker {
             None
         }
     }
-    pub fn sha_password(&self, user: &str) -> Vec<u8> {
-        shv::connection::sha1_hash(user.as_bytes())
+    pub fn sha_password(&self, user: &str) -> Option<Vec<u8>> {
+        match self.config.users.get(user) {
+            None => None,
+            Some(user) => {
+                match &user.password {
+                    Password::Plain(password) => {
+                        Some(sha1_hash(password.as_bytes()))
+                    }
+                    Password::Sha1(password) => {
+                        Some(password.as_bytes().into())
+                    }
+                }
+            }
+        }
     }
     pub fn mount_device(&mut self, client_id: i32, device_id: Option<String>, mount_point: Option<String>) {
         if let Some(mount_path) = loop {
@@ -364,13 +382,60 @@ impl Broker {
             Some(peer) => peer.mount_point.clone()
         }
     }
-    fn request_to_grant(&self, client_id: CliId, frame: &RpcFrame) -> Option<String> {
+    fn flatten_roles_helper<'a>(&'a self, flatten_roles: Vec<&'a str>) -> Vec<&'a str> {
+        fn add_unique_role<'a, 'b>(roles: &'b mut Vec<&'a str>, role: &'a str) {
+            for r in roles.iter() {
+                if r == &role {
+                    return;
+                }
+            }
+            roles.push(role);
+        }
+        let mut new_roles = flatten_roles.clone();
+        for role in flatten_roles {
+            if let Some(cfg_role) = self.config.roles.get(role) {
+                for r2 in &cfg_role.roles {
+                    add_unique_role(&mut new_roles, r2);
+                }
+            }
+        }
+        new_roles
+    }
+    fn flatten_roles(&self, user: &str) -> Option<Vec<&str>> {
+        if let Some(user) = self.config.users.get(user) {
+            let flatten_roles: Vec<&str> = user.roles.iter().map(|s| s.as_str()).collect();
+            Some(self.flatten_roles_helper(flatten_roles))
+        } else {
+            None
+        }
+    }
+    fn grant_for_request(&self, client_id: CliId, frame: &RpcFrame) -> Option<String> {
+        log!(target: "Acl", Level::Info, "======================= grant_for_request {}", &frame);
         let shv_path = frame.shv_path_or_empty();
         let method = frame.method().unwrap_or("");
         if method.is_empty() {
             None
         } else {
-            Some("su".to_string())
+            if let Some(peer) = self.peers.get(&client_id) {
+                if let Some(flatten_roles) = self.flatten_roles(&peer.user) {
+                    log!(target: "Acl", Level::Info, "user: {}, flatten roles: {:?}", &peer.user, flatten_roles);
+                    for role_name in flatten_roles {
+                        if let Some(role) = self.config.roles.get(role_name) {
+                            log!(target: "Acl", Level::Info, "----------- access for role: {}", role_name);
+                            for rule in &role.access {
+                                log!(target: "Acl", Level::Info, "\trule: {}:{}", rule.path, rule.method);
+                                if rule.method.is_empty() || &rule.method == method {
+                                    if glob_match(shv_path, &rule.path) {
+                                        log!(target: "Acl", Level::Info, "\t\t HIT");
+                                        return Some(rule.grant.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            None
         }
     }
 }
@@ -393,7 +458,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                         if frame.is_request() {
                             let shv_path = frame.shv_path_or_empty().to_string();
                             let response_meta= RpcFrame::prepare_response_meta(&frame.meta);
-                            let result: Option<ProcessRequestResult> = match broker.request_to_grant(client_id, &frame) {
+                            let result: Option<ProcessRequestResult> = match broker.grant_for_request(client_id, &frame) {
                                 None => {
                                     Some(Err(RpcError::new(RpcErrorCode::PermissionDenied, &format!("Cannot resolve call method grant for current user."))))
                                 }
@@ -451,7 +516,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                         } else if frame.is_signal() {
                             // send signal to all clients until subscribe method will be implemented
                             if let Some(mount_point) = broker.client_id_to_mount_point(client_id) {
-                                let new_path = join_path(&mount_point, frame.shv_path_or_empty());
+                                let new_path = util::join_path(&mount_point, frame.shv_path_or_empty());
                                 for (cli_id, peer) in broker.peers.iter() {
                                     if &client_id != cli_id {
                                         if peer.is_signal_subscribed(frame.shv_path_or_empty(), frame.method().unwrap_or("")) {

@@ -3,7 +3,6 @@ use async_std::io;
 use crate::rpcframe::{Protocol, RpcFrame};
 use futures::{AsyncReadExt, AsyncWriteExt};
 use log::*;
-use sha1::{Sha1, Digest};
 use crate::{ChainPackWriter, RpcMessage};
 // use log::*;
 
@@ -137,15 +136,4 @@ pub async fn call_rpc_method(&self, request: RpcMessage) -> crate::Result<RpcMes
 }
 
  */
-pub fn sha1_hash(data: &[u8]) -> Vec<u8> {
-    let mut hasher = Sha1::new();
-    hasher.update(data);
-    let result = hasher.finalize();
-    return hex::encode(&result[..]).as_bytes().to_vec();
-}
-pub fn sha1_password_hash(password: &[u8], nonce: &[u8]) -> Vec<u8> {
-    let mut hash = sha1_hash(password);
-    let mut nonce_pass= nonce.to_vec();
-    nonce_pass.append(&mut hash);
-    return sha1_hash(&nonce_pass);
-}
+
