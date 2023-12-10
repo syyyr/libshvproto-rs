@@ -1,4 +1,5 @@
-use crate::{RpcValue, rpcvalue};
+use crate::{RpcMessage, RpcValue, rpcvalue};
+use crate::rpcmessage::RpcError;
 
 #[derive(Debug)]
 pub enum Flag {
@@ -43,17 +44,23 @@ impl From<&str> for Access {
         }
     }
 }
-
+pub struct Signal {
+    pub value: RpcValue,
+    pub method: &'static str,
+}
+pub type ProcessRequestResult = std::result::Result<(RpcValue, Option<Signal>), RpcError>;
+type RequestHandler<K> = fn(rq: &RpcMessage, handler: &mut K) -> ProcessRequestResult;
 #[derive(Debug)]
-pub struct MetaMethod {
+pub struct MetaMethod<K> {
     pub name: String,
     pub flags: u32,
     pub access: Access,
     pub param: String,
     pub result: String,
     pub description: String,
+    pub handler: Option<RequestHandler<K>>,
 }
-impl Default for MetaMethod {
+impl<K> Default for MetaMethod<K> {
     fn default() -> Self {
         MetaMethod {
             name: "".to_string(),
@@ -62,6 +69,7 @@ impl Default for MetaMethod {
             param: "".to_string(),
             result: "".to_string(),
             description: "".to_string(),
+            handler: None,
         }
     }
 }
@@ -70,7 +78,7 @@ pub enum DirFormat {
     IMap,
     Map,
 }
-impl MetaMethod {
+impl<K> MetaMethod<K> {
     pub fn to_rpcvalue(&self, fmt: DirFormat) -> RpcValue {
         match fmt {
             DirFormat::IMap => {
