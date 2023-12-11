@@ -11,21 +11,21 @@ lazy_static! {
     ];
 }
 pub(crate) struct AppBrokerNode {}
-impl ShvNode for AppBrokerNode {
+impl ShvNode<crate::Broker> for AppBrokerNode {
     fn methods(&self) -> Vec<&MetaMethod> {
         DIR_LS_METHODS.iter().chain(APP_BROKER_METHODS.iter()).collect()
     }
 
-    fn process_request(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult {
+    fn process_request(&mut self, rpcmsg: &RpcMessage, broker: &mut crate::Broker) -> ProcessRequestResult {
         match rpcmsg.method() {
             Some(METH_CLIENT_INFO) => {
-                Ok((RpcValue::from(()), None))
+                //Ok((RpcValue::from(state.broker.client_info(state.callerClientId)), None))
+                Ok((RpcValue::from(broker.client_info(0).unwrap_or_default()), None))
             }
             _ => {
-                ShvNode::process_request_dir_ls(self, rpcmsg)
+                ShvNode::<crate::Broker>::process_dir_ls(self, rpcmsg)
             }
         }
     }
 }
 
-pub(crate) struct CurrentClientNode {}

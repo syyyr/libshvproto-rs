@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 
 pub struct Config {
+    #[allow(dead_code)]
     listen: Listen,
     pub users: HashMap<String, User>,
     pub roles: HashMap<String, Role>,
 }
 struct Listen {
+    #[allow(dead_code)]
     tcp: String,
 }
 pub struct User {

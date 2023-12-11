@@ -12,8 +12,6 @@ use shv::{RpcMessage, RpcValue, rpcvalue, util};
 use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
-use node::AppBrokerNode;
-use shv::metamethod::MetaMethod;
 use shv::shvnode::{find_longest_prefix, dir_ls, ShvNode, ProcessRequestResult};
 use shv::util::{glob_match, sha1_hash};
 use crate::config::{Config, default_config, Password};
@@ -300,17 +298,10 @@ impl Peer {
 struct Device {
     client_id: CliId,
 }
-//type Node = Box<dyn ShvNode + Send + Sync>;
-struct Method<'a> {
-    method: &'a MetaMethod,
-    handler: fn(broker_state: &mut Broker, rq: &RpcMessage) -> ProcessRequestResult,
-}
-struct Node<'a> {
-    methods: Vec<Method<'a>>,
-}
-enum Mount {
+type Node<K> = Box<dyn ShvNode<K> + Send + Sync>;
+enum Mount<K> {
     Device(Device),
-    Node(Node),
+    Node(Node<K>),
 }
 #[derive(Debug)]
 struct PathPattern(String);
@@ -341,7 +332,7 @@ struct Broker {
     config: Config,
 }
 
-fn find_mount<'a, 'b>(mounts: &'a mut BTreeMap<String, Mount>, shv_path: &'b str) -> Option<(&'a mut Mount, &'b str)> {
+fn find_mount<'a, 'b, K>(mounts: &'a mut BTreeMap<String, Mount<K>>, shv_path: &'b str) -> Option<(&'a mut Mount<K>, &'b str)> {
     if let Some((mount_dir, node_dir)) = find_longest_prefix(mounts, shv_path) {
         Some((mounts.get_mut(mount_dir).unwrap(), node_dir))
     } else {
@@ -365,7 +356,7 @@ impl Broker {
             }
         }
     }
-    pub fn mount_device(&mut self, mounts: &mut BTreeMap<String, Mount>, client_id: i32, device_id: Option<String>, mount_point: Option<String>) {
+    pub fn mount_device<K>(&mut self, mounts: &mut BTreeMap<String, Mount<K>>, client_id: i32, device_id: Option<String>, mount_point: Option<String>) {
         if let Some(mount_path) = loop {
             if let Some(ref mount_point) = mount_point {
                 if mount_point.starts_with("test/") {
@@ -448,10 +439,24 @@ impl Broker {
             None
         }
     }
-    fn client_info(&mut self, client_id: CliId) -> Option<rpcvalue::Map> {
-        Some(rpcvalue::Map::from([]))
+    pub fn client_info(&mut self, client_id: CliId) -> Option<rpcvalue::Map> {
+        match self.peers.get(&client_id) {
+            None => { None }
+            Some(peer) => {
+                Some(rpcvalue::Map::from([
+                    ("clientId".to_string(), client_id.into()),
+                    ("userName".to_string(), RpcValue::from(&peer.user)),
+                    ("mountPoint".to_string(), RpcValue::from(peer.mount_point.clone().unwrap_or_default())),
+                    ("subscriptions".to_string(), "NIY".into()),
+                ]
+                )) }
+        }
     }
 }
+//struct BrokerState<'a> {
+//    broker: &'a mut Broker,
+//    callerClientId: CliId,
+//}
 async fn broker_loop(events: Receiver<ClientEvent>) {
     let mut mounts= BTreeMap::new();
     let mut broker = Broker {
@@ -493,8 +498,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                                     let mut rpcmsg2 = rpcmsg;
                                                     rpcmsg2.set_shvpath(node_path);
                                                     rpcmsg2.set_access(&grant);
-                                                    let client_info = broker.client_info(client_id);
-                                                    Some(node.process_request(&rpcmsg2))
+                                                    Some(node.process_request(&rpcmsg2, &mut broker))
                                                 } else {
                                                     Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
                                                 }

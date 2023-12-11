@@ -57,6 +57,7 @@ pub(crate) fn main() -> shv::Result<()> {
     task::block_on(try_main(&url, &opts))
 }
 
+struct State {}
 async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
 
     // Establish a connection
@@ -77,7 +78,9 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     };
     client::login(&mut frame_reader, &mut writer, &login_params).await?;
 
-    let mut mounts: BTreeMap<String, Box<dyn ShvNode>> = BTreeMap::new();
+
+    let mut state = State{};
+    let mut mounts: BTreeMap<String, Box<dyn ShvNode<State>>> = BTreeMap::new();
     mounts.insert(".app".into(), Box::new(AppNode { app_name: "device", ..Default::default() }));
     mounts.insert(".app/device".into(), Box::new(AppDeviceNode { device_name: "example", ..Default::default() }));
     mounts.insert("number".into(), Box::new(IntPropertyNode::new(0)));
@@ -99,7 +102,7 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
                         let result = if let Some((mount, path)) = find_longest_prefix(&mounts, &shv_path) {
                             let node = mounts.get_mut(mount).unwrap();
                             rpcmsg.set_shvpath(path);
-                            node.process_request(&rpcmsg)
+                            node.process_request(&rpcmsg, &mut state)
                         } else {
                             dir_ls(&mounts, rpcmsg)
                         };
@@ -150,12 +153,12 @@ impl IntPropertyNode {
         IntPropertyNode { val }
     }
 }
-impl ShvNode for IntPropertyNode {
+impl<K> ShvNode<K> for IntPropertyNode {
     fn methods(&self) -> Vec<&MetaMethod> {
         DIR_LS_METHODS.iter().chain(PROPERTY_METHODS.iter()).collect()
     }
 
-    fn process_request(&mut self, rq: &RpcMessage) -> ProcessRequestResult {
+    fn process_request(&mut self, rq: &RpcMessage, _state: &mut K) -> ProcessRequestResult {
         match rq.method() {
             Some(METH_GET) => {
                 Ok((self.val.into(), None))
@@ -179,7 +182,7 @@ impl ShvNode for IntPropertyNode {
                 }
             }
             _ => {
-                ShvNode::process_request_dir_ls(self, rq)
+                ShvNode::<K>::process_dir_ls(self, rq)
             }
         }
     }

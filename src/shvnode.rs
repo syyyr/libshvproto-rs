@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::format;
 use lazy_static::lazy_static;
 use log::warn;
-use crate::metamethod::{Flag, MetaMethod, ProcessRequestResult};
+use crate::metamethod::{Flag, MetaMethod};
 use crate::{metamethod, RpcMessage, RpcMessageMetaTags, RpcValue, rpcvalue};
 use crate::rpcmessage::{RpcError, RpcErrorCode};
 
@@ -32,7 +32,7 @@ impl From<Option<&RpcValue>> for DirParam {
     }
 }
 
-pub fn dir<'a, K>(methods: impl Iterator<Item=&'a MetaMethod<K>>, param: DirParam) -> RpcValue {
+pub fn dir<'a>(methods: impl Iterator<Item=&'a MetaMethod>, param: DirParam) -> RpcValue {
     let mut result = RpcValue::null();
     let mut lst = rpcvalue::List::new();
     for mm in methods {
@@ -212,11 +212,16 @@ pub fn find_longest_prefix<'a, 'b, V>(map: &'a BTreeMap<String, V>, shv_path: &'
 //         Err(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
 //     }
 // }
-
+pub struct Signal {
+    pub value: RpcValue,
+    pub method: &'static str,
+}
+pub type ProcessRequestResult = std::result::Result<(RpcValue, Option<Signal>), RpcError>;
+// type RequestHandler<S, K> = fn(this: &mut S, rq: &RpcMessage, state: &mut K) -> ProcessRequestResult;
 pub trait ShvNode<K> {
-    fn methods(&self) -> Vec<&MetaMethod<K>>;
+    fn methods(&self) -> Vec<&MetaMethod>;
     fn process_request(&mut self, rq: &RpcMessage, state: &mut K) -> ProcessRequestResult;
-    fn process_dir_ls(&mut self, rq: &RpcMessage, state: &mut K) -> ProcessRequestResult {
+    fn process_dir_ls(&mut self, rq: &RpcMessage) -> ProcessRequestResult {
         match rq.method() {
             Some(METH_DIR) => {
                 self.process_dir(rq)
@@ -273,16 +278,16 @@ pub const METH_VERSION: &str = "version";
 pub const METH_SERIAL_NUMBER: &str = "serialNumber";
 
 lazy_static! {
-    pub static ref DIR_LS_METHODS: [MetaMethod<()>; 2] = [
+    pub static ref DIR_LS_METHODS: [MetaMethod; 2] = [
         MetaMethod { name: METH_DIR.into(), param: "DirParam".into(), result: "DirResult".into(), ..Default::default() },
         MetaMethod { name: METH_LS.into(), param: "LsParam".into(), result: "LsResult".into(), ..Default::default() },
     ];
-    static ref PROPERTY_METHODS: [MetaMethod<()>; 3] = [
+    static ref PROPERTY_METHODS: [MetaMethod; 3] = [
         MetaMethod { name: METH_GET.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
         MetaMethod { name: METH_SET.into(), flags: Flag::IsSetter.into(),  ..Default::default() },
         MetaMethod { name: SIG_CHNG.into(), flags: Flag::IsSignal.into(),  ..Default::default() },
     ];
-    static ref DEVICE_METHODS: [MetaMethod<()>; 3] = [
+    static ref DEVICE_METHODS: [MetaMethod; 3] = [
         MetaMethod { name: METH_NAME.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
         MetaMethod { name: METH_VERSION.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
         MetaMethod { name: METH_SERIAL_NUMBER.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
@@ -302,15 +307,9 @@ impl Default for AppNode {
         }
     }
 }
-impl<K> AppNode {
-    fn shv_version_major(rq: &RpcMessage, _handler: &mut K) -> ProcessRequestResult {
-        Ok((RpcValue::from(()), None))
-    }
-}
-
 lazy_static! {
-    static ref APP_METHODS: [MetaMethod<()>; 4] = [
-        MetaMethod { name: METH_SHV_VERSION_MAJOR.into(), flags: Flag::IsGetter.into(), handler: Some(),  ..Default::default() },
+    static ref APP_METHODS: [MetaMethod; 4] = [
+        MetaMethod { name: METH_SHV_VERSION_MAJOR.into(), flags: Flag::IsGetter.into(), ..Default::default() },
         MetaMethod { name: METH_SHV_VERSION_MINOR.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
         MetaMethod { name: METH_NAME.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
         MetaMethod { name: METH_PING.into(), ..Default::default() },
@@ -318,21 +317,21 @@ lazy_static! {
 }
 
 impl<K> ShvNode<K> for AppNode {
-    fn methods(&self) -> Vec<&MetaMethod<K>> {
+    fn methods(&self) -> Vec<&MetaMethod> {
         APP_METHODS.iter().collect()
     }
 
-    fn process_request(&mut self, rq: &RpcMessage, state: &mut K) -> ProcessRequestResult {
-        if let Some(method) = rq.method() {
-            if rq.shv_path_or_empty().is_empty() {
-                if let Some(mm) = self.methods().into_iter().find(|mm| mm.name == method) {
-                    if let Some(handler) = mm.handler {
-                        handler(rq, state)
-                    }
-                }
+    fn process_request(&mut self, rq: &RpcMessage, _state: &mut K) -> ProcessRequestResult {
+        if rq.shv_path_or_empty().is_empty() {
+            match rq.method() {
+                Some(METH_SHV_VERSION_MAJOR) => { return Ok((self.shv_version_major.into(), None))  }
+                Some(METH_SHV_VERSION_MINOR) => { return Ok((self.shv_version_minor.into(), None))  }
+                Some(METH_NAME) => { return Ok((RpcValue::from(self.app_name), None))  }
+                Some(METH_PING) => { return Ok((().into(), None))  }
+                _ => {}
             }
         }
-        self.process_dir_ls(rq, state);
+        <AppNode as ShvNode<K>>::process_dir_ls(self, rq)
     }
 }
 pub struct AppDeviceNode {
@@ -350,30 +349,29 @@ impl Default for AppDeviceNode {
     }
 }
 impl<K> ShvNode<K> for AppDeviceNode {
-    fn methods(&self) -> Vec<&MetaMethod<K>> {
+    fn methods(&self) -> Vec<&MetaMethod> {
         DEVICE_METHODS.iter().collect()
     }
 
-    fn process_request(&mut self, rq: &RpcMessage, state: &mut K) -> ProcessRequestResult {
-        todo!()
+    fn process_request(&mut self, rq: &RpcMessage, _state: &mut K) -> ProcessRequestResult {
+        if rq.shv_path_or_empty().is_empty() {
+            match rq.method() {
+                Some(METH_NAME) => {
+                    return Ok((RpcValue::from(self.device_name), None))
+                }
+                Some(METH_VERSION) => {
+                    return Ok((RpcValue::from(self.version), None))
+                }
+                Some(METH_SERIAL_NUMBER) => {
+                    match &self.serial_number {
+                        None => {return Ok((RpcValue::null(), None))}
+                        Some(sn) => {return Ok((RpcValue::from(sn), None))}
+                    }
+                }
+                _ => {
+                }
+            }
+        }
+        ShvNode::<K>::process_dir_ls(self, rq)
     }
-    //fn process_request(&mut self, rpcmsg: &RpcMessage) -> ProcessRequestResult {
-    //    match rpcmsg.method() {
-    //        Some(METH_NAME) => {
-    //            Ok((RpcValue::from(self.device_name), None))
-    //        }
-    //        Some(METH_VERSION) => {
-    //            Ok((RpcValue::from(self.version), None))
-    //        }
-    //        Some(METH_SERIAL_NUMBER) => {
-    //            match &self.serial_number {
-    //                None => {Ok((RpcValue::null(), None))}
-    //                Some(sn) => {Ok((RpcValue::from(sn), None))}
-    //            }
-    //        }
-    //        _ => {
-    //            ShvNode::process_request_dir_ls(self, rpcmsg)
-    //        }
-    //    }
-    //}
 }
