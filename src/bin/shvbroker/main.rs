@@ -327,9 +327,13 @@ impl Subscription {
         self.path.match_glob(path) && self.method.match_glob(method)
     }
 }
+struct RequestContext {
+    caller_client_id: CliId,
+}
 struct Broker {
     peers: HashMap<CliId, Peer>,
     config: Config,
+    request_context: RequestContext,
 }
 
 fn find_mount<'a, 'b, K>(mounts: &'a mut BTreeMap<String, Mount<K>>, shv_path: &'b str) -> Option<(&'a mut Mount<K>, &'b str)> {
@@ -453,19 +457,16 @@ impl Broker {
         }
     }
 }
-//struct BrokerState<'a> {
-//    broker: &'a mut Broker,
-//    callerClientId: CliId,
-//}
 async fn broker_loop(events: Receiver<ClientEvent>) {
     let mut mounts= BTreeMap::new();
     let mut broker = Broker {
         peers: HashMap::new(),
         config: default_config(),
+        request_context: RequestContext { caller_client_id: 0 },
     };
     mounts.insert(".app".into(), Mount::Node(Box::new(shv::shvnode::AppNode { app_name: "shvbroker", ..Default::default() })));
     mounts.insert(".app/broker".into(), Mount::Node(Box::new(node::AppBrokerNode {  })));
-    //broker.mounts.insert(".app/broker/currentClient".into(), Mount::Node(Box::new(node::CurrentClientNode {  })));
+    mounts.insert(".app/broker/currentClient".into(), Mount::Node(Box::new(node::AppBrokerCurrentClientNode {  })));
     loop {
         match events.recv().await {
             Err(e) => {
@@ -498,6 +499,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                                     let mut rpcmsg2 = rpcmsg;
                                                     rpcmsg2.set_shvpath(node_path);
                                                     rpcmsg2.set_access(&grant);
+                                                    broker.request_context.caller_client_id = client_id;
                                                     Some(node.process_request(&rpcmsg2, &mut broker))
                                                 } else {
                                                     Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
