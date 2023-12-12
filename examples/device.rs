@@ -57,7 +57,10 @@ pub(crate) fn main() -> shv::Result<()> {
     task::block_on(try_main(&url, &opts))
 }
 
-struct State {}
+struct DeviceState {
+    int_prop: i32,
+}
+
 async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
 
     // Establish a connection
@@ -79,11 +82,11 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     client::login(&mut frame_reader, &mut writer, &login_params).await?;
 
 
-    let mut state = State{};
-    let mut mounts: BTreeMap<String, Box<dyn ShvNode<State>>> = BTreeMap::new();
+    let mut device_state = DeviceState { int_prop: 0 };
+    let mut mounts: BTreeMap<String, Box<dyn ShvNode<DeviceState>>> = BTreeMap::new();
     mounts.insert(".app".into(), Box::new(AppNode { app_name: "device", ..Default::default() }));
     mounts.insert(".app/device".into(), Box::new(AppDeviceNode { device_name: "example", ..Default::default() }));
-    mounts.insert("number".into(), Box::new(IntPropertyNode::new(0)));
+    mounts.insert("number".into(), Box::new(IntPropertyNode{}));
     loop {
         match frame_reader.receive_frame().await {
             Err(e) => {
@@ -102,7 +105,7 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
                         let result = if let Some((mount, path)) = find_longest_prefix(&mounts, &shv_path) {
                             let node = mounts.get_mut(mount).unwrap();
                             rpcmsg.set_shvpath(path);
-                            node.process_request(&rpcmsg, &mut state)
+                            node.process_request(&rpcmsg, &mut device_state)
                         } else {
                             dir_ls(&mounts, rpcmsg)
                         };
@@ -146,22 +149,16 @@ lazy_static! {
 }
 
 struct IntPropertyNode {
-    val: i32,
 }
-impl IntPropertyNode {
-    fn new(val: i32) -> Self {
-        IntPropertyNode { val }
-    }
-}
-impl<K> ShvNode<K> for IntPropertyNode {
+impl ShvNode<DeviceState> for IntPropertyNode {
     fn methods(&self) -> Vec<&MetaMethod> {
         DIR_LS_METHODS.iter().chain(PROPERTY_METHODS.iter()).collect()
     }
 
-    fn process_request(&mut self, rq: &RpcMessage, _state: &mut K) -> ProcessRequestResult {
+    fn process_request(&mut self, rq: &RpcMessage, state: &mut DeviceState) -> ProcessRequestResult {
         match rq.method() {
             Some(METH_GET) => {
-                Ok((self.val.into(), None))
+                Ok((state.int_prop.into(), None))
             }
             Some(METH_SET) => {
                 match rq.param() {
@@ -169,10 +166,10 @@ impl<K> ShvNode<K> for IntPropertyNode {
                     Some(v) => {
                         if v.is_int() {
                             let v = v.as_i32();
-                            if v == self.val {
+                            if v == state.int_prop {
                                 Ok((RpcValue::from(false), None))
                             } else {
-                                self.val = v;
+                                state.int_prop = v;
                                 Ok((RpcValue::from(true), Some(Signal{ value: v.into(), method: SIG_CHNG })))
                             }
                         } else {
@@ -182,7 +179,7 @@ impl<K> ShvNode<K> for IntPropertyNode {
                 }
             }
             _ => {
-                ShvNode::<K>::process_dir_ls(self, rq)
+                ShvNode::<DeviceState>::process_dir_ls(self, rq)
             }
         }
     }

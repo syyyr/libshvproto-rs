@@ -12,7 +12,7 @@ use shv::{RpcMessage, RpcValue, rpcvalue, util};
 use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
-use shv::shvnode::{find_longest_prefix, dir_ls, ShvNode, ProcessRequestResult};
+use shv::shvnode::{find_longest_prefix, dir_ls, ShvNode, ProcessRequestResult, children_on_path};
 use shv::util::{glob_match, sha1_hash};
 use crate::config::{Config, default_config, Password};
 
@@ -53,6 +53,7 @@ pub(crate) fn main() -> Result<()> {
     warn!("warn message");
     error!("error message");
     log!(target: "RpcMsg", Level::Debug, "RPC message");
+    log!(target: "Acl", Level::Debug, "ACL message");
 
     let port = 3755;
     let host = "127.0.0.1";
@@ -361,7 +362,7 @@ impl Broker {
         }
     }
     pub fn mount_device<K>(&mut self, mounts: &mut BTreeMap<String, Mount<K>>, client_id: i32, device_id: Option<String>, mount_point: Option<String>) {
-        if let Some(mount_path) = loop {
+        if let Some(mount_point) = loop {
             if let Some(ref mount_point) = mount_point {
                 if mount_point.starts_with("test/") {
                     info!("Client id: {} mounted on path: '{}'", client_id, &mount_point);
@@ -375,11 +376,13 @@ impl Broker {
             }
             break None;
         } {
+            mounts.insert(mount_point.clone(), Mount::Device(Device { client_id }));
             if let Some(peer) = self.peers.get_mut(&client_id) {
-                peer.mount_point = Some(mount_path.clone());
+                peer.mount_point = Some(mount_point.clone());
             }
-            mounts.insert(mount_path, Mount::Device(Device { client_id }));
-        }
+        };
+        let client_path = format!(".app/broker/client/{}", client_id);
+        mounts.insert(client_path, Mount::Device(Device { client_id }));
     }
     pub fn client_id_to_mount_point(&self, client_id: CliId) -> Option<String> {
         match self.peers.get(&client_id) {
@@ -415,7 +418,7 @@ impl Broker {
         }
     }
     fn grant_for_request(&self, client_id: CliId, frame: &RpcFrame) -> Option<String> {
-        log!(target: "Acl", Level::Info, "======================= grant_for_request {}", &frame);
+        log!(target: "Acl", Level::Debug, "======================= grant_for_request {}", &frame);
         let shv_path = frame.shv_path_or_empty();
         let method = frame.method().unwrap_or("");
         if method.is_empty() {
@@ -423,15 +426,15 @@ impl Broker {
         } else {
             if let Some(peer) = self.peers.get(&client_id) {
                 if let Some(flatten_roles) = self.flatten_roles(&peer.user) {
-                    log!(target: "Acl", Level::Info, "user: {}, flatten roles: {:?}", &peer.user, flatten_roles);
+                    log!(target: "Acl", Level::Debug, "user: {}, flatten roles: {:?}", &peer.user, flatten_roles);
                     for role_name in flatten_roles {
                         if let Some(role) = self.config.roles.get(role_name) {
-                            log!(target: "Acl", Level::Info, "----------- access for role: {}", role_name);
+                            log!(target: "Acl", Level::Debug, "----------- access for role: {}", role_name);
                             for rule in &role.access {
-                                log!(target: "Acl", Level::Info, "\trule: {}:{}", rule.path, rule.method);
+                                log!(target: "Acl", Level::Debug, "\trule: {}:{}", rule.path, rule.method);
                                 if rule.method.is_empty() || &rule.method == method {
                                     if glob_match(shv_path, &rule.path) {
-                                        log!(target: "Acl", Level::Info, "\t\t HIT");
+                                        log!(target: "Acl", Level::Debug, "\t\t HIT");
                                         return Some(rule.grant.clone());
                                     }
                                 }
@@ -484,7 +487,20 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                     Some(Err(RpcError::new(RpcErrorCode::PermissionDenied, &format!("Cannot resolve call method grant for current user."))))
                                 }
                                 Some(grant) => {
-                                    if let Some((mount, node_path)) = find_mount(&mut mounts, &shv_path) {
+                                    let children_on_path = children_on_path(&mounts, &shv_path);
+                                    let has_mounted_children = match children_on_path {
+                                        None => { true }
+                                        Some(children) => { !children.is_empty() }
+                                    };
+                                    if has_mounted_children {
+                                        if let Ok(rpcmsg) = frame.to_rpcmesage() {
+                                            Some(dir_ls(&mounts, rpcmsg))
+                                        } else {
+                                            Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
+                                        }
+                                    } else {
+                                        // shv_path should exist
+                                        let (mount, node_path) = find_mount(&mut mounts, &shv_path).unwrap();
                                         match mount {
                                             Mount::Device(device) => {
                                                 let device_client_id = device.client_id;
@@ -505,12 +521,6 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                                     Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
                                                 }
                                             }
-                                        }
-                                    } else {
-                                        if let Ok(rpcmsg) = frame.to_rpcmesage() {
-                                            Some(dir_ls(&mounts, rpcmsg))
-                                        } else {
-                                            Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
                                         }
                                     }
                                 }
@@ -567,10 +577,13 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                     },
                     ClientEvent::ClientGone { client_id } => {
                         broker.peers.remove(&client_id);
+                        info!("Client id: {} disconnected.", client_id);
                         if let Some(path) = broker.client_id_to_mount_point(client_id) {
-                            info!("Client id: {} disconnected, unmounting path: '{}'", client_id, path);
+                            info!("Unmounting path: '{}'", path);
                             mounts.remove(&path);
                         }
+                        let client_path = format!(".app/broker/client/{}", client_id);
+                        mounts.remove(&client_path);
                     }
                     ClientEvent::GetPassword { client_id, user } => {
                         let shapwd = broker.sha_password(&user);

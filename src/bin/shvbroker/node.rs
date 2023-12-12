@@ -7,16 +7,12 @@ use crate::Broker;
 const METH_CLIENT_INFO: &str = "clientInfo";
 const METH_MOUNTED_CLIENT_INFO: &str = "mountedClientInfo";
 const METH_CLIENTS: &str = "clients";
-const METH_INFO: &str = "info";
 
 lazy_static! {
     pub static ref APP_BROKER_METHODS: [MetaMethod; 3] = [
         MetaMethod { name: METH_CLIENT_INFO.into(), param: "Int".into(), result: "ClientInfo".into(), access: Access::Service, ..Default::default() },
         MetaMethod { name: METH_MOUNTED_CLIENT_INFO.into(), param: "String".into(), result: "ClientInfo".into(), access: Access::Service, ..Default::default() },
         MetaMethod { name: METH_CLIENTS.into(), param: "".into(), result: "List[Int]".into(), access: Access::Service, ..Default::default() },
-    ];
-    pub static ref APP_BROKER_CURRENT_CLIENT_METHODS: [MetaMethod; 1] = [
-        MetaMethod { name: METH_INFO.into(), param: "Int".into(), result: "ClientInfo".into(), ..Default::default() },
     ];
 }
 pub(crate) struct AppBrokerNode {}
@@ -42,8 +38,15 @@ impl ShvNode<crate::Broker> for AppBrokerNode {
     }
 }
 
+lazy_static! {
+    pub static ref APP_BROKER_CURRENT_CLIENT_METHODS: [MetaMethod; 1] = [
+        MetaMethod { name: METH_INFO.into(), param: "Int".into(), result: "ClientInfo".into(), ..Default::default() },
+    ];
+}
+const METH_INFO: &str = "info";
+
 pub(crate) struct AppBrokerCurrentClientNode {}
-impl ShvNode<crate::Broker> for AppBrokerCurrentClientNode {
+impl ShvNode<Broker> for AppBrokerCurrentClientNode {
     fn methods(&self) -> Vec<&MetaMethod> {
         DIR_LS_METHODS.iter().chain(APP_BROKER_CURRENT_CLIENT_METHODS.iter()).collect()
     }
@@ -55,7 +58,7 @@ impl ShvNode<crate::Broker> for AppBrokerCurrentClientNode {
                 Ok((RpcValue::from(broker.client_info(client_id).unwrap_or_default()), None))
             }
             _ => {
-                ShvNode::<crate::Broker>::process_dir_ls(self, rq)
+                ShvNode::<Broker>::process_dir_ls(self, rq)
             }
         }
     }

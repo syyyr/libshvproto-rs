@@ -96,11 +96,14 @@ pub fn dir_ls<V>(mounts: &BTreeMap<String, V>, rpcmsg: RpcMessage) -> ProcessReq
     }
 }
 pub fn ls<V>(mounts: &BTreeMap<String, V>, shv_path: &str, param: LsParam) -> ProcessRequestResult {
+    ls_children_to_result(children_on_path(mounts, shv_path), param)
+}
+pub fn ls_children_to_result(children: Option<Vec<String>>, param: LsParam) -> ProcessRequestResult {
     match param {
         LsParam::List => {
-            match ls_mounts(mounts, shv_path) {
+            match children {
                 None => {
-                    Err(RpcError::new(RpcErrorCode::MethodCallException, &format!("Invalid shv path: {}", shv_path)))
+                    Err(RpcError::new(RpcErrorCode::MethodCallException, "Invalid shv path"))
                 }
                 Some(dirs) => {
                     let res: rpcvalue::List = dirs.iter().map(|d| RpcValue::from(d)).collect();
@@ -109,11 +112,18 @@ pub fn ls<V>(mounts: &BTreeMap<String, V>, shv_path: &str, param: LsParam) -> Pr
             }
         }
         LsParam::Exists(path) => {
-            Ok((mounts.contains_key(&path).into(), None))
+            match children {
+                None => {
+                    Ok((false.into(), None))
+                }
+                Some(children) => {
+                    Ok((children.contains(&path).into(), None))
+                }
+            }
         }
     }
 }
-fn ls_mounts<V>(mounts: &BTreeMap<String, V>, path: &str) -> Option<Vec<String>> {
+pub fn children_on_path<V>(mounts: &BTreeMap<String, V>, path: &str) -> Option<Vec<String>> {
     let mut dirs: Vec<String> = Vec::new();
     let mut unique_dirs: HashSet<String> = HashSet::new();
     let mut dir_exists = false;
@@ -157,9 +167,9 @@ mod tests {
         mounts.insert("b/2/C".into(), ());
         mounts.insert("b/2/D".into(), ());
         mounts.insert("b/3/E".into(), ());
-        assert_eq!(super::ls_mounts(&mounts, ""), Some(vec!["a".to_string(), "b".to_string()]));
-        assert_eq!(super::ls_mounts(&mounts, "a"), Some(vec!["1".to_string()]));
-        assert_eq!(super::ls_mounts(&mounts, "b/2"), Some(vec!["C".to_string(), "D".to_string()]));
+        assert_eq!(super::children_on_path(&mounts, ""), Some(vec!["a".to_string(), "b".to_string()]));
+        assert_eq!(super::children_on_path(&mounts, "a"), Some(vec!["1".to_string()]));
+        assert_eq!(super::children_on_path(&mounts, "b/2"), Some(vec!["C".to_string(), "D".to_string()]));
     }
 }
 pub fn find_longest_prefix<'a, 'b, V>(map: &'a BTreeMap<String, V>, shv_path: &'b str) -> Option<(&'b str, &'b str)> {
