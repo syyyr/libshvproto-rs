@@ -70,7 +70,7 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
         let expected_methods = vec![
             MetaMethod { name: METH_DIR.into(), param: "DirParam".into(), result: "DirResult".into(), ..Default::default() },
             MetaMethod { name: METH_LS.into(), param: "LsParam".into(), result: "LsResult".into(), ..Default::default() },
-            MetaMethod { name: METH_NAME.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
+            MetaMethod { name: METH_NAME.into(), flags: 1 << Flag::IsGetter as u32,  ..Default::default() },
             MetaMethod { name: METH_PING.into(), ..Default::default() },
         ];
         {
