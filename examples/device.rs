@@ -1,3 +1,4 @@
+use shv::shvnode::dir_ls;
 use std::collections::BTreeMap;
 use structopt::StructOpt;
 use async_std::io::BufReader;
@@ -13,7 +14,7 @@ use shv::client::LoginParams;
 use shv::metamethod::{Access, Flag, MetaMethod};
 use shv::rpcframe::RpcFrame;
 use shv::rpcmessage::{RpcError, RpcErrorCode};
-use shv::shvnode::{AppDeviceNode, find_longest_prefix, dir_ls, ShvNode, ProcessRequestResult, Signal, AppNode, DIR_LS_METHODS};
+use shv::shvnode::{AppDeviceNode, find_longest_prefix, ShvNode, ProcessRequestResult, Signal, AppNode, DIR_LS_METHODS};
 
 #[derive(StructOpt, Debug)]
 //#[structopt(name = "device", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "SHV call")]
@@ -100,7 +101,7 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
             Ok(Some(frame)) => {
                 if frame.is_request() {
                     if let Ok(mut rpcmsg) = frame.to_rpcmesage() {
-                        let shv_path = frame.shv_path_or_empty();
+                        let shv_path = frame.shv_path().unwrap_or_default();
                         let response_meta= RpcFrame::prepare_response_meta(&frame.meta);
                         let result = if let Some((mount, path)) = find_longest_prefix(&mounts, &shv_path) {
                             let node = mounts.get_mut(mount).unwrap();

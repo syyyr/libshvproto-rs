@@ -62,8 +62,8 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
     println!("====== broker =====");
     println!("---broker---: :ls(.app)");
     assert_eq!(call("", "ls", r#"".app""#)?, RpcValue::from(true));
-    assert_eq!(call(".app", "ls", r#""client""#)?, RpcValue::from(true));
     assert_eq!(call(".app", "ls", r#""broker""#)?, RpcValue::from(true));
+    assert_eq!(call(".app/broker", "ls", r#""client""#)?, RpcValue::from(true));
     {
         println!("---broker---: .app:dir()");
         let expected_methods = vec![

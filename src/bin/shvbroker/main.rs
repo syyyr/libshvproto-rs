@@ -8,11 +8,11 @@ use rand::distributions::{Alphanumeric, DistString};
 use log::*;
 use structopt::StructOpt;
 use shv::rpcframe::{RpcFrame};
-use shv::{RpcMessage, RpcValue, rpcvalue, util};
+use shv::{RpcMessage, RpcValue, rpcvalue, shvnode, util};
 use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
-use shv::shvnode::{find_longest_prefix, dir_ls, ShvNode, ProcessRequestResult, children_on_path};
+use shv::shvnode::{find_longest_prefix, ShvNode, ProcessRequestResult, children_on_path, METH_LS, METH_DIR, DIR_LS_METHODS};
 use shv::util::{glob_match, sha1_hash};
 use crate::config::{Config, default_config, Password};
 
@@ -301,7 +301,7 @@ struct Device {
 }
 type Node<K> = Box<dyn ShvNode<K> + Send + Sync>;
 enum Mount<K> {
-    Device(Device),
+    Peer(Device),
     Node(Node<K>),
 }
 #[derive(Debug)]
@@ -376,13 +376,13 @@ impl Broker {
             }
             break None;
         } {
-            mounts.insert(mount_point.clone(), Mount::Device(Device { client_id }));
+            mounts.insert(mount_point.clone(), Mount::Peer(Device { client_id }));
             if let Some(peer) = self.peers.get_mut(&client_id) {
                 peer.mount_point = Some(mount_point.clone());
             }
         };
         let client_path = format!(".app/broker/client/{}", client_id);
-        mounts.insert(client_path, Mount::Device(Device { client_id }));
+        mounts.insert(client_path, Mount::Peer(Device { client_id }));
     }
     pub fn client_id_to_mount_point(&self, client_id: CliId) -> Option<String> {
         match self.peers.get(&client_id) {
@@ -419,7 +419,7 @@ impl Broker {
     }
     fn grant_for_request(&self, client_id: CliId, frame: &RpcFrame) -> Option<String> {
         log!(target: "Acl", Level::Debug, "======================= grant_for_request {}", &frame);
-        let shv_path = frame.shv_path_or_empty();
+        let shv_path = frame.shv_path().unwrap_or_default();
         let method = frame.method().unwrap_or("");
         if method.is_empty() {
             None
@@ -480,47 +480,72 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                 match event {
                     ClientEvent::Frame { client_id, mut frame} => {
                         if frame.is_request() {
-                            let shv_path = frame.shv_path_or_empty().to_string();
+                            let shv_path = frame.shv_path().unwrap_or_default().to_string();
                             let response_meta= RpcFrame::prepare_response_meta(&frame.meta);
                             let result: Option<ProcessRequestResult> = match broker.grant_for_request(client_id, &frame) {
                                 None => {
                                     Some(Err(RpcError::new(RpcErrorCode::PermissionDenied, &format!("Cannot resolve call method grant for current user."))))
                                 }
                                 Some(grant) => {
+                                    let method = frame.method().unwrap_or_default();
                                     let children_on_path = children_on_path(&mounts, &shv_path);
-                                    let has_mounted_children = match children_on_path {
-                                        None => { true }
-                                        Some(children) => { !children.is_empty() }
-                                    };
-                                    if has_mounted_children {
-                                        if let Ok(rpcmsg) = frame.to_rpcmesage() {
-                                            Some(dir_ls(&mounts, rpcmsg))
-                                        } else {
-                                            Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
+                                    let is_mount_point = mounts.contains_key(&shv_path);
+                                    let local_result = match children_on_path {
+                                        None => {
+                                            // path doesn't exist
+                                            Some(Err(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid shv path: {}", shv_path))))
                                         }
+                                        Some(children) => {
+                                            if !children.is_empty() {
+                                                if method == METH_LS {
+                                                    // ls on not-leaf node must be resolved locally
+                                                    if let Ok(rpcmsg) = frame.to_rpcmesage() {
+                                                        let ls = shvnode::ls(&mounts, &shv_path, rpcmsg.param().into());
+                                                        Some(ls)
+                                                    } else {
+                                                        Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
+                                                    }
+                                                } else if !is_mount_point {
+                                                    if method == METH_DIR {
+                                                        // dir in the middle of the tree must be resolved locally
+                                                        if let Ok(rpcmsg) = frame.to_rpcmesage() {
+                                                            let dir = Ok((shvnode::dir(DIR_LS_METHODS.iter().into_iter(), rpcmsg.param().into()), None));
+                                                            Some(dir)
+                                                        } else {
+                                                            Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
+                                                        }
+                                                    } else { None }
+                                                } else { None }
+                                            } else { None }
+                                        }
+                                    };
+                                    if local_result.is_some() {
+                                        local_result
                                     } else {
-                                        // shv_path should exist
-                                        let (mount, node_path) = find_mount(&mut mounts, &shv_path).unwrap();
-                                        match mount {
-                                            Mount::Device(device) => {
-                                                let device_client_id = device.client_id;
-                                                frame.push_caller_id(client_id);
-                                                frame.set_shvpath(node_path);
-                                                frame.set_access(&grant);
-                                                let _ = broker.peers.get(&device_client_id).unwrap().sender.send(PeerEvent::Frame(frame)).await;
-                                                None
-                                            }
-                                            Mount::Node(node) => {
-                                                if let Ok(rpcmsg) = frame.to_rpcmesage() {
-                                                    let mut rpcmsg2 = rpcmsg;
-                                                    rpcmsg2.set_shvpath(node_path);
-                                                    rpcmsg2.set_access(&grant);
-                                                    broker.request_context.caller_client_id = client_id;
-                                                    Some(node.process_request(&rpcmsg2, &mut broker))
-                                                } else {
-                                                    Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
+                                        if let Some((mount, node_path)) = find_mount(&mut mounts, &shv_path) {
+                                            match mount {
+                                                Mount::Peer(device) => {
+                                                    let device_client_id = device.client_id;
+                                                    frame.push_caller_id(client_id);
+                                                    frame.set_shvpath(node_path);
+                                                    frame.set_access(&grant);
+                                                    let _ = broker.peers.get(&device_client_id).unwrap().sender.send(PeerEvent::Frame(frame)).await;
+                                                    None
+                                                }
+                                                Mount::Node(node) => {
+                                                    if let Ok(rpcmsg) = frame.to_rpcmesage() {
+                                                        let mut rpcmsg2 = rpcmsg;
+                                                        rpcmsg2.set_shvpath(node_path);
+                                                        rpcmsg2.set_access(&grant);
+                                                        broker.request_context.caller_client_id = client_id;
+                                                        Some(node.process_request(&rpcmsg2, &mut broker))
+                                                    } else {
+                                                        Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
+                                                    }
                                                 }
                                             }
+                                        } else {
+                                            Some(Err(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid method path {}:{}()", shv_path, method))))
                                         }
                                     }
                                 }
@@ -548,10 +573,10 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                         } else if frame.is_signal() {
                             // send signal to all clients until subscribe method will be implemented
                             if let Some(mount_point) = broker.client_id_to_mount_point(client_id) {
-                                let new_path = util::join_path(&mount_point, frame.shv_path_or_empty());
+                                let new_path = util::join_path(&mount_point, frame.shv_path().unwrap_or_default());
                                 for (cli_id, peer) in broker.peers.iter() {
                                     if &client_id != cli_id {
-                                        if peer.is_signal_subscribed(frame.shv_path_or_empty(), frame.method().unwrap_or("")) {
+                                        if peer.is_signal_subscribed(frame.shv_path().unwrap_or_default(), frame.method().unwrap_or("")) {
                                             let mut frame = frame.clone();
                                             frame.set_shvpath(&new_path);
                                             peer.sender.send(PeerEvent::Frame(frame)).await.unwrap();

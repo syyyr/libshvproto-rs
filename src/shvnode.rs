@@ -79,7 +79,7 @@ impl From<Option<&RpcValue>> for LsParam {
     }
 }
 pub fn dir_ls<V>(mounts: &BTreeMap<String, V>, rpcmsg: RpcMessage) -> ProcessRequestResult {
-    let shv_path = rpcmsg.shv_path_or_empty();
+    let shv_path = rpcmsg.shv_path().unwrap_or_default();
     match rpcmsg.method() {
         None => {
             Err(RpcError::new(RpcErrorCode::InvalidParam, &format!("Shv call method missing.")))
@@ -240,24 +240,24 @@ pub trait ShvNode<K> {
                 self.process_ls(rq)
             }
             _ => {
-                let errmsg = format!("Unknown method '{}:{}()', path.", rq.shv_path_or_empty(), rq.method().unwrap_or(""));
+                let errmsg = format!("Unknown method '{}:{}()', path.", rq.shv_path().unwrap_or_default(), rq.method().unwrap_or_default());
                 warn!("{}", &errmsg);
                 Err(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
             }
         }
     }
     fn process_dir(&mut self, rq: &RpcMessage) -> ProcessRequestResult {
-        let shv_path = rq.shv_path_or_empty();
+        let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
             Ok((dir(DIR_LS_METHODS.iter().chain(self.methods().into_iter()), rq.param().into()), None))
         } else {
-            let errmsg = format!("Unknown method '{}:{}()', invalid path.", rq.shv_path_or_empty(), rq.method().unwrap_or(""));
+            let errmsg = format!("Unknown method '{}:{}()', invalid path.", rq.shv_path().unwrap_or_default(), rq.method().unwrap_or_default());
             warn!("{}", &errmsg);
             Err(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
         }
     }
     fn process_ls(&mut self, rq: &RpcMessage) -> ProcessRequestResult {
-        let shv_path = rq.shv_path_or_empty();
+        let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
             match LsParam::from(rq.param()) {
                 LsParam::List => {
@@ -268,7 +268,7 @@ pub trait ShvNode<K> {
                 }
             }
         } else {
-            let errmsg = format!("Unknown method '{}:{}()', invalid path.", rq.shv_path_or_empty(), rq.method().unwrap_or(""));
+            let errmsg = format!("Unknown method '{}:{}()', invalid path.", rq.shv_path().unwrap_or_default(), rq.method().unwrap_or(""));
             warn!("{}", &errmsg);
             Err(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
         }
@@ -332,7 +332,7 @@ impl<K> ShvNode<K> for AppNode {
     }
 
     fn process_request(&mut self, rq: &RpcMessage, _state: &mut K) -> ProcessRequestResult {
-        if rq.shv_path_or_empty().is_empty() {
+        if rq.shv_path().unwrap_or_default().is_empty() {
             match rq.method() {
                 Some(METH_SHV_VERSION_MAJOR) => { return Ok((self.shv_version_major.into(), None))  }
                 Some(METH_SHV_VERSION_MINOR) => { return Ok((self.shv_version_minor.into(), None))  }
@@ -364,7 +364,7 @@ impl<K> ShvNode<K> for AppDeviceNode {
     }
 
     fn process_request(&mut self, rq: &RpcMessage, _state: &mut K) -> ProcessRequestResult {
-        if rq.shv_path_or_empty().is_empty() {
+        if rq.shv_path().unwrap_or_default().is_empty() {
             match rq.method() {
                 Some(METH_NAME) => {
                     return Ok((RpcValue::from(self.device_name), None))
