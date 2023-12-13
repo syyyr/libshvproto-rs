@@ -1,5 +1,4 @@
-use lazy_static::lazy_static;
-use shv::metamethod::{Access, MetaMethod};
+use shv::metamethod::{Access, Flag, MetaMethod};
 use shv::{RpcMessage, RpcMessageMetaTags, RpcValue};
 use shv::shvnode::{DIR_LS_METHODS, ProcessRequestResult, ShvNode};
 use crate::Broker;
@@ -8,13 +7,12 @@ const METH_CLIENT_INFO: &str = "clientInfo";
 const METH_MOUNTED_CLIENT_INFO: &str = "mountedClientInfo";
 const METH_CLIENTS: &str = "clients";
 
-lazy_static! {
-    pub static ref APP_BROKER_METHODS: [MetaMethod; 3] = [
-        MetaMethod { name: METH_CLIENT_INFO.into(), param: "Int".into(), result: "ClientInfo".into(), access: Access::Service, ..Default::default() },
-        MetaMethod { name: METH_MOUNTED_CLIENT_INFO.into(), param: "String".into(), result: "ClientInfo".into(), access: Access::Service, ..Default::default() },
-        MetaMethod { name: METH_CLIENTS.into(), param: "".into(), result: "List[Int]".into(), access: Access::Service, ..Default::default() },
-    ];
-}
+const APP_BROKER_METHODS: [MetaMethod; 3] = [
+    MetaMethod { name: METH_CLIENT_INFO, param: "Int", result: "ClientInfo", access: Access::Service, flags: Flag::None as u32, description: "" },
+    MetaMethod { name: METH_MOUNTED_CLIENT_INFO, param: "String", result: "ClientInfo", access: Access::Service, flags: Flag::None as u32, description: "" },
+    MetaMethod { name: METH_CLIENTS, param: "", result: "List[Int]", access: Access::Service, flags: Flag::None as u32, description: "" },
+];
+
 pub(crate) struct AppBrokerNode {}
 impl ShvNode<crate::Broker> for AppBrokerNode {
     fn methods(&self) -> Vec<&MetaMethod> {
@@ -38,11 +36,9 @@ impl ShvNode<crate::Broker> for AppBrokerNode {
     }
 }
 
-lazy_static! {
-    pub static ref APP_BROKER_CURRENT_CLIENT_METHODS: [MetaMethod; 1] = [
-        MetaMethod { name: METH_INFO.into(), param: "Int".into(), result: "ClientInfo".into(), ..Default::default() },
-    ];
-}
+const APP_BROKER_CURRENT_CLIENT_METHODS: [MetaMethod; 1] = [
+    MetaMethod { name: METH_INFO, flags: Flag::None as u32, access: Access::Browse, param: "Int", result: "ClientInfo", description: "" },
+];
 const METH_INFO: &str = "info";
 
 pub(crate) struct AppBrokerCurrentClientNode {}

@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, HashSet};
 use std::format;
-use lazy_static::lazy_static;
 use log::warn;
 use crate::metamethod::{Flag, MetaMethod};
 use crate::{metamethod, RpcMessage, RpcMessageMetaTags, RpcValue, rpcvalue};
+use crate::metamethod::Access;
+use crate::rpcframe::RpcFrame;
 use crate::rpcmessage::{RpcError, RpcErrorCode};
 
 pub enum DirParam {
@@ -32,7 +33,7 @@ impl From<Option<&RpcValue>> for DirParam {
     }
 }
 
-pub fn dir<'a>(methods: impl Iterator<Item=&'a MetaMethod>, param: DirParam) -> RpcValue {
+fn dir<'a>(methods: impl Iterator<Item=&'a MetaMethod>, param: DirParam) -> RpcValue {
     let mut result = RpcValue::null();
     let mut lst = rpcvalue::List::new();
     for mm in methods {
@@ -78,27 +79,52 @@ impl From<Option<&RpcValue>> for LsParam {
         }
     }
 }
-pub fn dir_ls<V>(mounts: &BTreeMap<String, V>, rpcmsg: RpcMessage) -> ProcessRequestResult {
-    let shv_path = rpcmsg.shv_path().unwrap_or_default();
-    match rpcmsg.method() {
+
+pub fn process_local_dir_ls<V>(mounts: &BTreeMap<String, V>, frame: &RpcFrame) -> Option<ProcessRequestResult> {
+    let shv_path = frame.shv_path().unwrap_or_default();
+    let method = frame.method().unwrap_or_default();
+    let children_on_path = children_on_path(&mounts, shv_path);
+    let mount = find_longest_prefix(mounts, &shv_path);
+    let is_mount_point = mount.is_some();
+    match children_on_path {
         None => {
-            Err(RpcError::new(RpcErrorCode::InvalidParam, &format!("Shv call method missing.")))
+            if is_mount_point {
+                // remote request
+                None
+            } else {
+                // path doesn't exist
+                Some(Err(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid shv path: {}", shv_path))))
+            }
         }
-        Some("dir") => {
-            Ok((dir(DIR_LS_METHODS.iter().into_iter(), rpcmsg.param().into()), None))
-        }
-        Some("ls") => {
-            ls(&mounts, shv_path, rpcmsg.param().into())
-        }
-        Some(method) => {
-            Err(RpcError::new(RpcErrorCode::MethodCallException, &format!("Unknown method {}", method)))
+        Some(children) => {
+            if !children.is_empty() {
+                if method == METH_LS {
+                    // ls on not-leaf node must be resolved locally
+                    if let Ok(rpcmsg) = frame.to_rpcmesage() {
+                        let ls = ls(&mounts, shv_path, rpcmsg.param().into());
+                        Some(ls)
+                    } else {
+                        Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
+                    }
+                } else if !is_mount_point {
+                    if method == METH_DIR {
+                        // dir in the middle of the tree must be resolved locally
+                        if let Ok(rpcmsg) = frame.to_rpcmesage() {
+                            let dir = Ok((dir(DIR_LS_METHODS.iter().into_iter(), rpcmsg.param().into()), None));
+                            Some(dir)
+                        } else {
+                            Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
+                        }
+                    } else { None }
+                } else { None }
+            } else { None }
         }
     }
 }
-pub fn ls<V>(mounts: &BTreeMap<String, V>, shv_path: &str, param: LsParam) -> ProcessRequestResult {
+fn ls<V>(mounts: &BTreeMap<String, V>, shv_path: &str, param: LsParam) -> ProcessRequestResult {
     ls_children_to_result(children_on_path(mounts, shv_path), param)
 }
-pub fn ls_children_to_result(children: Option<Vec<String>>, param: LsParam) -> ProcessRequestResult {
+fn ls_children_to_result(children: Option<Vec<String>>, param: LsParam) -> ProcessRequestResult {
     match param {
         LsParam::List => {
             match children {
@@ -287,22 +313,20 @@ pub const METH_PING: &str = "ping";
 pub const METH_VERSION: &str = "version";
 pub const METH_SERIAL_NUMBER: &str = "serialNumber";
 
-lazy_static! {
-    pub static ref DIR_LS_METHODS: [MetaMethod; 2] = [
-        MetaMethod { name: METH_DIR.into(), param: "DirParam".into(), result: "DirResult".into(), ..Default::default() },
-        MetaMethod { name: METH_LS.into(), param: "LsParam".into(), result: "LsResult".into(), ..Default::default() },
-    ];
-    static ref PROPERTY_METHODS: [MetaMethod; 3] = [
-        MetaMethod { name: METH_GET.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
-        MetaMethod { name: METH_SET.into(), flags: Flag::IsSetter.into(),  ..Default::default() },
-        MetaMethod { name: SIG_CHNG.into(), flags: Flag::IsSignal.into(),  ..Default::default() },
-    ];
-    static ref DEVICE_METHODS: [MetaMethod; 3] = [
-        MetaMethod { name: METH_NAME.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
-        MetaMethod { name: METH_VERSION.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
-        MetaMethod { name: METH_SERIAL_NUMBER.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
-    ];
-}
+pub const DIR_LS_METHODS: [MetaMethod; 2] = [
+    MetaMethod { name: METH_DIR, flags: Flag::None as u32, access: Access::Browse, param: "DirParam", result: "DirResult", description: "" },
+    MetaMethod { name: METH_LS, flags: Flag::None as u32, access: Access::Browse, param: "LsParam", result: "LsResult", description: "" },
+];
+pub const PROPERTY_METHODS: [MetaMethod; 3] = [
+    MetaMethod { name: METH_GET, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: METH_SET, flags: Flag::IsSetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: SIG_CHNG, flags: Flag::IsSignal as u32, access: Access::Browse, param: "", result: "", description: "" },
+];
+const DEVICE_METHODS: [MetaMethod; 3] = [
+    MetaMethod { name: METH_NAME, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: METH_VERSION, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: METH_SERIAL_NUMBER, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+];
 pub struct AppNode {
     pub app_name: &'static str,
     pub shv_version_major: i32,
@@ -317,14 +341,12 @@ impl Default for AppNode {
         }
     }
 }
-lazy_static! {
-    static ref APP_METHODS: [MetaMethod; 4] = [
-        MetaMethod { name: METH_SHV_VERSION_MAJOR.into(), flags: Flag::IsGetter.into(), ..Default::default() },
-        MetaMethod { name: METH_SHV_VERSION_MINOR.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
-        MetaMethod { name: METH_NAME.into(), flags: Flag::IsGetter.into(),  ..Default::default() },
-        MetaMethod { name: METH_PING.into(), ..Default::default() },
-    ];
-}
+const APP_METHODS: [MetaMethod; 4] = [
+    MetaMethod { name: METH_SHV_VERSION_MAJOR, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: METH_SHV_VERSION_MINOR, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: METH_NAME, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: METH_PING, flags: Flag::None as u32, access: Access::Browse, param: "", result: "", description: "" },
+];
 
 impl<K> ShvNode<K> for AppNode {
     fn methods(&self) -> Vec<&MetaMethod> {

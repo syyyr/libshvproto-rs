@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use lazy_static::lazy_static;
-
 use crate::{datetime, DateTime, Decimal};
 use crate::decimal;
 use crate::metamap::MetaMap;
@@ -13,26 +11,17 @@ use crate::CponWriter;
 use crate::chainpack::ChainPackWriter;
 use crate::chainpack::ChainPackReader;
 use std::convert::From;
+use std::sync::OnceLock;
 
 // see https://github.com/rhysd/tinyjson/blob/master/src/json_value.rs
 
+
 const EMPTY_STR_REF: &str = "";
 const EMPTY_BYTES_REF: &[u8] = EMPTY_STR_REF.as_bytes();
-lazy_static! {
-    static ref EMPTY_LIST_REF: Vec<RpcValue> = {
-        let v = Vec::new();
-        v
-    };
-    static ref EMPTY_MAP_REF: Map = {
-        let m = BTreeMap::new();
-        m
-    };
-    static ref EMPTY_IMAP_REF: IMap = {
-        let m = BTreeMap::new();
-        m
-    };
-    static ref EMPTY_METAMAP_REF: MetaMap = MetaMap::new();
-}
+static EMPTY_LIST: OnceLock<List> = OnceLock::new();
+static EMPTY_MAP: OnceLock<Map> = OnceLock::new();
+static EMPTY_IMAP: OnceLock<IMap> = OnceLock::new();
+static EMPTY_METAMAP: OnceLock<MetaMap> = OnceLock::new();
 
 #[macro_export(local_inner_macros)]
 macro_rules! make_map {
@@ -260,8 +249,13 @@ impl RpcValue {
 	}
 	pub fn meta(&self) -> &MetaMap {
 		match &self.meta {
-			Some(mm) => mm,
-			_ => &EMPTY_METAMAP_REF,
+			Some(mm) => {
+				return mm
+			}
+			None => {
+				let mm = EMPTY_METAMAP.get_or_init(|| MetaMap::new());
+				return mm
+			}
 		}
 	}
 	pub fn meta_mut(&mut self) -> Option<&mut MetaMap> {
@@ -374,19 +368,19 @@ impl RpcValue {
 	pub fn as_list(&self) -> &Vec<RpcValue> {
 		match &self.value {
 			Value::List(b) => &b,
-			_ => &EMPTY_LIST_REF,
+			_ => EMPTY_LIST.get_or_init(|| List::new()),
 		}
 	}
 	pub fn as_map(&self) -> &Map {
 		match &self.value {
 			Value::Map(b) => &b,
-			_ => &EMPTY_MAP_REF,
+			_ => EMPTY_MAP.get_or_init(|| Map::new()),
 		}
 	}
 	pub fn as_imap(&self) -> &BTreeMap<i32, RpcValue> {
 		match &self.value {
 			Value::IMap(b) => &b,
-			_ => &EMPTY_IMAP_REF,
+			_ => EMPTY_IMAP.get_or_init(|| IMap::new()),
 		}
 	}
 	pub fn get<I>(&self, key: I) -> Option<&RpcValue>
@@ -447,7 +441,13 @@ impl RpcValue {
 	}
 
 }
+static NULL_RPCVALUE: OnceLock<RpcValue> = OnceLock::new();
 
+impl Default for &RpcValue {
+	fn default() -> Self {
+		NULL_RPCVALUE.get_or_init(|| RpcValue::null())
+	}
+}
 impl fmt::Debug for RpcValue {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		//write!(f, "RpcValue {{meta: {:?} value: {:?}}}", self.meta, self.value)

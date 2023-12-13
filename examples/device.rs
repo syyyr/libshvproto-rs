@@ -1,20 +1,18 @@
-use shv::shvnode::dir_ls;
 use std::collections::BTreeMap;
 use structopt::StructOpt;
 use async_std::io::BufReader;
 use async_std::net::TcpStream;
 use shv::{client, RpcMessage, RpcMessageMetaTags, RpcValue};
 use async_std::task;
-use lazy_static::lazy_static;
 use log::*;
 use percent_encoding::percent_decode;
 use simple_logger::SimpleLogger;
 use url::Url;
 use shv::client::LoginParams;
-use shv::metamethod::{Access, Flag, MetaMethod};
+use shv::metamethod::{MetaMethod};
 use shv::rpcframe::RpcFrame;
 use shv::rpcmessage::{RpcError, RpcErrorCode};
-use shv::shvnode::{AppDeviceNode, find_longest_prefix, ShvNode, ProcessRequestResult, Signal, AppNode, DIR_LS_METHODS};
+use shv::shvnode::{AppDeviceNode, find_longest_prefix, ShvNode, ProcessRequestResult, Signal, AppNode, DIR_LS_METHODS, process_local_dir_ls, METH_GET, METH_SET, SIG_CHNG, PROPERTY_METHODS};
 
 #[derive(StructOpt, Debug)]
 //#[structopt(name = "device", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "SHV call")]
@@ -102,14 +100,21 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
                 if frame.is_request() {
                     if let Ok(mut rpcmsg) = frame.to_rpcmesage() {
                         let shv_path = frame.shv_path().unwrap_or_default();
-                        let response_meta= RpcFrame::prepare_response_meta(&frame.meta);
-                        let result = if let Some((mount, path)) = find_longest_prefix(&mounts, &shv_path) {
-                            let node = mounts.get_mut(mount).unwrap();
-                            rpcmsg.set_shvpath(path);
-                            node.process_request(&rpcmsg, &mut device_state)
-                        } else {
-                            dir_ls(&mounts, rpcmsg)
+                        let local_result = process_local_dir_ls(&mounts, &frame);
+                        let result = match local_result {
+                            None => {
+                                if let Some((mount, path)) = find_longest_prefix(&mounts, &shv_path) {
+                                    let node = mounts.get_mut(mount).unwrap();
+                                    rpcmsg.set_shvpath(path);
+                                    node.process_request(&rpcmsg, &mut device_state)
+                                } else {
+                                    let method = frame.method().unwrap_or_default();
+                                    Err(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid shv path {}:{}()", shv_path, method)))
+                                }
+                            }
+                            Some(result) => { result }
                         };
+                        let response_meta= RpcFrame::prepare_response_meta(&frame.meta);
                         if let Ok(meta) = response_meta {
                             let mut resp = RpcMessage::from_meta(meta);
                             match result {
@@ -137,18 +142,6 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
 
     Ok(())
 }
-pub const METH_SET: &str = "set";
-pub const METH_GET: &str = "get";
-pub const SIG_CHNG: &str = "chng";
-
-lazy_static! {
-    static ref PROPERTY_METHODS: [MetaMethod; 3] = [
-        MetaMethod { name: METH_GET.into(), flags: Flag::IsGetter.into(), result: "Int".into(), access: Access::Read, ..Default::default() },
-        MetaMethod { name: METH_SET.into(), flags: Flag::IsSetter.into(), param: "Int".into(), access: Access::Write, ..Default::default() },
-        MetaMethod { name: SIG_CHNG.into(), flags: Flag::IsSignal.into(), result: "Int".into(), access: Access::Read, ..Default::default() },
-    ];
-}
-
 struct IntPropertyNode {
 }
 impl ShvNode<DeviceState> for IntPropertyNode {

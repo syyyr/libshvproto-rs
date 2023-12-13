@@ -8,11 +8,11 @@ use rand::distributions::{Alphanumeric, DistString};
 use log::*;
 use structopt::StructOpt;
 use shv::rpcframe::{RpcFrame};
-use shv::{RpcMessage, RpcValue, rpcvalue, shvnode, util};
+use shv::{RpcMessage, RpcValue, rpcvalue, util};
 use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
-use shv::shvnode::{find_longest_prefix, ShvNode, ProcessRequestResult, children_on_path, METH_LS, METH_DIR, DIR_LS_METHODS};
+use shv::shvnode::{find_longest_prefix, ShvNode, ProcessRequestResult, process_local_dir_ls};
 use shv::util::{glob_match, sha1_hash};
 use crate::config::{Config, default_config, Password};
 
@@ -487,38 +487,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                     Some(Err(RpcError::new(RpcErrorCode::PermissionDenied, &format!("Cannot resolve call method grant for current user."))))
                                 }
                                 Some(grant) => {
-                                    let method = frame.method().unwrap_or_default();
-                                    let children_on_path = children_on_path(&mounts, &shv_path);
-                                    let is_mount_point = mounts.contains_key(&shv_path);
-                                    let local_result = match children_on_path {
-                                        None => {
-                                            // path doesn't exist
-                                            Some(Err(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid shv path: {}", shv_path))))
-                                        }
-                                        Some(children) => {
-                                            if !children.is_empty() {
-                                                if method == METH_LS {
-                                                    // ls on not-leaf node must be resolved locally
-                                                    if let Ok(rpcmsg) = frame.to_rpcmesage() {
-                                                        let ls = shvnode::ls(&mounts, &shv_path, rpcmsg.param().into());
-                                                        Some(ls)
-                                                    } else {
-                                                        Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
-                                                    }
-                                                } else if !is_mount_point {
-                                                    if method == METH_DIR {
-                                                        // dir in the middle of the tree must be resolved locally
-                                                        if let Ok(rpcmsg) = frame.to_rpcmesage() {
-                                                            let dir = Ok((shvnode::dir(DIR_LS_METHODS.iter().into_iter(), rpcmsg.param().into()), None));
-                                                            Some(dir)
-                                                        } else {
-                                                            Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
-                                                        }
-                                                    } else { None }
-                                                } else { None }
-                                            } else { None }
-                                        }
-                                    };
+                                    let local_result = process_local_dir_ls(&mounts, &frame);
                                     if local_result.is_some() {
                                         local_result
                                     } else {
@@ -545,7 +514,8 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                                 }
                                             }
                                         } else {
-                                            Some(Err(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid method path {}:{}()", shv_path, method))))
+                                            let method = frame.method().unwrap_or_default();
+                                            Some(Err(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid shv path {}:{}()", shv_path, method))))
                                         }
                                     }
                                 }

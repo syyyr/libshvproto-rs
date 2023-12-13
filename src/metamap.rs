@@ -1,11 +1,6 @@
 use crate::rpcvalue::RpcValue;
 use std::fmt;
-use lazy_static::lazy_static;
 use crate::{CponWriter, Writer};
-
-lazy_static! {
-    static ref NULL_RPCVALUE_REF: RpcValue = RpcValue::null();
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MetaKey {
@@ -97,14 +92,6 @@ impl MetaMap {
         match self.find(&key) {
             Some(ix) => Some(&self.0[ix].value),
             None => None,
-        }
-    }
-    pub fn get_or_null<I>(&self, key: I) -> &RpcValue
-        where I: GetIndex
-    {
-        match self.find(&key) {
-            Some(ix) => &self.0[ix].value,
-            None => &NULL_RPCVALUE_REF,
         }
     }
     fn find<I>(&self, key: &I) -> Option<usize>
@@ -231,20 +218,20 @@ mod test {
         let mut mm = MetaMap::new();
 
         mm.insert(123, RpcValue::from(1.1));
-        assert_eq!(mm.get_or_null(123).as_f64(), 1.1);
+        assert_eq!(mm.get(123).unwrap_or_default().as_f64(), 1.1);
         // let vv = mm.value(1234, Some(&RpcValue::from(123)));
         // println!("inserted and retrieved: {:?}", vv);
         // assert_eq!(123, vv.unwrap().to_i32().unwrap());
 
         mm.insert("foo", RpcValue::from("bar")).insert(123, RpcValue::from("baz"));
-        assert_eq!(mm.get_or_null("foo").as_str(), "bar");
+        assert_eq!(mm.get("foo").unwrap_or_default().as_str(), "bar");
         // println!("val: {:?}", mm.get_or_null(123]);
-        assert_eq!(mm.get_or_null(123).as_str(), "baz");
+        assert_eq!(mm.get(123).unwrap_or_default().as_str(), "baz");
 
         let v1 = vec![RpcValue::from("foo"), RpcValue::from("bar"), RpcValue::from("baz")];
         let v2 = v1.clone();
         mm.insert("list", RpcValue::from(v1));
-        assert_eq!(mm.get_or_null("list").as_list(), &v2);
+        assert_eq!(mm.get("list").unwrap_or_default().as_list(), &v2);
 
         let mut v1: BTreeMap<i32, RpcValue> = BTreeMap::new();
         v1.insert(1, RpcValue::from("foo"));
@@ -252,7 +239,7 @@ mod test {
         v1.insert(3, RpcValue::from("baz"));
         let v2 = v1.clone();
         mm.insert("imap", RpcValue::from(v1));
-        assert_eq!(mm.get_or_null("imap").as_imap(), &v2);
+        assert_eq!(mm.get("imap").unwrap_or_default().as_imap(), &v2);
 
         let mut v1: BTreeMap<String, RpcValue> = BTreeMap::new();
         v1.insert("a".to_string(), RpcValue::from("foo"));
@@ -260,7 +247,7 @@ mod test {
         v1.insert("c".to_string(), RpcValue::from("baz"));
         let v2 = v1.clone();
         mm.insert("map", RpcValue::from(v1));
-        assert_eq!(mm.get_or_null("map").as_map(), &v2);
+        assert_eq!(mm.get("map").unwrap_or_default().as_map(), &v2);
 
     }
     /*

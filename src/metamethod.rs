@@ -46,22 +46,22 @@ impl From<&str> for Access {
 
 #[derive(Debug)]
 pub struct MetaMethod {
-    pub name: String,
+    pub name: &'static str,
     pub flags: u32,
     pub access: Access,
-    pub param: String,
-    pub result: String,
-    pub description: String,
+    pub param: &'static str,
+    pub result: &'static str,
+    pub description: &'static str,
 }
 impl Default for MetaMethod {
     fn default() -> Self {
         MetaMethod {
-            name: "".to_string(),
+            name: "",
             flags: 0,
             access: Access::Browse,
-            param: "".to_string(),
-            result: "".to_string(),
-            description: "".to_string(),
+            param: "",
+            result: "",
+            description: "",
         }
     }
 }
@@ -75,21 +75,21 @@ impl MetaMethod {
         match fmt {
             DirFormat::IMap => {
                 let mut m = rpcvalue::IMap::new();
-                m.insert(DirAttribute::Name.into(), (&self.name).into());
+                m.insert(DirAttribute::Name.into(), (self.name).into());
                 m.insert(DirAttribute::Flags.into(), self.flags.into());
-                m.insert(DirAttribute::Param.into(), (&self.param).into());
-                m.insert(DirAttribute::Result.into(), (&self.result).into());
+                m.insert(DirAttribute::Param.into(), (self.param).into());
+                m.insert(DirAttribute::Result.into(), (self.result).into());
                 m.insert(DirAttribute::Access.into(), (self.access as i32).into());
                 m.into()
             }
             DirFormat::Map => {
                 let mut m = rpcvalue::Map::new();
-                m.insert(DirAttribute::Name.into(), (&self.name).into());
+                m.insert(DirAttribute::Name.into(), (self.name).into());
                 m.insert(DirAttribute::Flags.into(), self.flags.into());
-                m.insert(DirAttribute::Param.into(), (&self.param).into());
-                m.insert(DirAttribute::Result.into(), (&self.result).into());
+                m.insert(DirAttribute::Param.into(), (self.param).into());
+                m.insert(DirAttribute::Result.into(), (self.result).into());
                 m.insert(DirAttribute::Access.into(), (self.access as i32).into());
-                m.insert("description".into(), (&self.description).into());
+                m.insert("description".into(), (self.description).into());
                 m.into()
             }
         }
