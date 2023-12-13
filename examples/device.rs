@@ -13,6 +13,7 @@ use shv::metamethod::{MetaMethod};
 use shv::rpcframe::RpcFrame;
 use shv::rpcmessage::{RpcError, RpcErrorCode};
 use shv::shvnode::{AppDeviceNode, find_longest_prefix, ShvNode, ProcessRequestResult, Signal, AppNode, DIR_LS_METHODS, process_local_dir_ls, METH_GET, METH_SET, SIG_CHNG, PROPERTY_METHODS};
+use shv::util::parse_log_verbosity;
 
 #[derive(StructOpt, Debug)]
 //#[structopt(name = "device", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "SHV call")]
@@ -35,13 +36,8 @@ pub(crate) fn main() -> shv::Result<()> {
     let mut logger = SimpleLogger::new();
     logger = logger.with_level(LevelFilter::Error);
     if let Some(module_names) = &opts.verbose {
-        for module_name in module_names.split(',') {
-            let module_name = if module_name == "." {
-                module_path!().to_string()
-            } else {
-                module_name.to_string()
-            };
-            logger = logger.with_module_level(&module_name, LevelFilter::Trace);
+        for (module, level) in parse_log_verbosity(&module_names, module_path!()) {
+            logger = logger.with_module_level(module, level);
         }
     }
     logger.init().unwrap();

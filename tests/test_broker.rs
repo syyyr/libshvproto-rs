@@ -32,6 +32,7 @@ impl Drop for KillProcessGuard {
 #[test]
 fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
     let mut broker_process_guard = KillProcessGuard::new(Command::new("target/debug/shvbroker")
+        .arg("-v").arg(".:W")
         //.arg("-v").arg("Acl")
         .spawn()?);
     thread::sleep(Duration::from_millis(100));

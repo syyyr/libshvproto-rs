@@ -1,4 +1,5 @@
 use glob::Pattern;
+use log::LevelFilter;
 use sha1::Sha1;
 use sha1::Digest;
 
@@ -28,4 +29,23 @@ pub fn join_path(p1: &str, p2: &str) -> String {
 
 pub fn glob_match(path: &str, pattern: &str) -> bool {
     Pattern::new(pattern).unwrap().matches(path)
+}
+
+pub fn parse_log_verbosity<'a>(verbosity: &'a str, module_path: &'a str) -> Vec<(&'a str, LevelFilter)> {
+    let mut ret: Vec<(&str, LevelFilter)> = Vec::new();
+    for module_level_str in verbosity.split(',') {
+        let module_level: Vec<_> = module_level_str.split(':').collect();
+        let name = *module_level.get(0).unwrap_or(&".");
+        let level = *module_level.get(1).unwrap_or(&"D");
+        let module = if name == "." { module_path } else { name };
+        let level = match level {
+            "E" => LevelFilter::Error,
+            "W" => LevelFilter::Warn,
+            "I" => LevelFilter::Info,
+            "D" => LevelFilter::Debug,
+            _ => LevelFilter::Trace,
+        };
+        ret.push((module, level));
+    }
+    ret
 }

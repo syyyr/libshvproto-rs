@@ -13,7 +13,7 @@ use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
 use shv::shvnode::{find_longest_prefix, ShvNode, ProcessRequestResult, process_local_dir_ls};
-use shv::util::{glob_match, sha1_hash};
+use shv::util::{glob_match, parse_log_verbosity, sha1_hash};
 use crate::config::{Config, default_config, Password};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -36,13 +36,8 @@ pub(crate) fn main() -> Result<()> {
     let mut logger = SimpleLogger::new();
     logger = logger.with_level(LevelFilter::Info);
     if let Some(module_names) = opt.verbose {
-        for module_name in module_names.split(',') {
-            let module_name = if module_name == "." {
-                module_path!().to_string()
-            } else {
-                module_name.to_string()
-            };
-            logger = logger.with_module_level(&module_name, LevelFilter::Trace);
+        for (module, level) in parse_log_verbosity(&module_names, module_path!()) {
+            logger = logger.with_module_level(module, level);
         }
     }
     logger.init().unwrap();
