@@ -81,45 +81,41 @@ impl From<Option<&RpcValue>> for LsParam {
 }
 
 pub fn process_local_dir_ls<V>(mounts: &BTreeMap<String, V>, frame: &RpcFrame) -> Option<ProcessRequestResult> {
-    let shv_path = frame.shv_path().unwrap_or_default();
     let method = frame.method().unwrap_or_default();
+    if !(method == METH_DIR || method == METH_LS) {
+        return None
+    }
+    let shv_path = frame.shv_path().unwrap_or_default();
     let children_on_path = children_on_path(&mounts, shv_path);
     let mount = find_longest_prefix(mounts, &shv_path);
     let is_mount_point = mount.is_some();
-    match children_on_path {
-        None => {
-            if is_mount_point {
-                // remote request
-                None
-            } else {
-                // path doesn't exist
-                Some(Err(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid shv path: {}", shv_path))))
-            }
-        }
-        Some(children) => {
-            if !children.is_empty() {
-                if method == METH_LS {
-                    // ls on not-leaf node must be resolved locally
-                    if let Ok(rpcmsg) = frame.to_rpcmesage() {
-                        let ls = ls(&mounts, shv_path, rpcmsg.param().into());
-                        Some(ls)
-                    } else {
-                        Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
-                    }
-                } else if !is_mount_point {
-                    if method == METH_DIR {
-                        // dir in the middle of the tree must be resolved locally
-                        if let Ok(rpcmsg) = frame.to_rpcmesage() {
-                            let dir = Ok((dir(DIR_LS_METHODS.iter().into_iter(), rpcmsg.param().into()), None));
-                            Some(dir)
-                        } else {
-                            Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
-                        }
-                    } else { None }
-                } else { None }
-            } else { None }
+    let is_leaf = match &children_on_path {
+        None => { is_mount_point }
+        Some(dirs) => { dirs.is_empty() }
+    };
+    if children_on_path.is_none() && !is_mount_point {
+        // path doesn't exist
+        return Some(Err(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid shv path: {}", shv_path))))
+    }
+    if method == METH_DIR && !is_mount_point {
+        // dir in the middle of the tree must be resolved locally
+        if let Ok(rpcmsg) = frame.to_rpcmesage() {
+            let dir = Ok((dir(DIR_LS_METHODS.iter().into_iter(), rpcmsg.param().into()), None));
+            return Some(dir)
+        } else {
+            return Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
         }
     }
+    if method == METH_LS && !is_leaf {
+        // ls on not-leaf node must be resolved locally
+        if let Ok(rpcmsg) = frame.to_rpcmesage() {
+            let ls = ls(&mounts, shv_path, rpcmsg.param().into());
+            return Some(ls)
+        } else {
+            return Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
+        }
+    }
+    None
 }
 fn ls<V>(mounts: &BTreeMap<String, V>, shv_path: &str, param: LsParam) -> ProcessRequestResult {
     ls_children_to_result(children_on_path(mounts, shv_path), param)
@@ -219,35 +215,6 @@ pub fn find_longest_prefix<'a, 'b, V>(map: &'a BTreeMap<String, V>, shv_path: &'
     None
 }
 
-// fn process_request_dir_ls<'a, K>(methods: impl Iterator<Item=&'a MetaMethod<K>>, rpcmsg: &RpcMessage) -> ProcessRequestResult {
-//     let shv_path = rpcmsg.shv_path_or_empty();
-//     if shv_path.is_empty() {
-//         match rpcmsg.method() {
-//             Some(METH_DIR) => {
-//                 Ok((dir(methods, rpcmsg.param().into()), None))
-//             }
-//             Some(METH_LS) => {
-//                 match LsParam::from(rpcmsg.param()) {
-//                     LsParam::List => {
-//                         Ok((rpcvalue::List::new().into(), None))
-//                     }
-//                     LsParam::Exists(_path) => {
-//                         Ok((false.into(), None))
-//                     }
-//                 }
-//             }
-//             _ => {
-//                 let errmsg = format!("Unknown method '{}:{}()'", rpcmsg.shv_path_or_empty(), rpcmsg.method().unwrap_or(""));
-//                 warn!("{}", &errmsg);
-//                 Err(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
-//             }
-//         }
-//     } else {
-//         let errmsg = format!("Unknown method '{}:{}()', invalid path.", rpcmsg.shv_path_or_empty(), rpcmsg.method().unwrap_or(""));
-//         warn!("{}", &errmsg);
-//         Err(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
-//     }
-// }
 pub struct Signal {
     pub value: RpcValue,
     pub method: &'static str,
