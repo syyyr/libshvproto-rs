@@ -468,6 +468,10 @@ impl Broker {
         }
         None
     }
+    pub fn clients(&mut self) -> rpcvalue::List {
+        let ids: rpcvalue::List = self.peers.iter().map(|(id, _)| RpcValue::from(*id) ).collect();
+        ids
+    }
 }
 async fn broker_loop(events: Receiver<ClientEvent>) {
     let mut mounts= BTreeMap::new();

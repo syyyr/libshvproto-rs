@@ -23,11 +23,21 @@ impl ShvNode<crate::Broker> for AppBrokerNode {
         match rq.method() {
             Some(METH_CLIENT_INFO) => {
                 let client_id = rq.param().unwrap_or_default().as_i32();
-                Ok((RpcValue::from(broker.client_info(client_id).unwrap_or_default()), None))
+                match broker.client_info(client_id) {
+                    None => { Ok((RpcValue::null(), None)) }
+                    Some(info) => { RpcValue::from(info).into() }
+                }
             }
             Some(METH_MOUNTED_CLIENT_INFO) => {
                 let mount_point = rq.param().unwrap_or_default().as_str();
-                Ok((RpcValue::from(broker.mounted_client_info(mount_point).unwrap_or_default()), None))
+                match broker.mounted_client_info(mount_point) {
+                    None => { Ok((RpcValue::null(), None)) }
+                    Some(info) => { RpcValue::from(info).into() }
+                }
+            }
+            Some(METH_CLIENTS) => {
+                let clients = broker.clients();
+                RpcValue::from(clients).into()
             }
             _ => {
                 ShvNode::<crate::Broker>::process_dir_ls(self, rq)

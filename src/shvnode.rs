@@ -220,7 +220,9 @@ pub struct Signal {
     pub method: &'static str,
 }
 pub type ProcessRequestResult = std::result::Result<(RpcValue, Option<Signal>), RpcError>;
-// type RequestHandler<S, K> = fn(this: &mut S, rq: &RpcMessage, state: &mut K) -> ProcessRequestResult;
+impl From<RpcValue> for ProcessRequestResult {
+    fn from(val: RpcValue) -> Self { Ok((val, None)) }
+}
 pub trait ShvNode<K> {
     fn methods(&self) -> Vec<&MetaMethod>;
     fn process_request(&mut self, rq: &RpcMessage, state: &mut K) -> ProcessRequestResult;
