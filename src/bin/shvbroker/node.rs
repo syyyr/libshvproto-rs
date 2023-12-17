@@ -22,13 +22,13 @@ impl ShvNode<crate::Broker> for AppBrokerNode {
     fn process_request(&mut self, rq: &RpcMessage, broker: &mut crate::Broker) -> ProcessRequestResult {
         match rq.method() {
             Some(METH_CLIENT_INFO) => {
-                let client_id = broker.request_context.caller_client_id;
+                let client_id = rq.param().unwrap_or_default().as_i32();
                 Ok((RpcValue::from(broker.client_info(client_id).unwrap_or_default()), None))
             }
-            //Some(METH_MOUNTED_CLIENT_INFO) => {
-            //    let mount_path = rq.param().unwrap_or_default().as_str();
-            //    Ok((RpcValue::from(broker.mounted_client_info(mount_path).unwrap_or_default()), None))
-            //}
+            Some(METH_MOUNTED_CLIENT_INFO) => {
+                let mount_point = rq.param().unwrap_or_default().as_str();
+                Ok((RpcValue::from(broker.mounted_client_info(mount_point).unwrap_or_default()), None))
+            }
             _ => {
                 ShvNode::<crate::Broker>::process_dir_ls(self, rq)
             }

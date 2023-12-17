@@ -441,18 +441,32 @@ impl Broker {
             None
         }
     }
+    fn peer_to_info(client_id: CliId, peer: &Peer) -> rpcvalue::Map {
+        rpcvalue::Map::from([
+            ("clientId".to_string(), client_id.into()),
+            ("userName".to_string(), RpcValue::from(&peer.user)),
+            ("mountPoint".to_string(), RpcValue::from(peer.mount_point.clone().unwrap_or_default())),
+            ("subscriptions".to_string(), "NIY".into()),
+        ]
+        )
+    }
     pub fn client_info(&mut self, client_id: CliId) -> Option<rpcvalue::Map> {
         match self.peers.get(&client_id) {
             None => { None }
             Some(peer) => {
-                Some(rpcvalue::Map::from([
-                    ("clientId".to_string(), client_id.into()),
-                    ("userName".to_string(), RpcValue::from(&peer.user)),
-                    ("mountPoint".to_string(), RpcValue::from(peer.mount_point.clone().unwrap_or_default())),
-                    ("subscriptions".to_string(), "NIY".into()),
-                ]
-                )) }
+                Some(Broker::peer_to_info(client_id, peer))
+            }
         }
+    }
+    pub fn mounted_client_info(&mut self, mount_point: &str) -> Option<rpcvalue::Map> {
+        for (client_id, peer) in &self.peers {
+            if let Some(mount_point1) = &peer.mount_point {
+                if mount_point1 == mount_point {
+                    return Some(Broker::peer_to_info(*client_id, peer))
+                }
+            }
+        }
+        None
     }
 }
 async fn broker_loop(events: Receiver<ClientEvent>) {
