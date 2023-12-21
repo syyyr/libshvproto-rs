@@ -1,4 +1,3 @@
-use glob::Pattern;
 use log::LevelFilter;
 use sha1::Sha1;
 use sha1::Digest;
@@ -25,10 +24,6 @@ pub fn join_path(p1: &str, p2: &str) -> String {
     } else {
         p1.to_string() + "/" + p2
     }
-}
-
-pub fn glob_match(path: &str, pattern: &str) -> bool {
-    Pattern::new(pattern).unwrap().matches(path)
 }
 
 pub fn parse_log_verbosity<'a>(verbosity: &'a str, module_path: &'a str) -> Vec<(&'a str, LevelFilter)> {

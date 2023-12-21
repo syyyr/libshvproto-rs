@@ -4,6 +4,7 @@ use std::{
 use std::collections::BTreeMap;
 use futures::{select, FutureExt, StreamExt};
 use async_std::{channel, io::BufReader, net::{TcpListener, TcpStream, ToSocketAddrs}, prelude::*, task};
+use glob::{Pattern};
 use rand::distributions::{Alphanumeric, DistString};
 use log::*;
 use structopt::StructOpt;
@@ -13,7 +14,7 @@ use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
 use shv::shvnode::{find_longest_prefix, ShvNode, ProcessRequestResult, process_local_dir_ls};
-use shv::util::{glob_match, parse_log_verbosity, sha1_hash};
+use shv::util::{parse_log_verbosity, sha1_hash};
 use crate::config::{Config, default_config, Password};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -300,29 +301,38 @@ enum Mount<K> {
     Node(Node<K>),
 }
 #[derive(Debug)]
-struct PathPattern(String);
-impl PathPattern {
-    fn match_glob(&self, _: &str) -> bool {
-        return true
-    }
-}
-#[derive(Debug)]
-struct MethodPattern(String);
-impl MethodPattern {
-    fn match_glob(&self, _: &str) -> bool {
-        return true
-    }
-}
-#[derive(Debug)]
+#[derive(PartialEq)]
 struct Subscription {
-    path: PathPattern,
-    method: MethodPattern,
+    paths: Pattern,
+    methods: Pattern,
 }
 impl Subscription {
     fn match_signal(&self, path: &str, method: &str) -> bool {
-        self.path.match_glob(path) && self.method.match_glob(method)
+        self.paths.matches(path) && self.methods.matches(method)
+    }
+    pub fn from_rpcvalue(value: &RpcValue) -> Result<Subscription> {
+        let m = value.as_map();
+        let methods = m.get("method").unwrap_or(m.get("methods").unwrap_or_default()).as_str();
+        let methods = if methods.is_empty() { "?*" } else { methods };
+        let paths = m.get("path").unwrap_or(m.get("paths").unwrap_or_default()).as_str();
+        let paths = if paths.is_empty() { "**" } else { paths };
+        match Pattern::new(methods) {
+            Ok(methods) => {
+                match Pattern::new(paths) {
+                    Ok(paths) => {
+                        Ok(Subscription {
+                            methods,
+                            paths,
+                        })
+                    }
+                    Err(err) => { Err(format!("{}", &err).into()) }
+                }
+            }
+            Err(err) => { Err(format!("{}", &err).into()) }
+        }
     }
 }
+
 struct RequestContext {
     caller_client_id: CliId,
 }
@@ -427,8 +437,8 @@ impl Broker {
                             log!(target: "Acl", Level::Debug, "----------- access for role: {}", role_name);
                             for rule in &role.access {
                                 log!(target: "Acl", Level::Debug, "\trule: {}:{}", rule.path, rule.method);
-                                if rule.method.is_empty() || &rule.method == method {
-                                    if glob_match(shv_path, &rule.path) {
+                                if rule.method.matches(method) {
+                                    if rule.path.matches(shv_path) {
                                         log!(target: "Acl", Level::Debug, "\t\t HIT");
                                         return Some(rule.grant.clone());
                                     }
@@ -476,6 +486,17 @@ impl Broker {
        self.peers.iter().filter(|(_id, peer)| peer.mount_point.is_some()).map(|(_id, peer)| {
             RpcValue::from(peer.mount_point.clone().unwrap())
         } ).collect()
+    }
+    pub fn subscribe(&mut self, client_id: CliId, subscription: Subscription) -> Result<bool> {
+        let peer = self.peers.get_mut(&client_id).expect("client ID must be valid here");
+        peer.subscriptions.push(subscription);
+        Ok(true)
+    }
+    pub fn unsubscribe(&mut self, client_id: CliId, subscription: &Subscription) -> Result<bool> {
+        let peer = self.peers.get_mut(&client_id).expect("client ID must be valid here");
+        let cnt = peer.subscriptions.len();
+        peer.subscriptions.retain(|subscr| subscr != subscription);
+        Ok(cnt != peer.subscriptions.len())
     }
 }
 async fn broker_loop(events: Receiver<ClientEvent>) {
