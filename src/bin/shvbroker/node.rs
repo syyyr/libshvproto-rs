@@ -6,11 +6,13 @@ use crate::Broker;
 const METH_CLIENT_INFO: &str = "clientInfo";
 const METH_MOUNTED_CLIENT_INFO: &str = "mountedClientInfo";
 const METH_CLIENTS: &str = "clients";
+const METH_MOUNTS: &str = "mounts";
 
-const APP_BROKER_METHODS: [MetaMethod; 3] = [
+const APP_BROKER_METHODS: [MetaMethod; 4] = [
     MetaMethod { name: METH_CLIENT_INFO, param: "Int", result: "ClientInfo", access: Access::Service, flags: Flag::None as u32, description: "" },
     MetaMethod { name: METH_MOUNTED_CLIENT_INFO, param: "String", result: "ClientInfo", access: Access::Service, flags: Flag::None as u32, description: "" },
-    MetaMethod { name: METH_CLIENTS, param: "", result: "List[Int]", access: Access::Service, flags: Flag::None as u32, description: "" },
+    MetaMethod { name: METH_CLIENTS, param: "", result: "List[Int]", access: Access::SuperService, flags: Flag::None as u32, description: "" },
+    MetaMethod { name: METH_MOUNTS, param: "", result: "List[String]", access: Access::SuperService, flags: Flag::None as u32, description: "" },
 ];
 
 pub(crate) struct AppBrokerNode {}
@@ -38,6 +40,10 @@ impl ShvNode<crate::Broker> for AppBrokerNode {
             Some(METH_CLIENTS) => {
                 let clients = broker.clients();
                 RpcValue::from(clients).into()
+            }
+            Some(METH_MOUNTS) => {
+                let mounts = broker.mounts();
+                RpcValue::from(mounts).into()
             }
             _ => {
                 ShvNode::<crate::Broker>::process_dir_ls(self, rq)

@@ -125,13 +125,19 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
     assert!(device_process_guard.is_running());
 
     println!("---broker---: test:ls()");
-    assert_eq!(call("test", "ls", "")?, (vec![RpcValue::from("device")].into()));
+    assert_eq!(call("test", "ls", "")?, vec![RpcValue::from("device")].into());
     println!("---broker---: test/device:ls()");
-    assert_eq!(call("test/device", "ls", "")?, (vec![RpcValue::from(".app"), RpcValue::from("number")].into()));
+    assert_eq!(call("test/device", "ls", "")?, vec![RpcValue::from(".app"), RpcValue::from("number")].into());
     println!("---broker---: test/device/.app:ping()");
     assert_eq!(call("test/device/.app", "ping", "")?, RpcValue::null());
     println!("---broker---: test/device/number:ls()");
-    assert_eq!(call("test/device/number", "ls", "")?, (rpcvalue::List::new().into()));
+    assert_eq!(call("test/device/number", "ls", "")?, rpcvalue::List::new().into());
+
+    println!("---broker---: .app/broker:clients()");
+    assert_eq!(call(".app/broker", "clients", "")?.as_list().len(), 2); // [device-id, shvcall-id]
+
+    println!("---broker---: .app/broker:mounts()");
+    assert_eq!(call(".app/broker", "mounts", "")?, vec![RpcValue::from("test/device")].into());
 
     Ok(())
 }

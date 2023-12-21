@@ -468,9 +468,14 @@ impl Broker {
         }
         None
     }
-    pub fn clients(&mut self) -> rpcvalue::List {
+    pub fn clients(&self) -> rpcvalue::List {
         let ids: rpcvalue::List = self.peers.iter().map(|(id, _)| RpcValue::from(*id) ).collect();
         ids
+    }
+    pub fn mounts(&self) -> rpcvalue::List {
+       self.peers.iter().filter(|(_id, peer)| peer.mount_point.is_some()).map(|(_id, peer)| {
+            RpcValue::from(peer.mount_point.clone().unwrap())
+        } ).collect()
     }
 }
 async fn broker_loop(events: Receiver<ClientEvent>) {
