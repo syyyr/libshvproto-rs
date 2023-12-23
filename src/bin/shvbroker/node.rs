@@ -1,8 +1,9 @@
 use shv::metamethod::{Access, Flag, MetaMethod};
 use shv::{RpcMessage, RpcMessageMetaTags, RpcValue};
+use shv::rpc::Subscription;
 use shv::rpcmessage::RpcError;
 use shv::shvnode::{DIR_LS_METHODS, ProcessRequestResult, ShvNode};
-use crate::{Broker, Subscription};
+use crate::{Broker};
 
 const METH_CLIENT_INFO: &str = "clientInfo";
 const METH_MOUNTED_CLIENT_INFO: &str = "mountedClientInfo";

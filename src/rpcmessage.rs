@@ -95,6 +95,9 @@ impl RpcMessage {
     pub fn is_success(&self) -> bool {
         self.result().is_ok()
     }
+    pub fn is_error(&self) -> bool {
+        self.error().is_some()
+    }
 
     fn tag<Idx>(&self, key: Idx) -> Option<&RpcValue>
         where Idx: GetIndex

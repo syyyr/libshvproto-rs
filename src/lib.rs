@@ -14,6 +14,7 @@ pub mod chainpack;
 pub mod connection;
 pub mod client;
 pub mod shvnode;
+pub mod rpc;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;

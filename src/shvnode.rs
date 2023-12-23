@@ -287,14 +287,14 @@ pub const DIR_LS_METHODS: [MetaMethod; 2] = [
     MetaMethod { name: METH_LS, flags: Flag::None as u32, access: Access::Browse, param: "LsParam", result: "LsResult", description: "" },
 ];
 pub const PROPERTY_METHODS: [MetaMethod; 3] = [
-    MetaMethod { name: METH_GET, flags: 1 << Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
-    MetaMethod { name: METH_SET, flags: 1 << Flag::IsSetter as u32, access: Access::Browse, param: "", result: "", description: "" },
-    MetaMethod { name: SIG_CHNG, flags: 1 << Flag::IsSignal as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: METH_GET, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: METH_SET, flags: Flag::IsSetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: SIG_CHNG, flags: Flag::IsSignal as u32, access: Access::Browse, param: "", result: "", description: "" },
 ];
 const DEVICE_METHODS: [MetaMethod; 3] = [
-    MetaMethod { name: METH_NAME, flags: 1 << Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
-    MetaMethod { name: METH_VERSION, flags: 1 << Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
-    MetaMethod { name: METH_SERIAL_NUMBER, flags: 1 << Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: METH_NAME, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: METH_VERSION, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: METH_SERIAL_NUMBER, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
 ];
 pub struct AppNode {
     pub app_name: &'static str,
@@ -311,9 +311,9 @@ impl Default for AppNode {
     }
 }
 const APP_METHODS: [MetaMethod; 4] = [
-    MetaMethod { name: METH_SHV_VERSION_MAJOR, flags: 1 << Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
-    MetaMethod { name: METH_SHV_VERSION_MINOR, flags: 1 << Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
-    MetaMethod { name: METH_NAME, flags: 1 << Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: METH_SHV_VERSION_MAJOR, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: METH_SHV_VERSION_MINOR, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
+    MetaMethod { name: METH_NAME, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
     MetaMethod { name: METH_PING, flags: Flag::None as u32, access: Access::Browse, param: "", result: "", description: "" },
 ];
 

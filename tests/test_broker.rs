@@ -1,8 +1,8 @@
 extern crate shv;
 
-use std::process::{Child, Command};
+use std::process::{Child, Command, Output};
 use std::{thread, time::Duration};
-use shv::{metamethod, RpcMessage, RpcValue, rpcvalue};
+use shv::{metamethod, RpcMessage, RpcMessageMetaTags, RpcValue, rpcvalue};
 use shv::metamethod::{Flag, MetaMethod};
 use shv::shvnode::{METH_DIR, METH_LS, METH_NAME, METH_PING};
 
@@ -38,6 +38,27 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
     thread::sleep(Duration::from_millis(100));
     assert!(broker_process_guard.is_running());
 
+    fn rpcmsg_from_output(output: Output) -> Result<RpcMessage, Box<dyn std::error::Error>> {
+        if !output.status.success() {
+            let errmsg = std::str::from_utf8(&output.stderr)?;
+            return Err(format!("Process exited with error code {:?}, stderr: {}", output.status.code(), errmsg).into());
+        }
+        let out = output.stdout;
+        let cpon = std::str::from_utf8(&out)?;
+        let rv = RpcValue::from_cpon(cpon)?;
+        RpcMessage::from_rpcvalue(rv).map_err(|err| err.into())
+    }
+    fn result_from_output(output: Output) -> Result<RpcValue, Box<dyn std::error::Error>> {
+        if !output.status.success() {
+            let errmsg = std::str::from_utf8(&output.stderr)?;
+            return Err(format!("Process exited with error code {:?}, stderr: {}", output.status.code(), errmsg).into());
+        }
+        let msg = rpcmsg_from_output(output)?;
+        let result = msg.result()?;
+        //println!("cpon: {}, expected: {}", result, expected_value.to_cpon());
+        //assert_eq!(result, expected_value);
+        Ok(result.clone())
+    }
     fn call(path: &str, method: &str, param: &str) -> Result<RpcValue, Box<dyn std::error::Error>> {
         let output = Command::new("target/debug/shvcall")
             .arg("--url").arg("tcp://admin:admin@localhost")
@@ -46,18 +67,7 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
             .arg("--param").arg(param)
             .output()?;
 
-        let out = output.stdout;
-        if !output.status.success() {
-            let errmsg = std::str::from_utf8(&output.stderr)?;
-            return Err(format!("Process exited with error code {:?}, stderr: {}", output.status.code(), errmsg).into());
-        }
-        let cpon = std::str::from_utf8(&out)?;
-        let rv = RpcValue::from_cpon(cpon)?;
-        let msg = RpcMessage::from_rpcvalue(rv)?;
-        let result = msg.result()?;
-        //println!("cpon: {}, expected: {}", result, expected_value.to_cpon());
-        //assert_eq!(result, expected_value);
-        Ok(result.clone())
+        result_from_output(output)
     }
 
     println!("====== broker =====");
@@ -70,7 +80,7 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
         let expected_methods = vec![
             MetaMethod { name: METH_DIR.into(), param: "DirParam".into(), result: "DirResult".into(), ..Default::default() },
             MetaMethod { name: METH_LS.into(), param: "LsParam".into(), result: "LsResult".into(), ..Default::default() },
-            MetaMethod { name: METH_NAME.into(), flags: 1 << Flag::IsGetter as u32,  ..Default::default() },
+            MetaMethod { name: METH_NAME.into(), flags: Flag::IsGetter as u32,  ..Default::default() },
             MetaMethod { name: METH_PING.into(), ..Default::default() },
         ];
         {
@@ -113,7 +123,6 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
     println!("---broker---: .app:ping()");
     assert_eq!(call(".app", "ping", "")?, RpcValue::null());
 
-
     println!("====== device =====");
     let mut device_process_guard = KillProcessGuard {
         child: Command::new("target/debug/examples/device")
@@ -138,6 +147,28 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("---broker---: .app/broker:mounts()");
     assert_eq!(call(".app/broker", "mounts", "")?, vec![RpcValue::from("test/device")].into());
-
+    {
+        println!("====== subscriptions =====");
+        let sig_trap_proc = Command::new("target/debug/shvcall")
+            .arg("--url").arg("tcp://admin:admin@localhost")
+            .arg("--signal-trap")
+            .arg("--path").arg("test/**")
+            .arg("--method").arg("")
+            .arg("--timeout").arg("1s")
+            .arg("-v").arg("RpcMsg")
+            .spawn()?;
+        call("test/device/number", "set", "1234")?;
+        let output = sig_trap_proc.wait_with_output()?;
+        match output.status.code() {
+            Some(code) => println!("Exited with status code: {code}"),
+            None => println!("Process terminated by signal")
+        }
+        println!("STATUS {:?}", output.status.code());
+        assert!(output.status.success());
+        let msg = rpcmsg_from_output(output)?;
+        assert_eq!(msg.shv_path().ok_or("shv path missing")?, "test/device/number");
+        assert_eq!(msg.method().ok_or("method missing")?, "chng");
+        assert_eq!(msg.param().ok_or("param missing")?.as_i32(), 1234);
+    }
     Ok(())
 }

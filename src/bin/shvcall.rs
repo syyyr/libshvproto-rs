@@ -1,6 +1,6 @@
-use async_std::{io,prelude::*};
+use async_std::{io, prelude::*};
 use structopt::StructOpt;
-use async_std::io::BufReader;
+use async_std::io::{BufReader};
 use async_std::net::TcpStream;
 use shv::{client, RpcMessage, RpcValue};
 use async_std::task;
@@ -9,6 +9,9 @@ use percent_encoding::percent_decode;
 use simple_logger::SimpleLogger;
 use url::Url;
 use shv::client::LoginParams;
+use shv::rpc::Subscription;
+
+type Result = shv::Result<()>;
 
 #[derive(StructOpt, Debug)]
 //#[structopt(name = "shvcall", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "SHV call")]
@@ -22,6 +25,12 @@ struct Opts {
     method: String,
     #[structopt(short = "-a", long = "--param")]
     param: Option<String>,
+    /// Timeout while shvcall will wait for response, program will finish with error if timeout expires. Example: '1s' for one second, see duration-str crate
+    #[structopt(short = "-t", long = "--timeout")]
+    timeout: Option<String>,
+    /// Subscribe 'path' and 'method' and wait for first signal received
+    #[structopt(short = "-r", long = "--signal-trap")]
+    signal_trap: bool,
     /// Verbose mode (module, .)
     #[structopt(short = "v", long = "verbose")]
     verbose: Option<String>,
@@ -31,7 +40,7 @@ struct Opts {
 }
 
 // const DEFAULT_RPC_TIMEOUT_MSEC: u64 = 5000;
-pub(crate) fn main() -> shv::Result<()> {
+pub(crate) fn main() -> Result {
     let opts = Opts::from_args();
 
     let mut logger = SimpleLogger::new();
@@ -58,8 +67,7 @@ pub(crate) fn main() -> shv::Result<()> {
     task::block_on(try_main(&url, &opts))
 }
 
-async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
-
+async fn make_call(url: &Url, opts: &Opts) -> Result {
     // Establish a connection
     let address = format!("{}:{}", url.host_str().unwrap_or_default(), url.port().unwrap_or(3755));
     let stream = TcpStream::connect(&address).await?;
@@ -69,7 +77,7 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     let mut frame_reader = shv::connection::FrameReader::new(&mut brd);
 
     // login
-    let login_params = LoginParams{
+    let login_params = LoginParams {
         user: url.username().to_string(),
         password: percent_decode(url.password().unwrap_or("").as_bytes()).decode_utf8()?.into(),
         heartbeat_interval: None,
@@ -77,19 +85,28 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     };
 
     client::login(&mut frame_reader, &mut writer, &login_params).await?;
-
-    let param = match &opts.param {
-        None => None,
-        Some(p) => {
-            if p.is_empty() {
-                None
-            } else {
-                Some(RpcValue::from_cpon(&p)?)
+    if opts.signal_trap {
+        let subs = Subscription::new("test/**", "").expect("subscription params shall be correct");
+        let rpcmsg = RpcMessage::new_request(".app/broker/currentClient", "subscribe", Some(subs.into()));
+        shv::connection::send_message(&mut writer, &rpcmsg).await?;
+        let resp = frame_reader.receive_message().await?.ok_or("Subscribe error")?;
+        if resp.is_error() {
+            return Result::Err(format!("Subscribe error: {}", resp.error().unwrap()).into());
+        }
+    } else {
+        let param = match &opts.param {
+            None => None,
+            Some(p) => {
+                if p.is_empty() {
+                    None
+                } else {
+                    Some(RpcValue::from_cpon(&p)?)
+                }
             }
-        },
-    };
-    let rpcmsg = RpcMessage::new_request(&opts.path, &opts.method, param);
-    shv::connection::send_message(&mut writer, &rpcmsg).await?;
+        };
+        let rpcmsg = RpcMessage::new_request(&opts.path, &opts.method, param);
+        shv::connection::send_message(&mut writer, &rpcmsg).await?;
+    }
 
     let resp = frame_reader.receive_message().await?.ok_or("Receive error")?;
     let mut stdout = io::stdout();
@@ -101,4 +118,25 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     stdout.write_all(&response_bytes).await?;
     stdout.flush().await?;
     Ok(())
+}
+
+async fn try_main(url: &Url, opts: &Opts) -> Result {
+    let result = match &opts.timeout {
+        None => {
+            make_call(url, opts).await
+        }
+        Some(dur) => {
+            let dur = duration_str::parse(dur)?;
+            let fut = make_call(url, opts);
+            let fut = async_std::future::timeout(dur, fut);
+            fut.await?
+        }
+    };
+    match result {
+        Ok(_) => { Ok(()) }
+        Err(err) => {
+            eprintln!("{err}");
+            Err(err)
+        }
+    }
 }

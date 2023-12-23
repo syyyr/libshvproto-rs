@@ -4,7 +4,6 @@ use std::{
 use std::collections::BTreeMap;
 use futures::{select, FutureExt, StreamExt};
 use async_std::{channel, io::BufReader, net::{TcpListener, TcpStream, ToSocketAddrs}, prelude::*, task};
-use glob::{Pattern};
 use rand::distributions::{Alphanumeric, DistString};
 use log::*;
 use structopt::StructOpt;
@@ -13,6 +12,7 @@ use shv::{RpcMessage, RpcValue, rpcvalue, util};
 use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
+use shv::rpc::Subscription;
 use shv::shvnode::{find_longest_prefix, ShvNode, ProcessRequestResult, process_local_dir_ls};
 use shv::util::{parse_log_verbosity, sha1_hash};
 use crate::config::{Config, default_config, Password};
@@ -300,39 +300,6 @@ enum Mount<K> {
     Peer(Device),
     Node(Node<K>),
 }
-#[derive(Debug)]
-#[derive(PartialEq)]
-struct Subscription {
-    paths: Pattern,
-    methods: Pattern,
-}
-impl Subscription {
-    fn match_signal(&self, path: &str, method: &str) -> bool {
-        self.paths.matches(path) && self.methods.matches(method)
-    }
-    pub fn from_rpcvalue(value: &RpcValue) -> Result<Subscription> {
-        let m = value.as_map();
-        let methods = m.get("method").unwrap_or(m.get("methods").unwrap_or_default()).as_str();
-        let methods = if methods.is_empty() { "?*" } else { methods };
-        let paths = m.get("path").unwrap_or(m.get("paths").unwrap_or_default()).as_str();
-        let paths = if paths.is_empty() { "**" } else { paths };
-        match Pattern::new(methods) {
-            Ok(methods) => {
-                match Pattern::new(paths) {
-                    Ok(paths) => {
-                        Ok(Subscription {
-                            methods,
-                            paths,
-                        })
-                    }
-                    Err(err) => { Err(format!("{}", &err).into()) }
-                }
-            }
-            Err(err) => { Err(format!("{}", &err).into()) }
-        }
-    }
-}
-
 struct RequestContext {
     caller_client_id: CliId,
 }
@@ -488,6 +455,7 @@ impl Broker {
         } ).collect()
     }
     pub fn subscribe(&mut self, client_id: CliId, subscription: Subscription) -> Result<bool> {
+        log!(target: "Subscr", Level::Debug, "New subscription for client id: {} - {}", client_id, &subscription);
         let peer = self.peers.get_mut(&client_id).expect("client ID must be valid here");
         peer.subscriptions.push(subscription);
         Ok(true)
@@ -537,7 +505,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                                     frame.push_caller_id(client_id);
                                                     frame.set_shvpath(node_path);
                                                     frame.set_access(&grant);
-                                                    let _ = broker.peers.get(&device_client_id).unwrap().sender.send(PeerEvent::Frame(frame)).await;
+                                                    let _ = broker.peers.get(&device_client_id).expect("client ID must exist").sender.send(PeerEvent::Frame(frame)).await;
                                                     None
                                                 }
                                                 Mount::Node(node) => {
@@ -580,12 +548,11 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                 peer.sender.send(PeerEvent::Frame(frame)).await.unwrap();
                             }
                         } else if frame.is_signal() {
-                            // send signal to all clients until subscribe method will be implemented
                             if let Some(mount_point) = broker.client_id_to_mount_point(client_id) {
                                 let new_path = util::join_path(&mount_point, frame.shv_path().unwrap_or_default());
                                 for (cli_id, peer) in broker.peers.iter() {
                                     if &client_id != cli_id {
-                                        if peer.is_signal_subscribed(frame.shv_path().unwrap_or_default(), frame.method().unwrap_or("")) {
+                                        if peer.is_signal_subscribed(&new_path, frame.method().unwrap_or_default()) {
                                             let mut frame = frame.clone();
                                             frame.set_shvpath(&new_path);
                                             peer.sender.send(PeerEvent::Frame(frame)).await.unwrap();
