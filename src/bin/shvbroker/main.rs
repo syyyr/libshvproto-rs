@@ -43,11 +43,11 @@ pub(crate) fn main() -> Result<()> {
     }
     logger.init().unwrap();
 
-    trace!("trace message");
-    debug!("debug message");
-    info!("info message");
-    warn!("warn message");
-    error!("error message");
+    //trace!("trace message");
+    //debug!("debug message");
+    //info!("info message");
+    //warn!("warn message");
+    //error!("error message");
     log!(target: "RpcMsg", Level::Debug, "RPC message");
     log!(target: "Acl", Level::Debug, "ACL message");
 

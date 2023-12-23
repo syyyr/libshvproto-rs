@@ -25,20 +25,26 @@ impl Drop for KillProcessGuard {
 }
 
 pub fn rpcmsg_from_output(output: Output) -> shv::Result<RpcMessage> {
-    if !output.status.success() {
-        let errmsg = std::str::from_utf8(&output.stderr)?;
-        return Err(format!("Process exited with error code {:?}, stderr: {}", output.status.code(), errmsg).into());
-    }
-    let out = output.stdout;
-    let cpon = std::str::from_utf8(&out)?;
-    let rv = RpcValue::from_cpon(cpon)?;
+    let rv = rpcvalue_from_output(output)?;
     Ok(RpcMessage::from_rpcvalue(rv)?)
 }
-pub fn result_from_output(output: Output) -> shv::Result<RpcValue> {
+pub fn rpcvalue_from_output(output: Output) -> shv::Result<RpcValue> {
+    let out = bytes_from_output(output)?;
+    let cpon = std::str::from_utf8(&out)?;
+    Ok(RpcValue::from_cpon(cpon)?)
+}
+pub fn bytes_from_output(output: Output) -> shv::Result<Vec<u8>> {
     if !output.status.success() {
         let errmsg = std::str::from_utf8(&output.stderr)?;
         return Err(format!("Process exited with error code {:?}, stderr: {}", output.status.code(), errmsg).into());
     }
+    Ok(output.stdout)
+}
+pub fn text_from_output(output: Output) -> shv::Result<String> {
+    let bytes = bytes_from_output(output)?;
+    Ok(String::from_utf8(bytes)?)
+}
+pub fn result_from_output(output: Output) -> shv::Result<RpcValue> {
     let msg = rpcmsg_from_output(output)?;
     let result = msg.result()?;
     //println!("cpon: {}, expected: {}", result, expected_value.to_cpon());
@@ -47,6 +53,7 @@ pub fn result_from_output(output: Output) -> shv::Result<RpcValue> {
 }
 pub fn shv_call(path: &str, method: &str, param: &str) -> shv::Result<RpcValue> {
     let output = Command::new("target/debug/shvcall")
+        .arg("-v").arg(".:T")
         .arg("--url").arg("tcp://admin:admin@localhost")
         .arg("--path").arg(path)
         .arg("--method").arg(method)

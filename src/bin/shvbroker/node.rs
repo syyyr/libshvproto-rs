@@ -2,7 +2,7 @@ use shv::metamethod::{Access, Flag, MetaMethod};
 use shv::{RpcMessage, RpcMessageMetaTags, RpcValue};
 use shv::rpc::Subscription;
 use shv::rpcmessage::RpcError;
-use shv::shvnode::{DIR_LS_METHODS, ProcessRequestResult, ShvNode};
+use shv::shvnode::{ProcessRequestResult, ShvNode};
 use crate::{Broker};
 
 const METH_CLIENT_INFO: &str = "clientInfo";
@@ -20,7 +20,7 @@ const APP_BROKER_METHODS: [MetaMethod; 4] = [
 pub(crate) struct AppBrokerNode {}
 impl ShvNode<crate::Broker> for AppBrokerNode {
     fn methods(&self) -> Vec<&MetaMethod> {
-        DIR_LS_METHODS.iter().chain(APP_BROKER_METHODS.iter()).collect()
+        APP_BROKER_METHODS.iter().collect()
     }
 
     fn process_request(&mut self, rq: &RpcMessage, broker: &mut crate::Broker) -> ProcessRequestResult {
@@ -66,7 +66,7 @@ const METH_UNSUBSCRIBE: &str = "unsubscribe";
 pub(crate) struct AppBrokerCurrentClientNode {}
 impl ShvNode<Broker> for AppBrokerCurrentClientNode {
     fn methods(&self) -> Vec<&MetaMethod> {
-        DIR_LS_METHODS.iter().chain(APP_BROKER_CURRENT_CLIENT_METHODS.iter()).collect()
+        APP_BROKER_CURRENT_CLIENT_METHODS.iter().collect()
     }
 
     fn process_request(&mut self, rq: &RpcMessage, broker: &mut Broker) -> ProcessRequestResult {

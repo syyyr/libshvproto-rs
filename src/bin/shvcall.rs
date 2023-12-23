@@ -9,6 +9,8 @@ use percent_encoding::percent_decode;
 use simple_logger::SimpleLogger;
 use url::Url;
 use shv::client::LoginParams;
+use shv::connection::FrameReader;
+use shv::util::parse_log_verbosity;
 
 type Result = shv::Result<()>;
 
@@ -18,12 +20,15 @@ struct Opts {
     ///Url to connect to, example tcp://localhost:3755, localsocket:path/to/socket
     #[structopt(name = "url", short = "-s", long = "--url")]
     url: String,
-    #[structopt(short = "-p", long = "--path")]
-    path: String,
-    #[structopt(short = "-m", long = "--method")]
-    method: String,
-    #[structopt(short = "-a", long = "--param")]
+    #[structopt(short = "p", long = "path")]
+    path: Option<String>,
+    #[structopt(short = "m", long = "method")]
+    method: Option<String>,
+    #[structopt(short = "a", long = "param")]
     param: Option<String>,
+    /// Write only result, trim RPC message
+    #[structopt(short = "r", long = "trim-meta")]
+    trim_meta: bool,
     /// Verbose mode (module, .)
     #[structopt(short = "v", long = "verbose")]
     verbose: Option<String>,
@@ -37,15 +42,10 @@ pub(crate) fn main() -> Result {
     let opts = Opts::from_args();
 
     let mut logger = SimpleLogger::new();
-    logger = logger.with_level(LevelFilter::Error);
+    logger = logger.with_level(LevelFilter::Info);
     if let Some(module_names) = &opts.verbose {
-        for module_name in module_names.split(',') {
-            let module_name = if module_name == "." {
-                module_path!().to_string()
-            } else {
-                module_name.to_string()
-            };
-            logger = logger.with_module_level(&module_name, LevelFilter::Trace);
+        for (module, level) in parse_log_verbosity(&module_names, module_path!()) {
+            logger = logger.with_module_level(module, level);
         }
     }
     logger.init().unwrap();
@@ -78,29 +78,93 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
     };
 
     client::login(&mut frame_reader, &mut writer, &login_params).await?;
-
-    let param = match &opts.param {
-        None => None,
-        Some(p) => {
-            if p.is_empty() {
-                None
+    info!("Connected to broker.");
+    async fn print_resp(stdout: &mut io::Stdout, resp: &RpcMessage, to_chainpack: bool, trim_meta: bool) -> Result {
+        let rpcval = if resp.is_success() {
+            if trim_meta {
+                resp.result().expect("result should be set").clone()
             } else {
-                Some(RpcValue::from_cpon(&p)?)
+                resp.as_rpcvalue().clone()
+            }
+        } else {
+            resp.error().expect("error should be set").to_rpcvalue()
+        };
+        if to_chainpack {
+            let bytes = rpcval.to_chainpack();
+            stdout.write_all(&bytes).await?;
+            Ok(stdout.flush().await?)
+        } else {
+            let bytes = rpcval.to_cpon().into_bytes();
+            stdout.write_all(&bytes).await?;
+            Ok(stdout.write_all("\n".as_bytes()).await?)
+        }
+    }
+    async fn print_error(stdout: &mut io::Stdout, err: &str, to_chainpack: bool) -> Result {
+        if to_chainpack {
+            Ok(())
+        } else {
+            stdout.write_all(err.as_bytes()).await?;
+            Ok(stdout.write_all("\n".as_bytes()).await?)
+        }
+    }
+    async fn send_request(mut writer: &TcpStream, reader: &mut FrameReader<'_, BufReader<&TcpStream>>, path: &str, method: &str, param: &str) -> shv::Result<RpcMessage> {
+        let param = if param.is_empty() {
+            None
+        } else {
+            Some(RpcValue::from_cpon(param)?)
+        };
+        let rpcmsg = RpcMessage::new_request(path, method, param);
+        shv::connection::send_message(&mut writer, &rpcmsg).await?;
+
+        let resp = reader.receive_message().await?.ok_or("Receive error")?;
+        Ok(resp)
+
+    }
+    if opts.path.is_none() && opts.method.is_some() {
+        return Err("--path parameter missing".into())
+    }
+    if opts.path.is_some() && opts.method.is_none() {
+        return Err("--method parameter missing".into())
+    }
+    let mut stdout = io::stdout();
+    if opts.path.is_none() && opts.method.is_none() {
+        let stdin = io::stdin();
+        loop {
+            let mut line = String::new();
+            match stdin.read_line(&mut line).await {
+                Ok(nbytes) => {
+                    if nbytes == 0 {
+                        // stream closed
+                        break;
+                    } else {
+                        let method_ix = match line.find(':') {
+                            None => {
+                                print_error(&mut stdout, &format!("Invalid line format, method not found: {line}"), opts.chainpack).await?;
+                                break;
+                            }
+                            Some(ix) => { ix }
+                        };
+                        let param_ix = line.find(' ');
+                        let path = line[..method_ix].trim();
+                        let (method, param) = match param_ix {
+                            None => { (line[method_ix + 1 .. ].trim(), "") }
+                            Some(ix) => { (line[method_ix + 1 .. ix].trim(), line[ix + 1 ..].trim()) }
+                        };
+                        let resp = send_request(writer, &mut frame_reader, &path, &method, &param).await?;
+                        print_resp(&mut stdout, &resp, opts.chainpack, opts.trim_meta).await?;
+                    }
+                }
+                Err(err) => { return Err(format!("Read line error: {err}").into()) }
             }
         }
-    };
-    let rpcmsg = RpcMessage::new_request(&opts.path, &opts.method, param);
-    shv::connection::send_message(&mut writer, &rpcmsg).await?;
-
-    let resp = frame_reader.receive_message().await?.ok_or("Receive error")?;
-    let mut stdout = io::stdout();
-    let response_bytes = if opts.chainpack {
-        resp.as_rpcvalue().to_chainpack()
     } else {
-        resp.to_cpon().into_bytes()
-    };
-    stdout.write_all(&response_bytes).await?;
-    stdout.flush().await?;
+        let path = opts.path.clone().unwrap_or_default();
+        let method = opts.method.clone().unwrap_or_default();
+        let param = opts.param.clone().unwrap_or_default();
+        let resp = send_request(writer, &mut frame_reader, &path, &method, &param).await?;
+        print_resp(&mut stdout, &resp, opts.chainpack, opts.trim_meta).await?;
+    }
+
     Ok(())
 }
 
