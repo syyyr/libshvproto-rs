@@ -9,7 +9,6 @@ use percent_encoding::percent_decode;
 use simple_logger::SimpleLogger;
 use url::Url;
 use shv::client::LoginParams;
-use shv::rpc::Subscription;
 
 type Result = shv::Result<()>;
 
@@ -25,12 +24,6 @@ struct Opts {
     method: String,
     #[structopt(short = "-a", long = "--param")]
     param: Option<String>,
-    /// Timeout while shvcall will wait for response, program will finish with error if timeout expires. Example: '1s' for one second, see duration-str crate
-    #[structopt(short = "-t", long = "--timeout")]
-    timeout: Option<String>,
-    /// Subscribe 'path' and 'method' and wait for first signal received
-    #[structopt(short = "-r", long = "--signal-trap")]
-    signal_trap: bool,
     /// Verbose mode (module, .)
     #[structopt(short = "v", long = "verbose")]
     verbose: Option<String>,
@@ -85,28 +78,19 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
     };
 
     client::login(&mut frame_reader, &mut writer, &login_params).await?;
-    if opts.signal_trap {
-        let subs = Subscription::new("test/**", "").expect("subscription params shall be correct");
-        let rpcmsg = RpcMessage::new_request(".app/broker/currentClient", "subscribe", Some(subs.into()));
-        shv::connection::send_message(&mut writer, &rpcmsg).await?;
-        let resp = frame_reader.receive_message().await?.ok_or("Subscribe error")?;
-        if resp.is_error() {
-            return Result::Err(format!("Subscribe error: {}", resp.error().unwrap()).into());
-        }
-    } else {
-        let param = match &opts.param {
-            None => None,
-            Some(p) => {
-                if p.is_empty() {
-                    None
-                } else {
-                    Some(RpcValue::from_cpon(&p)?)
-                }
+
+    let param = match &opts.param {
+        None => None,
+        Some(p) => {
+            if p.is_empty() {
+                None
+            } else {
+                Some(RpcValue::from_cpon(&p)?)
             }
-        };
-        let rpcmsg = RpcMessage::new_request(&opts.path, &opts.method, param);
-        shv::connection::send_message(&mut writer, &rpcmsg).await?;
-    }
+        }
+    };
+    let rpcmsg = RpcMessage::new_request(&opts.path, &opts.method, param);
+    shv::connection::send_message(&mut writer, &rpcmsg).await?;
 
     let resp = frame_reader.receive_message().await?.ok_or("Receive error")?;
     let mut stdout = io::stdout();
@@ -121,18 +105,7 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
 }
 
 async fn try_main(url: &Url, opts: &Opts) -> Result {
-    let result = match &opts.timeout {
-        None => {
-            make_call(url, opts).await
-        }
-        Some(dur) => {
-            let dur = duration_str::parse(dur)?;
-            let fut = make_call(url, opts);
-            let fut = async_std::future::timeout(dur, fut);
-            fut.await?
-        }
-    };
-    match result {
+    match make_call(url, opts).await {
         Ok(_) => { Ok(()) }
         Err(err) => {
             eprintln!("{err}");
