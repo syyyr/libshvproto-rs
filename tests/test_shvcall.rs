@@ -20,7 +20,7 @@ fn test_invalid_param() -> shv::Result<()> {
 #[test]
 fn test_cannot_connect() -> shv::Result<()> {
     let exit_status = Command::new("target/debug/shvcall")
-        .arg("--url").arg("tcp://admin:admin@localhost")
+        .arg("--url").arg("tcp://admin:admin@nnn")
         .status()?;
     assert!(!exit_status.success());
     Ok(())

@@ -2,7 +2,7 @@ extern crate shv;
 
 use std::process::{Command, Output};
 use std::{thread, time::Duration};
-use shv::{metamethod, RpcMessage, RpcMessageMetaTags, RpcValue, rpcvalue};
+use shv::{metamethod, RpcMessage, RpcValue, rpcvalue};
 use shv::metamethod::{Flag, MetaMethod};
 use shv::shvnode::{METH_DIR, METH_LS, METH_NAME, METH_PING};
 use crate::common::KillProcessGuard;
