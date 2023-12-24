@@ -5,12 +5,12 @@ use std::{thread, time::Duration};
 use shv::{metamethod, RpcMessage, RpcValue, rpcvalue};
 use shv::metamethod::{Flag, MetaMethod};
 use shv::shvnode::{METH_DIR, METH_LS, METH_NAME, METH_PING};
-use crate::common::KillProcessGuard;
+use crate::common::{KillProcessGuard, shv_call};
 
 mod common;
 
 #[test]
-fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
+fn test_broker() -> shv::Result<()> {
     let mut broker_process_guard = KillProcessGuard::new(Command::new("target/debug/shvbroker")
         .arg("-v").arg(".:W")
         //.arg("-v").arg("Acl")
@@ -18,43 +18,11 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
     thread::sleep(Duration::from_millis(100));
     assert!(broker_process_guard.is_running());
 
-    fn rpcmsg_from_output(output: Output) -> Result<RpcMessage, Box<dyn std::error::Error>> {
-        if !output.status.success() {
-            let errmsg = std::str::from_utf8(&output.stderr)?;
-            return Err(format!("Process exited with error code {:?}, stderr: {}", output.status.code(), errmsg).into());
-        }
-        let out = output.stdout;
-        let cpon = std::str::from_utf8(&out)?;
-        let rv = RpcValue::from_cpon(cpon)?;
-        RpcMessage::from_rpcvalue(rv).map_err(|err| err.into())
-    }
-    fn result_from_output(output: Output) -> Result<RpcValue, Box<dyn std::error::Error>> {
-        if !output.status.success() {
-            let errmsg = std::str::from_utf8(&output.stderr)?;
-            return Err(format!("Process exited with error code {:?}, stderr: {}", output.status.code(), errmsg).into());
-        }
-        let msg = rpcmsg_from_output(output)?;
-        let result = msg.result()?;
-        //println!("cpon: {}, expected: {}", result, expected_value.to_cpon());
-        //assert_eq!(result, expected_value);
-        Ok(result.clone())
-    }
-    fn call(path: &str, method: &str, param: &str) -> Result<RpcValue, Box<dyn std::error::Error>> {
-        let output = Command::new("target/debug/shvcall")
-            .arg("--url").arg("tcp://admin:admin@localhost")
-            .arg("--path").arg(path)
-            .arg("--method").arg(method)
-            .arg("--param").arg(param)
-            .output()?;
-
-        result_from_output(output)
-    }
-
     println!("====== broker =====");
     println!("---broker---: :ls(.app)");
-    assert_eq!(call("", "ls", r#"".app""#)?, RpcValue::from(true));
-    assert_eq!(call(".app", "ls", r#""broker""#)?, RpcValue::from(true));
-    assert_eq!(call(".app/broker", "ls", r#""client""#)?, RpcValue::from(true));
+    assert_eq!(shv_call("", "ls", r#"".app""#)?, RpcValue::from(true));
+    assert_eq!(shv_call(".app", "ls", r#""broker""#)?, RpcValue::from(true));
+    assert_eq!(shv_call(".app/broker", "ls", r#""client""#)?, RpcValue::from(true));
     {
         println!("---broker---: .app:dir()");
         let expected_methods = vec![
@@ -64,7 +32,7 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
             MetaMethod { name: METH_PING.into(), ..Default::default() },
         ];
         {
-            let methods = call(".app", "dir", "")?;
+            let methods = shv_call(".app", "dir", "")?;
             let methods = methods.as_list();
             'outer: for xmm in expected_methods.iter() {
                 for mm in methods.iter() {
@@ -79,7 +47,7 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
         }
         println!("---broker---: .app:dir(true)");
         {
-            let methods = call(".app", "dir", "true")?;
+            let methods = shv_call(".app", "dir", "true")?;
             let methods = methods.as_list();
             'outer: for xmm in expected_methods.iter() {
                 for mm in methods.iter() {
@@ -94,14 +62,14 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
         }
         println!("---broker---: .app:dir(\"ping\")");
         {
-            let method = call(".app", "dir", r#""ping""#)?;
+            let method = shv_call(".app", "dir", r#""ping""#)?;
             assert!(method.is_imap());
             let name = method.as_imap().get(&metamethod::DirAttribute::Name.into()).ok_or("Name attribute doesn't exist")?.as_str();
             assert_eq!(name, "ping");
         }
     }
     println!("---broker---: .app:ping()");
-    assert_eq!(call(".app", "ping", "")?, RpcValue::null());
+    assert_eq!(shv_call(".app", "ping", "")?, RpcValue::null());
 
     println!("====== device =====");
     let mut device_process_guard = common::KillProcessGuard {
@@ -114,19 +82,19 @@ fn test_broker() -> Result<(), Box<dyn std::error::Error>> {
     assert!(device_process_guard.is_running());
 
     println!("---broker---: test:ls()");
-    assert_eq!(call("test", "ls", "")?, vec![RpcValue::from("device")].into());
+    assert_eq!(shv_call("test", "ls", "")?, vec![RpcValue::from("device")].into());
     println!("---broker---: test/device:ls()");
-    assert_eq!(call("test/device", "ls", "")?, vec![RpcValue::from(".app"), RpcValue::from("number")].into());
+    assert_eq!(shv_call("test/device", "ls", "")?, vec![RpcValue::from(".app"), RpcValue::from("number")].into());
     println!("---broker---: test/device/.app:ping()");
-    assert_eq!(call("test/device/.app", "ping", "")?, RpcValue::null());
+    assert_eq!(shv_call("test/device/.app", "ping", "")?, RpcValue::null());
     println!("---broker---: test/device/number:ls()");
-    assert_eq!(call("test/device/number", "ls", "")?, rpcvalue::List::new().into());
+    assert_eq!(shv_call("test/device/number", "ls", "")?, rpcvalue::List::new().into());
 
     println!("---broker---: .app/broker:clients()");
-    assert_eq!(call(".app/broker", "clients", "")?.as_list().len(), 2); // [device-id, shvcall-id]
+    assert_eq!(shv_call(".app/broker", "clients", "")?.as_list().len(), 2); // [device-id, shvcall-id]
 
     println!("---broker---: .app/broker:mounts()");
-    assert_eq!(call(".app/broker", "mounts", "")?, vec![RpcValue::from("test/device")].into());
+    assert_eq!(shv_call(".app/broker", "mounts", "")?, vec![RpcValue::from("test/device")].into());
     {
         //println!("====== subscriptions =====");
         //let sig_trap_proc = Command::new("target/debug/shvcall")

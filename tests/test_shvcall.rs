@@ -5,7 +5,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 use shv::{RpcValue};
-use crate::common::{shv_call, text_from_output};
+use crate::common::{shv_call, shv_call_many, value_list_from_output};
 
 mod common;
 
@@ -35,25 +35,14 @@ fn test_call_ping_stdin() -> shv::Result<()> {
 
     assert_eq!(shv_call(".app", "ping", "")?, RpcValue::null());
 
-    let mut child = Command::new("target/debug/shvcall")
-        .arg("--url").arg("tcp://admin:admin@localhost")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .arg("-r")
-        .arg("-v").arg(".:I")
-        .spawn()?;
-    let mut stdin = child.stdin.take().expect("shvcall should be running");
-    thread::spawn(move || {
-        stdin.write_all(".app:ping\n".as_bytes()).expect("Failed to write to stdin");
-        stdin.write_all(".app:name\n".as_bytes()).expect("Failed to write to stdin");
-    });
-    let output = child.wait_with_output()?;
-    let out = text_from_output(output)?;
-    let expected: [&str; 2] = ["null", "\"shvbroker\""];
-    for (no, line) in out.split(|b| b == '\n').enumerate() {
-        if no < expected.len() {
-            assert_eq!(expected[no], line);
-        }
+    let calls: Vec<String> = vec![
+        ".app:ping".into(),
+        ".app:name".into(),
+    ];
+    let values = shv_call_many(calls)?;
+    let expected: [RpcValue; 2] = [RpcValue::null(), RpcValue::from("shvbroker")];
+    for (no, val) in values.iter().enumerate() {
+        assert_eq!(&expected[no], val);
     }
 
     Ok(())

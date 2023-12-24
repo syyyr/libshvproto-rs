@@ -1,4 +1,6 @@
-use std::process::{Child, Command, Output};
+use std::io::Write;
+use std::process::{Child, Command, Output, Stdio};
+use std::thread;
 use shv::{RpcMessage, RpcValue};
 
 pub struct KillProcessGuard {
@@ -44,6 +46,14 @@ pub fn text_from_output(output: Output) -> shv::Result<String> {
     let bytes = bytes_from_output(output)?;
     Ok(String::from_utf8(bytes)?)
 }
+pub fn value_list_from_output(output: Output) -> shv::Result<Vec<RpcValue>> {
+    let bytes = text_from_output(output)?;
+    let mut values = Vec::new();
+    for cpon in bytes.split(|b| b == '\n').filter(|line| !line.is_empty()) {
+        values.push(RpcValue::from_cpon(cpon)?);
+    }
+    Ok(values)
+}
 pub fn result_from_output(output: Output) -> shv::Result<RpcValue> {
     let msg = rpcmsg_from_output(output)?;
     let result = msg.result()?;
@@ -61,4 +71,22 @@ pub fn shv_call(path: &str, method: &str, param: &str) -> shv::Result<RpcValue> 
         .output()?;
 
     result_from_output(output)
+}
+pub fn shv_call_many(calls: Vec<String>) -> shv::Result<Vec<RpcValue>> {
+    let mut child = Command::new("target/debug/shvcall")
+        .arg("--url").arg("tcp://admin:admin@localhost")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .arg("-r")
+        .arg("-v").arg(".:I")
+        .spawn()?;
+    let mut stdin = child.stdin.take().expect("shvcall should be running");
+    thread::spawn(move || {
+        for line in calls {
+            stdin.write_all(line.as_bytes()).expect("Failed to write to stdin");
+            stdin.write_all("\n".as_bytes()).expect("Failed to write to stdin");
+        }
+    });
+    let output = child.wait_with_output()?;
+    value_list_from_output(output)
 }
