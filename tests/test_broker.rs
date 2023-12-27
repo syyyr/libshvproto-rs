@@ -1,11 +1,11 @@
 extern crate shv;
 
-use std::process::{Command, Output};
+use std::process::{Command};
 use std::{thread, time::Duration};
-use shv::{metamethod, RpcMessage, RpcValue, rpcvalue};
+use shv::{metamethod, RpcValue, rpcvalue};
 use shv::metamethod::{Flag, MetaMethod};
 use shv::shvnode::{METH_DIR, METH_LS, METH_NAME, METH_PING};
-use crate::common::{KillProcessGuard, shv_call};
+use crate::common::{KillProcessGuard, shv_call, shv_call_many, ShvCallOutputFormat};
 
 mod common;
 
@@ -96,27 +96,23 @@ fn test_broker() -> shv::Result<()> {
     println!("---broker---: .app/broker:mounts()");
     assert_eq!(shv_call(".app/broker", "mounts", "")?, vec![RpcValue::from("test/device")].into());
     {
-        //println!("====== subscriptions =====");
-        //let sig_trap_proc = Command::new("target/debug/shvcall")
-        //    .arg("--url").arg("tcp://admin:admin@localhost")
-        //    .arg("--signal-trap")
-        //    .arg("--path").arg("test/**")
-        //    .arg("--method").arg("")
-        //    .arg("--timeout").arg("1s")
-        //    .arg("-v").arg("RpcMsg")
-        //    .spawn()?;
-        //call("test/device/number", "set", "1234")?;
-        //let output = sig_trap_proc.wait_with_output()?;
-        //match output.status.code() {
-        //    Some(code) => println!("Exited with status code: {code}"),
-        //    None => println!("Process terminated by signal")
-        //}
-        //println!("STATUS {:?}", output.status.code());
-        //assert!(output.status.success());
-        //let msg = rpcmsg_from_output(output)?;
-        //assert_eq!(msg.shv_path().ok_or("shv path missing")?, "test/device/number");
-        //assert_eq!(msg.method().ok_or("method missing")?, "chng");
-        //assert_eq!(msg.param().ok_or("param missing")?.as_i32(), 1234);
+        println!("====== subscriptions =====");
+        let calls: Vec<String> = vec![
+            r#".app/broker/currentClient:subscribe {"methods": "chng", "paths": "test/**"}"#.into(),
+            r#"test/device/number:set 42"#.into(),
+        ];
+        let values = shv_call_many(calls, ShvCallOutputFormat::Simple)?;
+        for v in values.iter() {
+            println!("\t{}", v);
+        }
+        let expected: Vec<&str> = vec![
+            "RES null", // response to subscribe
+            "SIG test/device/number:chng 42", // SIG chng
+            "RES null", // response to subscribe
+        ];
+        for (no, val) in values.iter().enumerate() {
+            assert_eq!(expected[no], val);
+        }
     }
     Ok(())
 }

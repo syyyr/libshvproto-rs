@@ -115,12 +115,13 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
                             let mut resp = RpcMessage::from_meta(meta);
                             match result {
                                 Ok((value, signal)) => {
-                                    resp.set_result(value);
-                                    shv::connection::send_message(&mut writer, &resp).await?;
+                                    // send signal before response, node.process_request(...) can also eventually send other signals
                                     if let Some(signal) = signal {
                                         let sig = RpcMessage::new_signal(shv_path, signal.method, Some(signal.value));
                                         shv::connection::send_message(&mut writer, &sig).await?;
                                     }
+                                    resp.set_result(value);
+                                    shv::connection::send_message(&mut writer, &resp).await?;
                                 }
                                 Err(errmsg) => {
                                     resp.set_error(errmsg);
@@ -157,10 +158,10 @@ impl ShvNode<DeviceState> for IntPropertyNode {
                         if v.is_int() {
                             let v = v.as_i32();
                             if v == state.int_prop {
-                                Ok((RpcValue::from(false), None))
+                                Ok((RpcValue::from(()), None))
                             } else {
                                 state.int_prop = v;
-                                Ok((RpcValue::from(true), Some(Signal{ value: v.into(), method: SIG_CHNG })))
+                                Ok((RpcValue::from(()), Some(Signal{ value: v.into(), method: SIG_CHNG })))
                             }
                         } else {
                             Err(RpcError::new(RpcErrorCode::InvalidParam, "Invalid parameter"))

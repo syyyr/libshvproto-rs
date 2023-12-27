@@ -8,7 +8,7 @@ use rand::distributions::{Alphanumeric, DistString};
 use log::*;
 use structopt::StructOpt;
 use shv::rpcframe::{RpcFrame};
-use shv::{RpcMessage, RpcValue, rpcvalue, util};
+use shv::{List, RpcMessage, RpcValue, rpcvalue, util};
 use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
@@ -419,11 +419,12 @@ impl Broker {
         }
     }
     fn peer_to_info(client_id: CliId, peer: &Peer) -> rpcvalue::Map {
+        let subs: List = peer.subscriptions.iter().map(|subs| subs.to_rpcvalue()).collect();
         rpcvalue::Map::from([
             ("clientId".to_string(), client_id.into()),
             ("userName".to_string(), RpcValue::from(&peer.user)),
             ("mountPoint".to_string(), RpcValue::from(peer.mount_point.clone().unwrap_or_default())),
-            ("subscriptions".to_string(), "NIY".into()),
+            ("subscriptions".to_string(), subs.into()),
         ]
         )
     }
@@ -454,11 +455,11 @@ impl Broker {
             RpcValue::from(peer.mount_point.clone().unwrap())
         } ).collect()
     }
-    pub fn subscribe(&mut self, client_id: CliId, subscription: Subscription) -> Result<bool> {
+    pub fn subscribe(&mut self, client_id: CliId, subscription: Subscription) -> Result<()> {
         log!(target: "Subscr", Level::Debug, "New subscription for client id: {} - {}", client_id, &subscription);
         let peer = self.peers.get_mut(&client_id).expect("client ID must be valid here");
         peer.subscriptions.push(subscription);
-        Ok(true)
+        Ok(())
     }
     pub fn unsubscribe(&mut self, client_id: CliId, subscription: &Subscription) -> Result<bool> {
         let peer = self.peers.get_mut(&client_id).expect("client ID must be valid here");
@@ -529,16 +530,21 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                             };
                             if let Some(result) = result {
                                 if let Ok(meta) = response_meta {
+                                    let peer = broker.peers.get(&client_id).unwrap();
                                     let mut resp = RpcMessage::from_meta(meta);
                                     match result {
-                                        Ok((value, _signal)) => {
+                                        Ok((value, signal)) => {
+                                            // send signal before response, node.process_request(...) can also eventually send other signals
+                                            if let Some(signal) = signal {
+                                                let sig = RpcMessage::new_signal(&shv_path, signal.method, Some(signal.value));
+                                                peer.sender.send(PeerEvent::Message(sig)).await.unwrap();
+                                            }
                                             resp.set_result(value);
                                         }
                                         Err(err) => {
                                             resp.set_error(err);
                                         }
                                     }
-                                    let peer = broker.peers.get(&client_id).unwrap();
                                     peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
                                 }
                             }

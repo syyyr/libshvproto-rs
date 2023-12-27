@@ -2,14 +2,14 @@ use async_std::{io, prelude::*};
 use structopt::StructOpt;
 use async_std::io::{BufReader};
 use async_std::net::TcpStream;
-use shv::{client, RpcMessage, RpcValue};
+use shv::{client, RpcMessage, RpcMessageMetaTags, RpcValue};
 use async_std::task;
 use log::*;
 use percent_encoding::percent_decode;
 use simple_logger::SimpleLogger;
 use url::Url;
 use shv::client::LoginParams;
-use shv::connection::FrameReader;
+use shv::rpcmessage::{RqId};
 use shv::util::parse_log_verbosity;
 
 type Result = shv::Result<()>;
@@ -26,17 +26,28 @@ struct Opts {
     method: Option<String>,
     #[structopt(short = "a", long = "param")]
     param: Option<String>,
-    /// Write only result, trim RPC message
-    #[structopt(short = "r", long = "trim-meta")]
-    trim_meta: bool,
+    /// Output format: [ cpon | chainpack | simple | value ], default is 'cpon'
+    #[structopt(short = "o", long = "output-format", default_value = "cpon")]
+    output_format: String,
     /// Verbose mode (module, .)
     #[structopt(short = "v", long = "verbose")]
     verbose: Option<String>,
-    ///Output as Chainpack instead of default CPON
-    #[structopt(short = "-x", long = "--chainpack")]
-    chainpack: bool,
 }
-
+enum OutputFormat {
+    Cpon,
+    ChainPack,
+    Simple,
+    Value,
+}
+impl From<&str> for OutputFormat {
+    fn from(value: &str) -> Self {
+        let s = value.to_ascii_lowercase();
+        if "chainpack".starts_with(&s) { return Self::ChainPack }
+        if "simple".starts_with(&s) { return Self::Simple }
+        if "value".starts_with(&s) { return Self::Value }
+        Self::Cpon
+    }
+}
 // const DEFAULT_RPC_TIMEOUT_MSEC: u64 = 5000;
 pub(crate) fn main() -> Result {
     let opts = Opts::from_args();
@@ -79,35 +90,57 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
 
     client::login(&mut frame_reader, &mut writer, &login_params).await?;
     info!("Connected to broker.");
-    async fn print_resp(stdout: &mut io::Stdout, resp: &RpcMessage, to_chainpack: bool, trim_meta: bool) -> Result {
-        let rpcval = if resp.is_success() {
-            if trim_meta {
-                resp.result().expect("result should be set").clone()
-            } else {
-                resp.as_rpcvalue().clone()
+    async fn print_resp(stdout: &mut io::Stdout, resp: &RpcMessage, output_format: OutputFormat) -> Result {
+        let bytes = match output_format {
+            OutputFormat::Cpon => {
+                let mut s = resp.as_rpcvalue().to_cpon();
+                s.push('\n');
+                s.as_bytes().to_owned()
             }
-        } else {
-            resp.error().expect("error should be set").to_rpcvalue()
+            OutputFormat::ChainPack => {
+                resp.as_rpcvalue().to_chainpack().to_owned()
+            }
+            OutputFormat::Simple => {
+                let s = if resp.is_request() {
+                    format!("REQ {}:{} {}\n", resp.shv_path().unwrap_or_default(), resp.method().unwrap_or_default(), resp.param().unwrap_or_default().to_cpon())
+                } else if resp.is_response() {
+                    match resp.result() {
+                        Ok(res) => {
+                            format!("RES {}\n", res.to_cpon())
+                        }
+                        Err(err) => {
+                            format!("ERR {}\n", err.to_string())
+                        }
+                    }
+                } else {
+                    format!("SIG {}:{} {}\n", resp.shv_path().unwrap_or_default(), resp.method().unwrap_or_default(), resp.param().unwrap_or_default().to_cpon())
+                };
+                s.as_bytes().to_owned()
+            }
+            OutputFormat::Value => {
+                let mut s = if resp.is_request() {
+                    resp.param().unwrap_or_default().to_cpon()
+                } else if resp.is_response() {
+                    match resp.result() {
+                        Ok(res) => {
+                            res.to_cpon()
+                        }
+                        Err(err) => {
+                            err.to_string()
+                        }
+                    }
+                } else {
+                    resp.param().unwrap_or_default().to_cpon()
+                };
+                s.push('\n');
+                s.as_bytes().to_owned()
+            }
         };
-        if to_chainpack {
-            let bytes = rpcval.to_chainpack();
-            stdout.write_all(&bytes).await?;
-            Ok(stdout.flush().await?)
-        } else {
-            let bytes = rpcval.to_cpon().into_bytes();
-            stdout.write_all(&bytes).await?;
-            Ok(stdout.write_all("\n".as_bytes()).await?)
-        }
+        stdout.write_all(&bytes).await?;
+        Ok(stdout.flush().await?)
     }
-    async fn print_error(stdout: &mut io::Stdout, err: &str, to_chainpack: bool) -> Result {
-        if to_chainpack {
-            Ok(())
-        } else {
-            stdout.write_all(err.as_bytes()).await?;
-            Ok(stdout.write_all("\n".as_bytes()).await?)
-        }
-    }
-    async fn send_request(mut writer: &TcpStream, reader: &mut FrameReader<'_, BufReader<&TcpStream>>, path: &str, method: &str, param: &str) -> shv::Result<RpcMessage> {
+
+    async fn send_request(mut writer: &TcpStream, path: &str, method: &str, param: &str) -> shv::Result<RqId> {
         let param = if param.is_empty() {
             None
         } else {
@@ -115,11 +148,9 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
         };
         let rpcmsg = RpcMessage::new_request(path, method, param);
         shv::connection::send_message(&mut writer, &rpcmsg).await?;
-
-        let resp = reader.receive_message().await?.ok_or("Receive error")?;
-        Ok(resp)
-
+        Ok(rpcmsg.request_id().expect("Request ID should exist here."))
     }
+
     if opts.path.is_none() && opts.method.is_some() {
         return Err("--path parameter missing".into())
     }
@@ -139,8 +170,7 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
                     } else {
                         let method_ix = match line.find(':') {
                             None => {
-                                print_error(&mut stdout, &format!("Invalid line format, method not found: {line}"), opts.chainpack).await?;
-                                break;
+                                return Err(format!("Invalid line format, method not found: {line}").into());
                             }
                             Some(ix) => { ix }
                         };
@@ -150,8 +180,14 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
                             None => { (line[method_ix + 1 .. ].trim(), "") }
                             Some(ix) => { (line[method_ix + 1 .. ix].trim(), line[ix + 1 ..].trim()) }
                         };
-                        let resp = send_request(writer, &mut frame_reader, &path, &method, &param).await?;
-                        print_resp(&mut stdout, &resp, opts.chainpack, opts.trim_meta).await?;
+                        let rqid = send_request(writer, &path, &method, &param).await?;
+                        loop {
+                            let resp = frame_reader.receive_message().await?.ok_or("Receive error")?;
+                            print_resp(&mut stdout, &resp, (&*opts.output_format).into()).await?;
+                            if resp.is_response() && resp.request_id().unwrap_or_default() == rqid {
+                                break;
+                            }
+                        }
                     }
                 }
                 Err(err) => { return Err(format!("Read line error: {err}").into()) }
@@ -161,8 +197,9 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
         let path = opts.path.clone().unwrap_or_default();
         let method = opts.method.clone().unwrap_or_default();
         let param = opts.param.clone().unwrap_or_default();
-        let resp = send_request(writer, &mut frame_reader, &path, &method, &param).await?;
-        print_resp(&mut stdout, &resp, opts.chainpack, opts.trim_meta).await?;
+        send_request(writer, &path, &method, &param).await?;
+        let resp = frame_reader.receive_message().await?.ok_or("Receive error")?;
+        print_resp(&mut stdout, &resp, (&*opts.output_format).into()).await?;
     }
 
     Ok(())

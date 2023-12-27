@@ -36,6 +36,12 @@ impl Subscription {
         let paths = m.get("path").unwrap_or(m.get("paths").unwrap_or_default()).as_str();
         Self::new(paths, methods)
     }
+    pub fn to_rpcvalue(&self) -> RpcValue {
+        let mut m = Map::new();
+        m.insert("paths".into(), self.paths.as_str().into());
+        m.insert("methods".into(), self.methods.as_str().into());
+        RpcValue::from(m)
+    }
 }
 impl Display for Subscription {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

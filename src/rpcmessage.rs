@@ -429,7 +429,14 @@ impl RpcError {
         RpcValue::from(m)
     }
 }
-
+impl Default for RpcError {
+    fn default() -> Self {
+        RpcError {
+            code: RpcErrorCode::NoError,
+            message: "".to_string(),
+        }
+    }
+}
 impl Debug for RpcError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "code: {}, message: {}", self.code, self.message)
