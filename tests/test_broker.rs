@@ -100,6 +100,8 @@ fn test_broker() -> shv::Result<()> {
         let calls: Vec<String> = vec![
             r#".app/broker/currentClient:subscribe {"methods": "chng", "paths": "test/**"}"#.into(),
             r#"test/device/number:set 42"#.into(),
+            r#".app/broker/currentClient:unsubscribe {"methods": "chng", "paths": "test/**"}"#.into(),
+            r#"test/device/number:set 123"#.into(),
         ];
         let values = shv_call_many(calls, ShvCallOutputFormat::Simple)?;
         for v in values.iter() {
@@ -108,7 +110,9 @@ fn test_broker() -> shv::Result<()> {
         let expected: Vec<&str> = vec![
             "RES null", // response to subscribe
             "SIG test/device/number:chng 42", // SIG chng
-            "RES null", // response to subscribe
+            "RES null", // response to SET
+            "RES true", // response to unsubscribe
+            "RES null", // response to SET
         ];
         for (no, val) in values.iter().enumerate() {
             assert_eq!(expected[no], val);
