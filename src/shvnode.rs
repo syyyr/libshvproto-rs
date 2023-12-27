@@ -225,6 +225,28 @@ impl From<RpcValue> for ProcessRequestResult {
 }
 pub trait ShvNode<K> {
     fn methods(&self) -> Vec<&MetaMethod>;
+    fn is_request_granted(&self, rq: &RpcMessage) -> bool {
+        let shv_path = rq.shv_path().unwrap_or_default();
+        if shv_path.is_empty() {
+            let level_str = rq.access().unwrap_or_default();
+            match Access::from_str(level_str) {
+                None => { return false }
+                Some(rq_level) => {
+                    let method = rq.method().unwrap_or_default();
+                    if method == METH_LS || method == METH_DIR {
+                        return rq_level >= Access::Browse
+                    } else {
+                        for mm in self.methods().into_iter() {
+                            if mm.name == method {
+                                return rq_level >= mm.access
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
     fn process_request(&mut self, rq: &RpcMessage, state: &mut K) -> ProcessRequestResult;
     fn process_dir_ls(&mut self, rq: &RpcMessage) -> ProcessRequestResult {
         match rq.method() {

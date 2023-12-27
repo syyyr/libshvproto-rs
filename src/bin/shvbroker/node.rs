@@ -9,12 +9,14 @@ const METH_CLIENT_INFO: &str = "clientInfo";
 const METH_MOUNTED_CLIENT_INFO: &str = "mountedClientInfo";
 const METH_CLIENTS: &str = "clients";
 const METH_MOUNTS: &str = "mounts";
+const METH_DISCONNECT_CLIENT: &str = "disconnectClient";
 
-const APP_BROKER_METHODS: [MetaMethod; 4] = [
+const APP_BROKER_METHODS: [MetaMethod; 5] = [
     MetaMethod { name: METH_CLIENT_INFO, param: "Int", result: "ClientInfo", access: Access::Service, flags: Flag::None as u32, description: "" },
     MetaMethod { name: METH_MOUNTED_CLIENT_INFO, param: "String", result: "ClientInfo", access: Access::Service, flags: Flag::None as u32, description: "" },
-    MetaMethod { name: METH_CLIENTS, param: "", result: "List[Int]", access: Access::SuperService, flags: Flag::None as u32, description: "" },
-    MetaMethod { name: METH_MOUNTS, param: "", result: "List[String]", access: Access::SuperService, flags: Flag::None as u32, description: "" },
+    MetaMethod { name: METH_CLIENTS, param: "void", result: "List[Int]", access: Access::SuperService, flags: Flag::None as u32, description: "" },
+    MetaMethod { name: METH_MOUNTS, param: "void", result: "List[String]", access: Access::SuperService, flags: Flag::None as u32, description: "" },
+    MetaMethod { name: METH_DISCONNECT_CLIENT, param: "Int", result: "void", access: Access::SuperService, flags: Flag::None as u32, description: "" },
 ];
 
 pub(crate) struct AppBrokerNode {}
@@ -46,6 +48,11 @@ impl ShvNode<crate::Broker> for AppBrokerNode {
             Some(METH_MOUNTS) => {
                 let mounts = broker.mounts();
                 RpcValue::from(mounts).into()
+            }
+            Some(METH_DISCONNECT_CLIENT) => {
+                let client_id = rq.param().unwrap_or_default().as_i32();
+                //broker.disconnect_client(client_id);
+                RpcValue::null().into()
             }
             _ => {
                 ShvNode::<crate::Broker>::process_dir_ls(self, rq)

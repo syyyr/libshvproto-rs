@@ -32,10 +32,10 @@ fn test_call_ping_stdin() -> shv::Result<()> {
     thread::sleep(Duration::from_millis(100));
     assert!(broker_process_guard.is_running());
 
-    println!("---shvcall---: .app/ping()");
+    println!("---shvcall---: .app:ping()");
     assert_eq!(shv_call(".app", "ping", "")?, RpcValue::null());
 
-    println!("---shvcall---: .app/name()");
+    println!("---shvcall---: .app:name()");
     let calls: Vec<String> = vec![
         ".app:ping".into(),
         ".app:name".into(),

@@ -19,7 +19,7 @@ fn test_broker() -> shv::Result<()> {
     assert!(broker_process_guard.is_running());
 
     println!("====== broker =====");
-    println!("---broker---: :ls(.app)");
+    println!("---broker---: :ls(\".app\")");
     assert_eq!(shv_call("", "ls", r#"".app""#)?, RpcValue::from(true));
     assert_eq!(shv_call(".app", "ls", r#""broker""#)?, RpcValue::from(true));
     assert_eq!(shv_call(".app/broker", "ls", r#""client""#)?, RpcValue::from(true));

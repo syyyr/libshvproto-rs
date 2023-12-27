@@ -439,7 +439,7 @@ impl Default for RpcError {
 }
 impl Debug for RpcError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "code: {}, message: {}", self.code, self.message)
+        write!(f, "{{code: {}, message: {}}}", self.code, self.message)
     }
 }
 

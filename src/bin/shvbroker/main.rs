@@ -221,10 +221,10 @@ async fn client_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream:
                             PeerEvent::PasswordSha1(_) => {
                                 panic!("PasswordSha1 cannot be received here")
                             }
-                            //PeerEvent::FatalError(errmsg) => {
-                            //    error!("Fatal client error: {}", errmsg);
-                            //    break;
-                            //}
+                            PeerEvent::DisconnectByBroker => {
+                                info!("Disconnected by broker, client ID: {client_id}");
+                                break;
+                            }
                             PeerEvent::Frame(frame) => {
                                 // log!(target: "RpcMsg", Level::Debug, "<---- Send frame, client id: {}", client_id);
                                 shv::connection::send_frame(&mut frame_writer, frame).await?;
@@ -273,7 +273,7 @@ enum PeerEvent {
     PasswordSha1(Option<Vec<u8>>),
     Frame(RpcFrame),
     Message(RpcMessage),
-    //FatalError(String),
+    DisconnectByBroker,
 }
 #[derive(Debug)]
 struct Peer {
@@ -436,6 +436,14 @@ impl Broker {
             }
         }
     }
+    async fn disconnect_client(&mut self, client_id: CliId) {
+        match self.peers.get(&client_id) {
+            None => {  }
+            Some(peer) => {
+                peer.sender.send(PeerEvent::DisconnectByBroker).await.unwrap();
+            }
+        }
+    }
     pub fn mounted_client_info(&mut self, mount_point: &str) -> Option<rpcvalue::Map> {
         for (client_id, peer) in &self.peers {
             if let Some(mount_point1) = &peer.mount_point {
@@ -514,8 +522,13 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                                         let mut rpcmsg2 = rpcmsg;
                                                         rpcmsg2.set_shvpath(node_path);
                                                         rpcmsg2.set_access(&grant);
-                                                        broker.request_context.caller_client_id = client_id;
-                                                        Some(node.process_request(&rpcmsg2, &mut broker))
+                                                        if node.is_request_granted(&rpcmsg2) {
+                                                            broker.request_context.caller_client_id = client_id;
+                                                            Some(node.process_request(&rpcmsg2, &mut broker))
+                                                        } else {
+                                                            let err = RpcError::new(RpcErrorCode::PermissionDenied, &format!("Request to call {}:{} is not granted.", rpcmsg2.shv_path().unwrap_or_default(), rpcmsg2.method().unwrap_or_default()));
+                                                            Some(Err(err))
+                                                        }
                                                     } else {
                                                         Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
                                                     }

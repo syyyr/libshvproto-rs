@@ -25,21 +25,29 @@ impl From<u8> for Flag {
         }
     }
 }
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum Access { Browse = 0, Read, Write, Command, Config, Service, SuperService, Developer, Superuser }
+impl Access {
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "bws" => Some(Access::Browse),
+            "rd" => Some(Access::Read),
+            "wr" => Some(Access::Write),
+            "cmd" => Some(Access::Command),
+            "cfg" => Some(Access::Config),
+            "srv" => Some(Access::Service),
+            "ssrv" => Some(Access::SuperService),
+            "dev" => Some(Access::Developer),
+            "su" => Some(Access::Superuser),
+            _ => None,
+        }
+    }
+}
 impl From<&str> for Access {
     fn from(value: &str) -> Self {
-        match value {
-            "bws" => Access::Browse,
-            "rd" => Access::Read,
-            "wr" => Access::Write,
-            "cmd" => Access::Command,
-            "cfg" => Access::Config,
-            "srv" => Access::Service,
-            "ssrv" => Access::SuperService,
-            "dev" => Access::Developer,
-            "su" => Access::Superuser,
-            _ => Access::Browse,
+        match Self::from_str(value) {
+            None => { Self::Browse }
+            Some(acc) => { acc }
         }
     }
 }
