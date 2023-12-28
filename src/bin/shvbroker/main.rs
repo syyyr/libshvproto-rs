@@ -13,9 +13,10 @@ use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
 use shv::rpc::Subscription;
-use shv::shvnode::{find_longest_prefix, ShvNode, ProcessRequestResult, process_local_dir_ls};
+use shv::shvnode::{find_longest_prefix, ShvNode, RequestCommand, process_local_dir_ls, SIG_CHNG};
 use shv::util::{parse_log_verbosity, sha1_hash};
 use crate::config::{Config, default_config, Password};
+use crate::node::BrokerCommand;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 type Sender<T> = async_std::channel::Sender<T>;
@@ -300,15 +301,11 @@ enum Mount<K> {
     Peer(Device),
     Node(Node<K>),
 }
-struct RequestContext {
-    caller_client_id: CliId,
-}
 struct Broker {
     peers: HashMap<CliId, Peer>,
+    mounts: BTreeMap<String, Mount<crate::node::BrokerCommand>>,
     config: Config,
-    request_context: RequestContext,
 }
-
 fn find_mount<'a, 'b, K>(mounts: &'a mut BTreeMap<String, Mount<K>>, shv_path: &'b str) -> Option<(&'a mut Mount<K>, &'b str)> {
     if let Some((mount_dir, node_dir)) = find_longest_prefix(mounts, shv_path) {
         Some((mounts.get_mut(mount_dir).unwrap(), node_dir))
@@ -333,7 +330,7 @@ impl Broker {
             }
         }
     }
-    pub fn mount_device<K>(&mut self, mounts: &mut BTreeMap<String, Mount<K>>, client_id: i32, device_id: Option<String>, mount_point: Option<String>) {
+    pub fn mount_device(&mut self, client_id: i32, device_id: Option<String>, mount_point: Option<String>) {
         if let Some(mount_point) = loop {
             if let Some(ref mount_point) = mount_point {
                 if mount_point.starts_with("test/") {
@@ -348,13 +345,13 @@ impl Broker {
             }
             break None;
         } {
-            mounts.insert(mount_point.clone(), Mount::Peer(Device { client_id }));
+            self.mounts.insert(mount_point.clone(), Mount::Peer(Device { client_id }));
             if let Some(peer) = self.peers.get_mut(&client_id) {
                 peer.mount_point = Some(mount_point.clone());
             }
         };
         let client_path = format!(".app/broker/client/{}", client_id);
-        mounts.insert(client_path, Mount::Peer(Device { client_id }));
+        self.mounts.insert(client_path, Mount::Peer(Device { client_id }));
     }
     pub fn client_id_to_mount_point(&self, client_id: CliId) -> Option<String> {
         match self.peers.get(&client_id) {
@@ -440,7 +437,7 @@ impl Broker {
         match self.peers.get(&client_id) {
             None => {  }
             Some(peer) => {
-                peer.sender.send(PeerEvent::DisconnectByBroker).await.unwrap();
+                let _ = peer.sender.send(PeerEvent::DisconnectByBroker).await;
             }
         }
     }
@@ -463,29 +460,31 @@ impl Broker {
             RpcValue::from(peer.mount_point.clone().unwrap())
         } ).collect()
     }
-    pub fn subscribe(&mut self, client_id: CliId, subscription: Subscription) -> Result<()> {
+    pub fn subscribe(&mut self, client_id: CliId, subscription: Subscription) {
         log!(target: "Subscr", Level::Debug, "New subscription for client id: {} - {}", client_id, &subscription);
-        let peer = self.peers.get_mut(&client_id).expect("client ID must be valid here");
-        peer.subscriptions.push(subscription);
-        Ok(())
+        if let Some(peer) = self.peers.get_mut(&client_id) {
+            peer.subscriptions.push(subscription);
+        }
     }
-    pub fn unsubscribe(&mut self, client_id: CliId, subscription: &Subscription) -> Result<bool> {
-        let peer = self.peers.get_mut(&client_id).expect("client ID must be valid here");
-        let cnt = peer.subscriptions.len();
-        peer.subscriptions.retain(|subscr| subscr != subscription);
-        Ok(cnt != peer.subscriptions.len())
+    pub fn unsubscribe(&mut self, client_id: CliId, subscription: &Subscription) -> bool {
+        if let Some(peer) = self.peers.get_mut(&client_id) {
+            let cnt = peer.subscriptions.len();
+            peer.subscriptions.retain(|subscr| subscr != subscription);
+            cnt != peer.subscriptions.len()
+        } else {
+            false
+        }
     }
 }
 async fn broker_loop(events: Receiver<ClientEvent>) {
-    let mut mounts= BTreeMap::new();
     let mut broker = Broker {
         peers: HashMap::new(),
+        mounts: BTreeMap::new(),
         config: default_config(),
-        request_context: RequestContext { caller_client_id: 0 },
     };
-    mounts.insert(".app".into(), Mount::Node(Box::new(shv::shvnode::AppNode { app_name: "shvbroker", ..Default::default() })));
-    mounts.insert(".app/broker".into(), Mount::Node(Box::new(node::AppBrokerNode {  })));
-    mounts.insert(".app/broker/currentClient".into(), Mount::Node(Box::new(node::AppBrokerCurrentClientNode {  })));
+    broker.mounts.insert(".app".into(), Mount::Node(Box::new(shv::shvnode::AppNode { app_name: "shvbroker", ..Default::default() })));
+    broker.mounts.insert(".app/broker".into(), Mount::Node(Box::new(node::AppBrokerNode {  })));
+    broker.mounts.insert(".app/broker/currentClient".into(), Mount::Node(Box::new(node::AppBrokerCurrentClientNode {  })));
     loop {
         match events.recv().await {
             Err(e) => {
@@ -496,18 +495,19 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                 match event {
                     ClientEvent::Frame { client_id, mut frame} => {
                         if frame.is_request() {
+                            type Command = RequestCommand<BrokerCommand>;
                             let shv_path = frame.shv_path().unwrap_or_default().to_string();
                             let response_meta= RpcFrame::prepare_response_meta(&frame.meta);
-                            let result: Option<ProcessRequestResult> = match broker.grant_for_request(client_id, &frame) {
+                            let command = match broker.grant_for_request(client_id, &frame) {
                                 None => {
-                                    Some(Err(RpcError::new(RpcErrorCode::PermissionDenied, &format!("Cannot resolve call method grant for current user."))))
+                                    Command::Error(RpcError::new(RpcErrorCode::PermissionDenied, &format!("Cannot resolve call method grant for current user.")))
                                 }
                                 Some(grant) => {
-                                    let local_result = process_local_dir_ls(&mounts, &frame);
+                                    let local_result = process_local_dir_ls(&broker.mounts, &frame);
                                     if local_result.is_some() {
-                                        local_result
+                                        local_result.unwrap()
                                     } else {
-                                        if let Some((mount, node_path)) = find_mount(&mut mounts, &shv_path) {
+                                        if let Some((mount, node_path)) = find_mount(&mut broker.mounts, &shv_path) {
                                             match mount {
                                                 Mount::Peer(device) => {
                                                     let device_client_id = device.client_id;
@@ -515,7 +515,7 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                                     frame.set_shvpath(node_path);
                                                     frame.set_access(&grant);
                                                     let _ = broker.peers.get(&device_client_id).expect("client ID must exist").sender.send(PeerEvent::Frame(frame)).await;
-                                                    None
+                                                    Command::Noop
                                                 }
                                                 Mount::Node(node) => {
                                                     if let Ok(rpcmsg) = frame.to_rpcmesage() {
@@ -523,42 +523,96 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                                                         rpcmsg2.set_shvpath(node_path);
                                                         rpcmsg2.set_access(&grant);
                                                         if node.is_request_granted(&rpcmsg2) {
-                                                            broker.request_context.caller_client_id = client_id;
-                                                            Some(node.process_request(&rpcmsg2, &mut broker))
+                                                            node.process_request(&rpcmsg2)
                                                         } else {
                                                             let err = RpcError::new(RpcErrorCode::PermissionDenied, &format!("Request to call {}:{} is not granted.", rpcmsg2.shv_path().unwrap_or_default(), rpcmsg2.method().unwrap_or_default()));
-                                                            Some(Err(err))
+                                                            Command::Error(err)
                                                         }
                                                     } else {
-                                                        Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
+                                                        Command::Error(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message")))
                                                     }
                                                 }
                                             }
                                         } else {
                                             let method = frame.method().unwrap_or_default();
-                                            Some(Err(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid shv path {}:{}()", shv_path, method))))
+                                            Command::Error(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid shv path {}:{}()", shv_path, method)))
                                         }
                                     }
                                 }
                             };
-                            if let Some(result) = result {
-                                if let Ok(meta) = response_meta {
-                                    let peer = broker.peers.get(&client_id).unwrap();
-                                    let mut resp = RpcMessage::from_meta(meta);
-                                    match result {
-                                        Ok((value, signal)) => {
-                                            // send signal before response, node.process_request(...) can also eventually send other signals
-                                            if let Some(signal) = signal {
-                                                let sig = RpcMessage::new_signal(&shv_path, signal.method, Some(signal.value));
-                                                peer.sender.send(PeerEvent::Message(sig)).await.unwrap();
-                                            }
-                                            resp.set_result(value);
-                                        }
-                                        Err(err) => {
-                                            resp.set_error(err);
+                            let command = if let Command::Custom(cc) = command {
+                                match cc {
+                                    BrokerCommand::ClientInfo(client_id) => {
+                                        match broker.client_info(client_id) {
+                                            None => { Command::Result(().into()) }
+                                            Some(info) => { Command::Result(info.into()) }
                                         }
                                     }
-                                    peer.sender.send(PeerEvent::Message(resp)).await.unwrap();
+                                    BrokerCommand::MountedClientInfo(mount_point) => {
+                                        match broker.mounted_client_info(&mount_point) {
+                                            None => { Command::Result(().into()) }
+                                            Some(info) => { Command::Result(info.into()) }
+                                        }
+                                    }
+                                    BrokerCommand::Clients => {
+                                        Command::Result(broker.clients().into())
+                                    }
+                                    BrokerCommand::Mounts => {
+                                        Command::Result(broker.mounts().into())
+                                    }
+                                    BrokerCommand::DisconnectClient(client_id) => {
+                                        broker.disconnect_client(client_id).await;
+                                        Command::Result(().into())
+                                    }
+                                    BrokerCommand::CurrentClientInfo => {
+                                        match broker.client_info(client_id) {
+                                            None => { Command::Result(().into()) }
+                                            Some(info) => { Command::Result(info.into()) }
+                                        }
+                                    }
+                                    BrokerCommand::Subscribe(subscr) => {
+                                        broker.subscribe(client_id, subscr);
+                                        Command::Result(().into())
+                                    }
+                                    BrokerCommand::Unsubscribe(subscr) => {
+                                        let ok = broker.unsubscribe(client_id, &subscr);
+                                        Command::Result(ok.into())
+                                    }
+                                }
+                            } else {
+                                command
+                            };
+                            match command {
+                                RequestCommand::Noop => {}
+                                command => {
+                                    if let Ok(meta) = response_meta {
+                                        let peer = broker.peers.get(&client_id).unwrap();
+                                        let command = if let Command::PropertyChanged(value) = command {
+                                            let sig = RpcMessage::new_signal(&shv_path, SIG_CHNG, Some(value));
+                                            peer.sender.send(PeerEvent::Message(sig)).await.unwrap();
+                                            Command::Result(().into())
+                                        } else {
+                                            command
+                                        };
+                                        let mut resp = RpcMessage::from_meta(meta);
+                                        match command {
+                                            RequestCommand::Result(value) => {
+                                                resp.set_result(value);
+                                            }
+                                            RequestCommand::Error(error) => {
+                                                resp.set_error(error);
+                                            }
+                                            _ => {
+                                            }
+                                        }
+                                        if resp.is_success() || resp.is_error() {
+                                            if let Err(error) = peer.sender.send(PeerEvent::Message(resp)).await {
+                                                error!("Error writing to peer channel: {error}");
+                                            }
+                                        }
+                                    } else {
+                                        warn!("Invalid request frame received.");
+                                    }
                                 }
                             }
                         } else if frame.is_response() {
@@ -593,17 +647,17 @@ async fn broker_loop(events: Receiver<ClientEvent>) {
                         }
                     },
                     ClientEvent::RegisterDevice { client_id, device_id, mount_point } => {
-                        broker.mount_device(&mut mounts, client_id, device_id, mount_point);
+                        broker.mount_device(client_id, device_id, mount_point);
                     },
                     ClientEvent::ClientGone { client_id } => {
                         broker.peers.remove(&client_id);
                         info!("Client id: {} disconnected.", client_id);
                         if let Some(path) = broker.client_id_to_mount_point(client_id) {
                             info!("Unmounting path: '{}'", path);
-                            mounts.remove(&path);
+                            broker.mounts.remove(&path);
                         }
                         let client_path = format!(".app/broker/client/{}", client_id);
-                        mounts.remove(&client_path);
+                        broker.mounts.remove(&client_path);
                     }
                     ClientEvent::GetPassword { client_id, user } => {
                         let shapwd = broker.sha_password(&user);

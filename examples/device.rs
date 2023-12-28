@@ -12,7 +12,7 @@ use shv::client::LoginParams;
 use shv::metamethod::{MetaMethod};
 use shv::rpcframe::RpcFrame;
 use shv::rpcmessage::{RpcError, RpcErrorCode};
-use shv::shvnode::{AppDeviceNode, find_longest_prefix, ShvNode, ProcessRequestResult, Signal, AppNode, DIR_LS_METHODS, process_local_dir_ls, METH_GET, METH_SET, SIG_CHNG, PROPERTY_METHODS};
+use shv::shvnode::{AppDeviceNode, find_longest_prefix, ShvNode, RequestCommand, AppNode, DIR_LS_METHODS, process_local_dir_ls, METH_GET, METH_SET, SIG_CHNG, PROPERTY_METHODS};
 use shv::util::parse_log_verbosity;
 
 #[derive(StructOpt, Debug)]
@@ -52,10 +52,6 @@ pub(crate) fn main() -> shv::Result<()> {
     task::block_on(try_main(&url, &opts))
 }
 
-struct DeviceState {
-    int_prop: i32,
-}
-
 async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
 
     // Establish a connection
@@ -77,11 +73,10 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     client::login(&mut frame_reader, &mut writer, &login_params).await?;
 
 
-    let mut device_state = DeviceState { int_prop: 0 };
-    let mut mounts: BTreeMap<String, Box<dyn ShvNode<DeviceState>>> = BTreeMap::new();
+    let mut mounts: BTreeMap<String, Box<dyn ShvNode<()>>> = BTreeMap::new();
     mounts.insert(".app".into(), Box::new(AppNode { app_name: "device", ..Default::default() }));
     mounts.insert(".app/device".into(), Box::new(AppDeviceNode { device_name: "example", ..Default::default() }));
-    mounts.insert("number".into(), Box::new(IntPropertyNode{}));
+    mounts.insert("number".into(), Box::new(IntPropertyNode{ value: 0 }));
     loop {
         match frame_reader.receive_frame().await {
             Err(e) => {
@@ -97,37 +92,47 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
                     if let Ok(mut rpcmsg) = frame.to_rpcmesage() {
                         let shv_path = frame.shv_path().unwrap_or_default();
                         let local_result = process_local_dir_ls(&mounts, &frame);
-                        let result = match local_result {
+                        type Command = RequestCommand<()>;
+                        let command = match local_result {
                             None => {
                                 if let Some((mount, path)) = find_longest_prefix(&mounts, &shv_path) {
                                     let node = mounts.get_mut(mount).unwrap();
                                     rpcmsg.set_shvpath(path);
-                                    node.process_request(&rpcmsg, &mut device_state)
+                                    node.process_request(&rpcmsg)
                                 } else {
                                     let method = frame.method().unwrap_or_default();
-                                    Err(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid shv path {}:{}()", shv_path, method)))
+                                    Command::Error(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid shv path {}:{}()", shv_path, method)))
                                 }
                             }
-                            Some(result) => { result }
+                            Some(command) => { command }
                         };
                         let response_meta= RpcFrame::prepare_response_meta(&frame.meta);
                         if let Ok(meta) = response_meta {
+                            let command = if let Command::PropertyChanged(value) = &command {
+                                let sig = RpcMessage::new_signal(shv_path, SIG_CHNG, Some(value.clone()));
+                                shv::connection::send_message(&mut writer, &sig).await?;
+                                Command::Result(().into())
+                            } else {
+                                command
+                            };
                             let mut resp = RpcMessage::from_meta(meta);
-                            match result {
-                                Ok((value, signal)) => {
-                                    // send signal before response, node.process_request(...) can also eventually send other signals
-                                    if let Some(signal) = signal {
-                                        let sig = RpcMessage::new_signal(shv_path, signal.method, Some(signal.value));
-                                        shv::connection::send_message(&mut writer, &sig).await?;
-                                    }
+                            match command {
+                                RequestCommand::Result(value) => {
                                     resp.set_result(value);
+                                }
+                                RequestCommand::Error(error) => {
+                                    resp.set_error(error);
                                     shv::connection::send_message(&mut writer, &resp).await?;
                                 }
-                                Err(errmsg) => {
-                                    resp.set_error(errmsg);
-                                    shv::connection::send_message(&mut writer, &resp).await?;
+                                _ => {  }
+                            };
+                            if resp.is_success() || resp.is_error() {
+                                if let Err(error) = shv::connection::send_message(&mut writer, &resp).await {
+                                    error!("Error writing to peer socket: {error}");
                                 }
                             }
+                        } else {
+                            warn!("Invalid request frame received.");
                         }
                     } else {
                         warn!("Invalid shv request");
@@ -140,37 +145,38 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
     Ok(())
 }
 struct IntPropertyNode {
+    value: i32,
 }
-impl ShvNode<DeviceState> for IntPropertyNode {
+impl ShvNode<()> for IntPropertyNode {
     fn methods(&self) -> Vec<&MetaMethod> {
         DIR_LS_METHODS.iter().chain(PROPERTY_METHODS.iter()).collect()
     }
 
-    fn process_request(&mut self, rq: &RpcMessage, state: &mut DeviceState) -> ProcessRequestResult {
+    fn process_request(&mut self, rq: &RpcMessage) -> RequestCommand<()> {
         match rq.method() {
             Some(METH_GET) => {
-                Ok((state.int_prop.into(), None))
+                RequestCommand::Result(self.value.into())
             }
             Some(METH_SET) => {
                 match rq.param() {
-                    None => Err(RpcError::new(RpcErrorCode::InvalidParam, "Invalid parameter")),
+                    None => RequestCommand::Error(RpcError::new(RpcErrorCode::InvalidParam, "Invalid parameter")),
                     Some(v) => {
                         if v.is_int() {
                             let v = v.as_i32();
-                            if v == state.int_prop {
-                                Ok((RpcValue::from(()), None))
+                            if v == self.value {
+                                RequestCommand::Result(RpcValue::null())
                             } else {
-                                state.int_prop = v;
-                                Ok((RpcValue::from(()), Some(Signal{ value: v.into(), method: SIG_CHNG })))
+                                self.value = v;
+                                RequestCommand::PropertyChanged(v.into())
                             }
                         } else {
-                            Err(RpcError::new(RpcErrorCode::InvalidParam, "Invalid parameter"))
+                            RequestCommand::Error(RpcError::new(RpcErrorCode::InvalidParam, "Invalid parameter"))
                         }
                     }
                 }
             }
             _ => {
-                ShvNode::<DeviceState>::process_dir_ls(self, rq)
+                ShvNode::<()>::process_dir_ls(self, rq)
             }
         }
     }

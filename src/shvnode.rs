@@ -80,7 +80,7 @@ impl From<Option<&RpcValue>> for LsParam {
     }
 }
 
-pub fn process_local_dir_ls<V>(mounts: &BTreeMap<String, V>, frame: &RpcFrame) -> Option<ProcessRequestResult> {
+pub fn process_local_dir_ls<V,K>(mounts: &BTreeMap<String, V>, frame: &RpcFrame) -> Option<RequestCommand<K>> {
     let method = frame.method().unwrap_or_default();
     if !(method == METH_DIR || method == METH_LS) {
         return None
@@ -95,15 +95,15 @@ pub fn process_local_dir_ls<V>(mounts: &BTreeMap<String, V>, frame: &RpcFrame) -
     };
     if children_on_path.is_none() && !is_mount_point {
         // path doesn't exist
-        return Some(Err(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid shv path: {}", shv_path))))
+        return Some(RequestCommand::Error(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid shv path: {}", shv_path))))
     }
     if method == METH_DIR && !is_mount_point {
         // dir in the middle of the tree must be resolved locally
         if let Ok(rpcmsg) = frame.to_rpcmesage() {
-            let dir = Ok((dir(DIR_LS_METHODS.iter().into_iter(), rpcmsg.param().into()), None));
-            return Some(dir)
+            let dir = dir(DIR_LS_METHODS.iter().into_iter(), rpcmsg.param().into());
+            return Some(RequestCommand::Result(dir))
         } else {
-            return Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
+            return Some(RequestCommand::Error(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
         }
     }
     if method == METH_LS && !is_leaf {
@@ -112,34 +112,34 @@ pub fn process_local_dir_ls<V>(mounts: &BTreeMap<String, V>, frame: &RpcFrame) -
             let ls = ls(&mounts, shv_path, rpcmsg.param().into());
             return Some(ls)
         } else {
-            return Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
+            return Some(RequestCommand::Error(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
         }
     }
     None
 }
-fn ls<V>(mounts: &BTreeMap<String, V>, shv_path: &str, param: LsParam) -> ProcessRequestResult {
+fn ls<V, K>(mounts: &BTreeMap<String, V>, shv_path: &str, param: LsParam) -> RequestCommand<K> {
     ls_children_to_result(children_on_path(mounts, shv_path), param)
 }
-fn ls_children_to_result(children: Option<Vec<String>>, param: LsParam) -> ProcessRequestResult {
+fn ls_children_to_result<K>(children: Option<Vec<String>>, param: LsParam) -> RequestCommand<K> {
     match param {
         LsParam::List => {
             match children {
                 None => {
-                    Err(RpcError::new(RpcErrorCode::MethodCallException, "Invalid shv path"))
+                    RequestCommand::Error(RpcError::new(RpcErrorCode::MethodCallException, "Invalid shv path"))
                 }
                 Some(dirs) => {
                     let res: rpcvalue::List = dirs.iter().map(|d| RpcValue::from(d)).collect();
-                    Ok((res.into(), None))
+                    RequestCommand::Result(res.into())
                 }
             }
         }
         LsParam::Exists(path) => {
             match children {
                 None => {
-                    Ok((false.into(), None))
+                    RequestCommand::Result(false.into())
                 }
                 Some(children) => {
-                    Ok((children.contains(&path).into(), None))
+                    RequestCommand::Result(children.contains(&path).into())
                 }
             }
         }
@@ -215,13 +215,12 @@ pub fn find_longest_prefix<'a, 'b, V>(map: &'a BTreeMap<String, V>, shv_path: &'
     None
 }
 
-pub struct Signal {
-    pub value: RpcValue,
-    pub method: &'static str,
-}
-pub type ProcessRequestResult = std::result::Result<(RpcValue, Option<Signal>), RpcError>;
-impl From<RpcValue> for ProcessRequestResult {
-    fn from(val: RpcValue) -> Self { Ok((val, None)) }
+pub enum RequestCommand<K> {
+    Noop,
+    Result(RpcValue),
+    PropertyChanged(RpcValue),
+    Error(RpcError),
+    Custom(K),
 }
 pub trait ShvNode<K> {
     fn methods(&self) -> Vec<&MetaMethod>;
@@ -247,8 +246,8 @@ pub trait ShvNode<K> {
         }
         false
     }
-    fn process_request(&mut self, rq: &RpcMessage, state: &mut K) -> ProcessRequestResult;
-    fn process_dir_ls(&mut self, rq: &RpcMessage) -> ProcessRequestResult {
+    fn process_request(&mut self, rq: &RpcMessage) -> RequestCommand<K>;
+    fn process_dir_ls(&mut self, rq: &RpcMessage) -> RequestCommand<K> {
         match rq.method() {
             Some(METH_DIR) => {
                 self.process_dir(rq)
@@ -259,35 +258,36 @@ pub trait ShvNode<K> {
             _ => {
                 let errmsg = format!("Unknown method '{}:{}()', path.", rq.shv_path().unwrap_or_default(), rq.method().unwrap_or_default());
                 warn!("{}", &errmsg);
-                Err(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
+                RequestCommand::Error(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
             }
         }
     }
-    fn process_dir(&mut self, rq: &RpcMessage) -> ProcessRequestResult {
+    fn process_dir(&mut self, rq: &RpcMessage) -> RequestCommand<K> {
         let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
-            Ok((dir(DIR_LS_METHODS.iter().chain(self.methods().into_iter()), rq.param().into()), None))
+            let resp = dir(DIR_LS_METHODS.iter().chain(self.methods().into_iter()), rq.param().into());
+            RequestCommand::Result(resp)
         } else {
             let errmsg = format!("Unknown method '{}:{}()', invalid path.", rq.shv_path().unwrap_or_default(), rq.method().unwrap_or_default());
             warn!("{}", &errmsg);
-            Err(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
+            RequestCommand::Error(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
         }
     }
-    fn process_ls(&mut self, rq: &RpcMessage) -> ProcessRequestResult {
+    fn process_ls(&mut self, rq: &RpcMessage) -> RequestCommand<K> {
         let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
             match LsParam::from(rq.param()) {
                 LsParam::List => {
-                    Ok((rpcvalue::List::new().into(), None))
+                    RequestCommand::Result(rpcvalue::List::new().into())
                 }
                 LsParam::Exists(_path) => {
-                    Ok((false.into(), None))
+                    RequestCommand::Result(false.into())
                 }
             }
         } else {
             let errmsg = format!("Unknown method '{}:{}()', invalid path.", rq.shv_path().unwrap_or_default(), rq.method().unwrap_or(""));
             warn!("{}", &errmsg);
-            Err(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
+            RequestCommand::Error(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
         }
     }
 }
@@ -344,13 +344,13 @@ impl<K> ShvNode<K> for AppNode {
         APP_METHODS.iter().collect()
     }
 
-    fn process_request(&mut self, rq: &RpcMessage, _state: &mut K) -> ProcessRequestResult {
+    fn process_request(&mut self, rq: &RpcMessage) -> RequestCommand<K> {
         if rq.shv_path().unwrap_or_default().is_empty() {
             match rq.method() {
-                Some(METH_SHV_VERSION_MAJOR) => { return Ok((self.shv_version_major.into(), None))  }
-                Some(METH_SHV_VERSION_MINOR) => { return Ok((self.shv_version_minor.into(), None))  }
-                Some(METH_NAME) => { return Ok((RpcValue::from(self.app_name), None))  }
-                Some(METH_PING) => { return Ok((().into(), None))  }
+                Some(METH_SHV_VERSION_MAJOR) => { return RequestCommand::Result(self.shv_version_major.into())  }
+                Some(METH_SHV_VERSION_MINOR) => { return RequestCommand::Result(self.shv_version_minor.into())  }
+                Some(METH_NAME) => { return RequestCommand::Result(RpcValue::from(self.app_name))  }
+                Some(METH_PING) => { return RequestCommand::Result(().into())  }
                 _ => {}
             }
         }
@@ -376,19 +376,19 @@ impl<K> ShvNode<K> for AppDeviceNode {
         DEVICE_METHODS.iter().collect()
     }
 
-    fn process_request(&mut self, rq: &RpcMessage, _state: &mut K) -> ProcessRequestResult {
+    fn process_request(&mut self, rq: &RpcMessage) -> RequestCommand<K> {
         if rq.shv_path().unwrap_or_default().is_empty() {
             match rq.method() {
                 Some(METH_NAME) => {
-                    return Ok((RpcValue::from(self.device_name), None))
+                    return RequestCommand::Result(RpcValue::from(self.device_name))
                 }
                 Some(METH_VERSION) => {
-                    return Ok((RpcValue::from(self.version), None))
+                    return RequestCommand::Result(RpcValue::from(self.version))
                 }
                 Some(METH_SERIAL_NUMBER) => {
                     match &self.serial_number {
-                        None => {return Ok((RpcValue::null(), None))}
-                        Some(sn) => {return Ok((RpcValue::from(sn), None))}
+                        None => {return RequestCommand::Result(RpcValue::null())}
+                        Some(sn) => {return RequestCommand::Result(RpcValue::from(sn))}
                     }
                 }
                 _ => {

@@ -1,9 +1,8 @@
 use shv::metamethod::{Access, Flag, MetaMethod};
-use shv::{RpcMessage, RpcMessageMetaTags, RpcValue};
+use shv::{RpcMessage, RpcMessageMetaTags};
 use shv::rpc::Subscription;
-use shv::rpcmessage::RpcError;
-use shv::shvnode::{ProcessRequestResult, ShvNode};
-use crate::{Broker};
+use shv::rpcmessage::{CliId, RpcError};
+use shv::shvnode::{RequestCommand, ShvNode};
 
 const METH_CLIENT_INFO: &str = "clientInfo";
 const METH_MOUNTED_CLIENT_INFO: &str = "mountedClientInfo";
@@ -18,44 +17,44 @@ const APP_BROKER_METHODS: [MetaMethod; 5] = [
     MetaMethod { name: METH_MOUNTS, param: "void", result: "List[String]", access: Access::SuperService, flags: Flag::None as u32, description: "" },
     MetaMethod { name: METH_DISCONNECT_CLIENT, param: "Int", result: "void", access: Access::SuperService, flags: Flag::None as u32, description: "" },
 ];
-
+pub enum BrokerCommand {
+    ClientInfo(CliId),
+    MountedClientInfo(String),
+    Clients,
+    Mounts,
+    DisconnectClient(CliId),
+    CurrentClientInfo,
+    Subscribe(Subscription),
+    Unsubscribe(Subscription),
+}
 pub(crate) struct AppBrokerNode {}
-impl ShvNode<crate::Broker> for AppBrokerNode {
+impl ShvNode<BrokerCommand> for AppBrokerNode {
     fn methods(&self) -> Vec<&MetaMethod> {
         APP_BROKER_METHODS.iter().collect()
     }
 
-    fn process_request(&mut self, rq: &RpcMessage, broker: &mut crate::Broker) -> ProcessRequestResult {
+    fn process_request(&mut self, rq: &RpcMessage) -> RequestCommand<BrokerCommand> {
         match rq.method() {
             Some(METH_CLIENT_INFO) => {
                 let client_id = rq.param().unwrap_or_default().as_i32();
-                match broker.client_info(client_id) {
-                    None => { Ok((RpcValue::null(), None)) }
-                    Some(info) => { RpcValue::from(info).into() }
-                }
+                RequestCommand::<BrokerCommand>::Custom(BrokerCommand::ClientInfo(client_id))
             }
             Some(METH_MOUNTED_CLIENT_INFO) => {
                 let mount_point = rq.param().unwrap_or_default().as_str();
-                match broker.mounted_client_info(mount_point) {
-                    None => { Ok((RpcValue::null(), None)) }
-                    Some(info) => { RpcValue::from(info).into() }
-                }
+                RequestCommand::<BrokerCommand>::Custom(BrokerCommand::MountedClientInfo(mount_point.to_owned()))
             }
             Some(METH_CLIENTS) => {
-                let clients = broker.clients();
-                RpcValue::from(clients).into()
+                RequestCommand::<BrokerCommand>::Custom(BrokerCommand::Clients)
             }
             Some(METH_MOUNTS) => {
-                let mounts = broker.mounts();
-                RpcValue::from(mounts).into()
+                RequestCommand::<BrokerCommand>::Custom(BrokerCommand::Mounts)
             }
             Some(METH_DISCONNECT_CLIENT) => {
                 let client_id = rq.param().unwrap_or_default().as_i32();
-                //broker.disconnect_client(client_id);
-                RpcValue::null().into()
+                RequestCommand::<BrokerCommand>::Custom(BrokerCommand::DisconnectClient(client_id))
             }
             _ => {
-                ShvNode::<crate::Broker>::process_dir_ls(self, rq)
+                ShvNode::<BrokerCommand>::process_dir_ls(self, rq)
             }
         }
     }
@@ -71,51 +70,38 @@ const METH_SUBSCRIBE: &str = "subscribe";
 const METH_UNSUBSCRIBE: &str = "unsubscribe";
 
 pub(crate) struct AppBrokerCurrentClientNode {}
-impl ShvNode<Broker> for AppBrokerCurrentClientNode {
+impl ShvNode<BrokerCommand> for AppBrokerCurrentClientNode {
     fn methods(&self) -> Vec<&MetaMethod> {
         APP_BROKER_CURRENT_CLIENT_METHODS.iter().collect()
     }
 
-    fn process_request(&mut self, rq: &RpcMessage, broker: &mut Broker) -> ProcessRequestResult {
+    fn process_request(&mut self, rq: &RpcMessage) -> RequestCommand<BrokerCommand> {
         match rq.method() {
             Some(METH_INFO) => {
-                let client_id = broker.request_context.caller_client_id;
-                RpcValue::from(broker.client_info(client_id).unwrap_or_default()).into()
+                RequestCommand::<BrokerCommand>::Custom(BrokerCommand::CurrentClientInfo)
             }
             Some(METH_SUBSCRIBE) => {
-                let client_id = broker.request_context.caller_client_id;
                 match Subscription::from_rpcvalue(rq.param().unwrap_or_default()) {
                     Ok(subscription) => {
-                        match broker.subscribe(client_id, subscription) {
-                            Ok(b) => { RpcValue::from(b).into() }
-                            Err(err) => {
-                                Err(RpcError{ code: shv::rpcmessage::RpcErrorCode::MethodCallException, message: err.to_string() })
-                            }
-                        }
+                        RequestCommand::<BrokerCommand>::Custom(BrokerCommand::Subscribe(subscription))
                     }
                     Err(err) => {
-                        Err(RpcError{ code: shv::rpcmessage::RpcErrorCode::InvalidParam, message: err.to_string() })
+                        RequestCommand::Error(RpcError{ code: shv::rpcmessage::RpcErrorCode::InvalidParam, message: err.to_string() })
                     }
                 }
             }
             Some(METH_UNSUBSCRIBE) => {
-                let client_id = broker.request_context.caller_client_id;
                 match Subscription::from_rpcvalue(rq.param().unwrap_or_default()) {
                     Ok(subscription) => {
-                        match broker.unsubscribe(client_id, &subscription) {
-                            Ok(b) => { RpcValue::from(b).into() }
-                            Err(err) => {
-                                Err(RpcError{ code: shv::rpcmessage::RpcErrorCode::MethodCallException, message: err.to_string() })
-                            }
-                        }
+                        RequestCommand::<BrokerCommand>::Custom(BrokerCommand::Unsubscribe(subscription))
                     }
                     Err(err) => {
-                        Err(RpcError{ code: shv::rpcmessage::RpcErrorCode::InvalidParam, message: err.to_string() })
+                        RequestCommand::Error(RpcError{ code: shv::rpcmessage::RpcErrorCode::InvalidParam, message: err.to_string() })
                     }
                 }
             }
             _ => {
-                ShvNode::<Broker>::process_dir_ls(self, rq)
+                ShvNode::<BrokerCommand>::process_dir_ls(self, rq)
             }
         }
     }
