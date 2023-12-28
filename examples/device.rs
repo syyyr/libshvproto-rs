@@ -14,6 +14,7 @@ use shv::rpcframe::RpcFrame;
 use shv::rpcmessage::{RpcError, RpcErrorCode};
 use shv::shvnode::{AppDeviceNode, find_longest_prefix, ShvNode, RequestCommand, AppNode, DIR_LS_METHODS, process_local_dir_ls, METH_GET, METH_SET, SIG_CHNG, PROPERTY_METHODS};
 use shv::util::parse_log_verbosity;
+use duration_str::{parse};
 
 #[derive(StructOpt, Debug)]
 //#[structopt(name = "device", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "SHV call")]
@@ -23,8 +24,13 @@ struct Opts {
     url: String,
     #[structopt(short = "-i", long = "--device-id")]
     device_id: Option<String>,
+    /// Mount point on broker connected to, note that broker might not accept any path.
     #[structopt(short = "-m", long = "--mount")]
     mount: Option<String>,
+    /// Device tries to reconnect to broker after this interval, if connection to broker is lost.
+    /// Example values: 1s, 1h, etc.
+    #[structopt(short = "r", long = "--reconnect-interval")]
+    reconnect_interval: Option<String>,
     /// Verbose mode (module, .)
     #[structopt(short = "v", long = "verbose")]
     verbose: Option<String>,
@@ -34,7 +40,7 @@ pub(crate) fn main() -> shv::Result<()> {
     let opts = Opts::from_args();
 
     let mut logger = SimpleLogger::new();
-    logger = logger.with_level(LevelFilter::Error);
+    logger = logger.with_level(LevelFilter::Info);
     if let Some(module_names) = &opts.verbose {
         for (module, level) in parse_log_verbosity(&module_names, module_path!()) {
             logger = logger.with_module_level(module, level);
@@ -48,14 +54,41 @@ pub(crate) fn main() -> shv::Result<()> {
 
     // let rpc_timeout = Duration::from_millis(DEFAULT_RPC_TIMEOUT_MSEC);
     let url = Url::parse(&opts.url)?;
-
-    task::block_on(try_main(&url, &opts))
+    task::block_on(try_main_reconnect(&url, &opts))
 }
 
+async fn try_main_reconnect(url: &Url, opts: &Opts) -> shv::Result<()> {
+    if let Some(time_str) = &opts.reconnect_interval {
+        match parse(time_str) {
+            Ok(interval) => {
+                info!("Reconnect interval set to: {:?}", interval);
+                loop {
+                    match try_main(&url, &opts).await {
+                        Ok(_) => {
+                            info!("Finished without error");
+                            return Ok(())
+                        }
+                        Err(err) => {
+                            error!("Error in main loop: {err}");
+                            info!("Reconnecting after: {:?}", interval);
+                            async_std::task::sleep(interval).await;
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                return Err(err.into());
+            }
+        }
+    } else {
+        try_main(&url, &opts).await
+    }
+}
 async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
 
-    // Establish a connection
     let address = format!("{}:{}", url.host_str().unwrap_or_default(), url.port().unwrap_or(3755));
+    // Establish a connection
+    info!("Connecting to: {address}");
     let stream = TcpStream::connect(&address).await?;
     let (reader, mut writer) = (&stream, &stream);
 
@@ -70,6 +103,8 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
         device_id: match opts.device_id { None => {"".to_string()} Some(ref str) => {str.clone()} },
         ..Default::default()
     };
+
+    info!("Connected OK");
     client::login(&mut frame_reader, &mut writer, &login_params).await?;
 
 
@@ -84,8 +119,7 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
                 continue;
             }
             Ok(None) => {
-                debug!("Broker socket closed");
-                break;
+                return Err("Broker socket closed".into());
             }
             Ok(Some(frame)) => {
                 if frame.is_request() {
@@ -141,8 +175,6 @@ async fn try_main(url: &Url, opts: &Opts) -> shv::Result<()> {
             }
         }
     }
-
-    Ok(())
 }
 struct IntPropertyNode {
     value: i32,
