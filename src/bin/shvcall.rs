@@ -5,19 +5,18 @@ use async_std::net::TcpStream;
 use shv::{client, RpcMessage, RpcMessageMetaTags, RpcValue};
 use async_std::task;
 use log::*;
-use percent_encoding::percent_decode;
 use simple_logger::SimpleLogger;
 use url::Url;
 use shv::client::LoginParams;
 use shv::rpcmessage::{RqId};
-use shv::util::parse_log_verbosity;
+use shv::util::{login_from_url, parse_log_verbosity};
 
 type Result = shv::Result<()>;
 
 #[derive(StructOpt, Debug)]
 //#[structopt(name = "shvcall", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "SHV call")]
 struct Opts {
-    ///Url to connect to, example tcp://localhost:3755, localsocket:path/to/socket
+    ///Url to connect to, example tcp://admin@localhost:3755?password=dj4j5HHb, localsocket:path/to/socket
     #[structopt(name = "url", short = "-s", long = "--url")]
     url: String,
     #[structopt(short = "p", long = "path")]
@@ -81,9 +80,10 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
     let mut frame_reader = shv::connection::FrameReader::new(&mut brd);
 
     // login
+    let (user, password) = login_from_url(url);
     let login_params = LoginParams {
-        user: url.username().to_string(),
-        password: percent_decode(url.password().unwrap_or("").as_bytes()).decode_utf8()?.into(),
+        user,
+        password,
         heartbeat_interval: None,
         ..Default::default()
     };

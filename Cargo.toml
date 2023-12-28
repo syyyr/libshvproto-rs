@@ -18,7 +18,7 @@ chrono = "0.4.31"
 hex = "0.4.3"
 rand = "0.8.5"
 url = "2.4.1"
-percent-encoding = "2.3.0"
+#percent-encoding = "2.3.0"
 glob = "0.3.1"
 duration-str = "0.7.1"
 

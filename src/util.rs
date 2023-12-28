@@ -1,6 +1,7 @@
 use log::LevelFilter;
 use sha1::Sha1;
 use sha1::Digest;
+use url::Url;
 
 pub fn sha1_hash(data: &[u8]) -> Vec<u8> {
     let mut hasher = Sha1::new();
@@ -43,4 +44,21 @@ pub fn parse_log_verbosity<'a>(verbosity: &'a str, module_path: &'a str) -> Vec<
         ret.push((module, level));
     }
     ret
+}
+
+pub fn login_from_url(url: &Url) -> (String, String) {
+    let password = if let Some(password) = url.password() {
+        password.to_owned()
+    } else {
+        let mut password = None;
+        for (key,val) in url.query_pairs() {
+            if key == "password" {
+                password = Some(val.to_string());
+                break;
+            }
+        }
+        password.unwrap_or_default()
+    };
+    let user = url.username().to_string();
+    (user, password)
 }
