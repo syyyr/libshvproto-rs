@@ -1,54 +1,40 @@
 use std::collections::HashMap;
-use glob::Pattern;
+use serde::{Serialize, Deserialize};
 
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
     #[allow(dead_code)]
     listen: Listen,
     pub users: HashMap<String, User>,
     pub roles: HashMap<String, Role>,
 }
+#[derive(Serialize, Deserialize, Debug)]
 struct Listen {
     #[allow(dead_code)]
     tcp: String,
 }
+#[derive(Serialize, Deserialize, Debug)]
 pub struct User {
     pub password: Password,
     pub roles: Vec<String>,
 }
+#[derive(Serialize, Deserialize, Debug)]
 pub enum Password {
     Plain(String),
     Sha1(String),
 }
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Role {
     pub roles: Vec<String>,
     pub access: Vec<AccessRule>,
 }
+#[derive(Serialize, Deserialize, Debug)]
 pub struct AccessRule {
-    pub path: Pattern,
-    pub method: Pattern,
+    pub patterns: String,
+    pub methods: String,
     pub grant: String,
 }
-impl AccessRule {
-    pub fn new(path: &str, method: &str, grant: &str) -> shv::Result<Self> {
-        let method = if method.is_empty() { "?*" } else { method };
-        let path = if path.is_empty() { "**" } else { path };
-        match Pattern::new(method) {
-            Ok(method) => {
-                match Pattern::new(path) {
-                    Ok(path) => {
-                        Ok(Self {
-                            method,
-                            path,
-                            grant: grant.to_string(),
-                        })
-                    }
-                    Err(err) => { Err(format!("{}", &err).into()) }
-                }
-            }
-            Err(err) => { Err(format!("{}", &err).into()) }
-        }
-    }
-}
+impl AccessRule {}
 pub fn default_config() -> Config {
     Config {
         listen: Listen { tcp: "localhost:3755".to_string() },
@@ -59,21 +45,21 @@ pub fn default_config() -> Config {
         ]),
         roles: HashMap::from([
             ("su".to_string(), Role{ roles: vec![], access: vec![
-                AccessRule::new("**", "", "su").unwrap(),
+                AccessRule{ patterns: "**".to_string(), methods: "".to_string(), grant: "su".to_string() },
             ] }),
             ("client".to_string(), Role{ roles: vec!["ping".to_string(), "subscribe".to_string(), "browse".to_string(), ], access: vec![] }),
             ("tester".to_string(), Role{ roles: vec!["client".to_string()], access: vec![
-                AccessRule::new("test/**", "", "cfg").unwrap(),
+                AccessRule{ patterns: "test/**".to_string(), methods: "".to_string(), grant: "cfg".to_string() },
             ] }),
             ("ping".to_string(), Role{ roles: vec![], access: vec![
-                AccessRule::new(".app", "ping", "wr").unwrap(),
+                AccessRule{ patterns: ".app".to_string(), methods: "ping".to_string(), grant: "wr".to_string() },
             ] }),
             ("subscribe".to_string(), Role{ roles: vec![], access: vec![
-                AccessRule::new(".app/broker/currentClient", "subscribe", "wr").unwrap(),
-                AccessRule::new(".app/broker/currentClient", "unsubscribe", "wr").unwrap(),
+                AccessRule{ patterns: ".app/broker/currentClient".to_string(), methods: "subscribe".to_string(), grant: "wr".to_string() },
+                AccessRule{ patterns: ".app/broker/currentClient".to_string(), methods: "unsubscribe".to_string(), grant: "wr".to_string() },
             ] }),
             ("browse".to_string(), Role{ roles: vec![], access: vec![
-                AccessRule::new("**", "", "bws").unwrap(),
+                AccessRule{ patterns: "**".to_string(), methods: "".to_string(), grant: "bws".to_string() },
             ] }),
         ]),
     }

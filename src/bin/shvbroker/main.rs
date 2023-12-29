@@ -4,9 +4,9 @@ use std::{
 use std::collections::BTreeMap;
 use futures::{select, FutureExt, StreamExt};
 use async_std::{channel, io::BufReader, net::{TcpListener, TcpStream, ToSocketAddrs}, prelude::*, task};
+use glob::Pattern;
 use rand::distributions::{Alphanumeric, DistString};
 use log::*;
-use structopt::StructOpt;
 use shv::rpcframe::{RpcFrame};
 use shv::{List, RpcMessage, RpcValue, rpcvalue, util};
 use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
@@ -17,6 +17,7 @@ use shv::shvnode::{find_longest_prefix, ShvNode, RequestCommand, process_local_d
 use shv::util::{parse_log_verbosity, sha1_hash};
 use crate::config::{Config, default_config, Password};
 use crate::node::BrokerCommand;
+use clap::{Parser};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 type Sender<T> = async_std::channel::Sender<T>;
@@ -24,16 +25,15 @@ type Receiver<T> = async_std::channel::Receiver<T>;
 
 mod config;
 mod node;
-#[derive(StructOpt, Debug)]
-#[structopt()]
+#[derive(Parser, Debug)]
 struct Opt {
     /// Verbose mode (module, .)
-    #[structopt(short = "v", long = "verbose")]
+    #[arg(short = 'v', long = "verbose")]
     verbose: Option<String>,
 }
 
 pub(crate) fn main() -> Result<()> {
-    let opt = Opt::from_args();
+    let opt = Opt::parse();
 
     let mut logger = SimpleLogger::new();
     logger = logger.with_level(LevelFilter::Info);
@@ -286,7 +286,7 @@ struct Peer {
 impl Peer {
     fn is_signal_subscribed(&self, path: &str, method: &str) -> bool {
         for subs in self.subscriptions.iter() {
-            if subs.match_signal(path, method) {
+            if subs.match_shv_method(path, method) {
                 return true;
             }
         }
@@ -301,10 +301,35 @@ enum Mount<K> {
     Peer(Device),
     Node(Node<K>),
 }
+struct ParsedAccessRule {
+    path_method: Subscription,
+    grant: String,
+}
+impl ParsedAccessRule {
+    pub fn new(path: &str, method: &str, grant: &str) -> shv::Result<Self> {
+       let method = if method.is_empty() { "?*" } else { method };
+       let path = if path.is_empty() { "**" } else { path };
+       match Pattern::new(method) {
+           Ok(method) => {
+               match Pattern::new(path) {
+                   Ok(path) => {
+                       Ok(Self {
+                           path_method: Subscription { paths: path, methods: method },
+                           grant: grant.to_string(),
+                       })
+                   }
+                   Err(err) => { Err(format!("{}", &err).into()) }
+               }
+           }
+           Err(err) => { Err(format!("{}", &err).into()) }
+       }
+    }
+}
 struct Broker {
     peers: HashMap<CliId, Peer>,
     mounts: BTreeMap<String, Mount<crate::node::BrokerCommand>>,
     config: Config,
+    role_access: HashMap<String, Vec<ParsedAccessRule>>,
 }
 fn find_mount<'a, 'b, K>(mounts: &'a mut BTreeMap<String, Mount<K>>, shv_path: &'b str) -> Option<(&'a mut Mount<K>, &'b str)> {
     if let Some((mount_dir, node_dir)) = find_longest_prefix(mounts, shv_path) {
@@ -315,6 +340,31 @@ fn find_mount<'a, 'b, K>(mounts: &'a mut BTreeMap<String, Mount<K>>, shv_path: &
 }
 
 impl Broker {
+    fn new(config: Config) -> Self {
+        let mut role_access: HashMap<String, Vec<ParsedAccessRule>> = Default::default();
+        for (name, role) in &config.roles {
+            let mut list: Vec<ParsedAccessRule> = Default::default();
+            for rule in &role.access {
+                match ParsedAccessRule::new(&rule.patterns, &rule.methods, &rule.grant) {
+                    Ok(rule) => {
+                        list.push(rule);
+                    }
+                    Err(err) => {
+                        error!("Parse access rule error: {}", err);
+                    }
+                }
+            }
+            if !list.is_empty() {
+                role_access.insert(name.clone(), list);
+            }
+        }
+        Self {
+            peers: Default::default(),
+            mounts: Default::default(),
+            config,
+            role_access,
+        }
+    }
     pub fn sha_password(&self, user: &str) -> Option<Vec<u8>> {
         match self.config.users.get(user) {
             None => None,
@@ -397,15 +447,13 @@ impl Broker {
                 if let Some(flatten_roles) = self.flatten_roles(&peer.user) {
                     log!(target: "Acl", Level::Debug, "user: {}, flatten roles: {:?}", &peer.user, flatten_roles);
                     for role_name in flatten_roles {
-                        if let Some(role) = self.config.roles.get(role_name) {
+                        if let Some(rules) = self.role_access.get(role_name) {
                             log!(target: "Acl", Level::Debug, "----------- access for role: {}", role_name);
-                            for rule in &role.access {
-                                log!(target: "Acl", Level::Debug, "\trule: {}:{}", rule.path, rule.method);
-                                if rule.method.matches(method) {
-                                    if rule.path.matches(shv_path) {
-                                        log!(target: "Acl", Level::Debug, "\t\t HIT");
-                                        return Some(rule.grant.clone());
-                                    }
+                            for rule in rules {
+                                log!(target: "Acl", Level::Debug, "\trule: {}", rule.path_method);
+                                if rule.path_method.match_shv_method(shv_path, method) {
+                                    log!(target: "Acl", Level::Debug, "\t\t HIT");
+                                    return Some(rule.grant.clone());
                                 }
                             }
                         }
@@ -477,11 +525,11 @@ impl Broker {
     }
 }
 async fn broker_loop(events: Receiver<ClientEvent>) {
-    let mut broker = Broker {
-        peers: HashMap::new(),
-        mounts: BTreeMap::new(),
-        config: default_config(),
-    };
+    let mut broker = Broker::new(default_config());
+
+    //let yaml = serde_yaml::to_string(&broker.config).unwrap();
+    //println!("yaml = \n{}", yaml);
+
     broker.mounts.insert(".app".into(), Mount::Node(Box::new(shv::shvnode::AppNode { app_name: "shvbroker", ..Default::default() })));
     broker.mounts.insert(".app/broker".into(), Mount::Node(Box::new(node::AppBrokerNode {  })));
     broker.mounts.insert(".app/broker/currentClient".into(), Mount::Node(Box::new(node::AppBrokerCurrentClientNode {  })));

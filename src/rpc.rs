@@ -27,7 +27,7 @@ impl Subscription {
             Err(err) => { Err(format!("{}", &err).into()) }
         }
     }
-    pub fn match_signal(&self, path: &str, method: &str) -> bool {
+    pub fn match_shv_method(&self, path: &str, method: &str) -> bool {
         self.paths.matches(path) && self.methods.matches(method)
     }
     pub fn from_rpcvalue(value: &RpcValue) -> crate::Result<Subscription> {

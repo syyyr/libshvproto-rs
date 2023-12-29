@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use structopt::StructOpt;
 use async_std::io::BufReader;
 use async_std::net::TcpStream;
 use shv::{client, RpcMessage, RpcMessageMetaTags, RpcValue};
@@ -14,29 +13,30 @@ use shv::rpcmessage::{RpcError, RpcErrorCode};
 use shv::shvnode::{AppDeviceNode, find_longest_prefix, ShvNode, RequestCommand, AppNode, DIR_LS_METHODS, process_local_dir_ls, METH_GET, METH_SET, SIG_CHNG, PROPERTY_METHODS};
 use shv::util::{login_from_url, parse_log_verbosity};
 use duration_str::{parse};
+use clap::{Parser};
 
-#[derive(StructOpt, Debug)]
+#[derive(Parser, Debug)]
 //#[structopt(name = "device", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "SHV call")]
 struct Opts {
     ///Url to connect to, example tcp://admin@localhost:3755?password=dj4j5HHb, localsocket:path/to/socket
-    #[structopt(name = "url", short = "-s", long = "--url")]
+    #[arg(name = "url", short = 's', long = "url")]
     url: String,
-    #[structopt(short = "-i", long = "--device-id")]
+    #[arg(short = 'i', long = "device-id")]
     device_id: Option<String>,
     /// Mount point on broker connected to, note that broker might not accept any path.
-    #[structopt(short = "-m", long = "--mount")]
+    #[arg(short = 'm', long = "mount")]
     mount: Option<String>,
     /// Device tries to reconnect to broker after this interval, if connection to broker is lost.
     /// Example values: 1s, 1h, etc.
-    #[structopt(short = "r", long = "--reconnect-interval")]
+    #[arg(short = 'r', long = "reconnect-interval")]
     reconnect_interval: Option<String>,
     /// Verbose mode (module, .)
-    #[structopt(short = "v", long = "verbose")]
+    #[arg(short = 'v', long = "verbose")]
     verbose: Option<String>,
 }
 
 pub(crate) fn main() -> shv::Result<()> {
-    let opts = Opts::from_args();
+    let opts = Opts::parse();
 
     let mut logger = SimpleLogger::new();
     logger = logger.with_level(LevelFilter::Info);

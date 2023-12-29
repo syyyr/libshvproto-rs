@@ -11,7 +11,6 @@ simple_logger = { git = "https://github.com/fvacek/rust-simple_logger.git", bran
 futures = "0.3.29"
 async-std = "1.12.0"
 log = "0.4.20"
-structopt = "0.3.26"
 bytes = "1.5.0"
 sha1 = "0.10.6"
 chrono = "0.4.31"
@@ -21,6 +20,9 @@ url = "2.4.1"
 #percent-encoding = "2.3.0"
 glob = "0.3.1"
 duration-str = "0.7.1"
+serde = "1.0.193"
+serde_yaml = "0.9.29"
+clap = { version = "4.4.12", features = ["derive"] }
 
 [[bin]]
 name = "cp2cp"

@@ -1,5 +1,4 @@
 use async_std::{io, prelude::*};
-use structopt::StructOpt;
 use async_std::io::{BufReader};
 use async_std::net::TcpStream;
 use shv::{client, RpcMessage, RpcMessageMetaTags, RpcValue};
@@ -10,26 +9,27 @@ use url::Url;
 use shv::client::LoginParams;
 use shv::rpcmessage::{RqId};
 use shv::util::{login_from_url, parse_log_verbosity};
+use clap::{Parser};
 
 type Result = shv::Result<()>;
 
-#[derive(StructOpt, Debug)]
+#[derive(Parser, Debug)]
 //#[structopt(name = "shvcall", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "SHV call")]
 struct Opts {
     ///Url to connect to, example tcp://admin@localhost:3755?password=dj4j5HHb, localsocket:path/to/socket
-    #[structopt(name = "url", short = "-s", long = "--url")]
+    #[arg(name = "url", short = 's', long = "url")]
     url: String,
-    #[structopt(short = "p", long = "path")]
+    #[arg(short = 'p', long = "path")]
     path: Option<String>,
-    #[structopt(short = "m", long = "method")]
+    #[arg(short = 'm', long = "method")]
     method: Option<String>,
-    #[structopt(short = "a", long = "param")]
+    #[arg(short = 'a', long = "param")]
     param: Option<String>,
     /// Output format: [ cpon | chainpack | simple | value ], default is 'cpon'
-    #[structopt(short = "o", long = "output-format", default_value = "cpon")]
+    #[arg(short = 'o', long = "output-format", default_value = "cpon")]
     output_format: String,
     /// Verbose mode (module, .)
-    #[structopt(short = "v", long = "verbose")]
+    #[arg(short = 'v', long = "verbose")]
     verbose: Option<String>,
 }
 enum OutputFormat {
@@ -49,7 +49,7 @@ impl From<&str> for OutputFormat {
 }
 // const DEFAULT_RPC_TIMEOUT_MSEC: u64 = 5000;
 pub(crate) fn main() -> Result {
-    let opts = Opts::from_args();
+    let opts = Opts::parse();
 
     let mut logger = SimpleLogger::new();
     logger = logger.with_level(LevelFilter::Info);

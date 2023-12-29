@@ -2,32 +2,32 @@ use std::{process, io, fs};
 use std::io::{BufReader, BufRead, BufWriter, stdout};
 use std::path::PathBuf;
 use log::LevelFilter;
-use structopt::StructOpt;
 use shv::{ChainPackReader, ChainPackWriter, CponReader, CponWriter};
 use simple_logger::SimpleLogger;
 use shv::Reader;
 use shv::Writer;
+use clap::{Parser};
 
-#[derive(StructOpt, Debug)]
+#[derive(Parser, Debug)]
 #[structopt(name = "cp2cp", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "ChainPack to Cpon and back utility")]
 struct Cli {
-    #[structopt(short, long, help = "Cpon indentation string")]
+    #[arg(short, long, help = "Cpon indentation string")]
     indent: Option<String>,
-    #[structopt(long = "--ip", help = "Cpon input")]
+    #[arg(long = "ip", help = "Cpon input")]
     cpon_input: bool,
-    #[structopt(long = "--oc", help = "ChainPack output")]
+    #[arg(long = "oc", help = "ChainPack output")]
     chainpack_output: bool,
     /// Verbose mode (module, .)
-    #[structopt(short = "v", long = "verbose")]
+    #[arg(short = 'v', long = "verbose")]
     verbose: Option<String>,
     /// File to process
-    #[structopt(name = "FILE", parse(from_os_str))]
+    #[arg(value_name = "FILE")]
     file: Option<PathBuf>,
 }
 
 fn main() {
     // Parse command line arguments
-    let opts = Cli::from_args();
+    let opts = Cli::parse();
 
     let mut logger = SimpleLogger::new();
     logger = logger.with_level(LevelFilter::Error);
