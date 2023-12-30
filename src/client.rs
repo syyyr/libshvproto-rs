@@ -1,5 +1,9 @@
+use std::fs;
+use std::path::Path;
 use std::time::Duration;
 use async_std::io;
+use log::{info};
+use serde::{Deserialize, Serialize};
 use crate::{RpcMessage, RpcValue};
 use crate::connection::FrameReader;
 use crate::util::sha1_password_hash;
@@ -98,5 +102,55 @@ where R: io::Read + std::marker::Unpin,
     match resp.result()?.as_map().get("clientId") {
         None => { Ok(0) }
         Some(client_id) => { Ok(client_id.as_i32()) }
+    }
+}
+fn default_heartbeat() -> String { "1m".into() }
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ClientConfig {
+    pub url: String,
+    pub device_id: Option<String>,
+    pub mount: Option<String>,
+    #[serde(default = "default_heartbeat")]
+    pub heartbeat_interval: String,
+    pub reconnect_interval: Option<String>,
+}
+impl ClientConfig {
+    pub fn from_file(file_name: &str) -> crate::Result<Self> {
+        let content = fs::read_to_string(file_name)?;
+        Ok(serde_yaml::from_str(&content)?)
+    }
+    pub fn from_file_or_default(file_name: &str, create_if_not_exist: bool) -> crate::Result<Self> {
+        let file_path = Path::new(file_name);
+        if file_path.exists() {
+            info!("Loading config file {file_name}");
+            return match Self::from_file(&file_name) {
+                Ok(cfg) => {
+                    Ok(cfg)
+                }
+                Err(err) => {
+                    Err(format!("Cannot read config file: {file_name} - {err}").into())
+                }
+            }
+        }
+        let config = Default::default();
+        if create_if_not_exist {
+            if let Some(config_dir) = file_path.parent() {
+                fs::create_dir_all(config_dir)?;
+            }
+            info!("Creating default config file: {file_name}");
+            fs::write(file_path, serde_yaml::to_string(&config)?)?;
+        }
+        Ok(config)
+    }
+}
+impl Default for ClientConfig {
+    fn default() -> Self {
+        Self {
+            url: "tcp://localhost:3755".to_string(),
+            device_id: None,
+            mount: None,
+            heartbeat_interval: default_heartbeat(),
+            reconnect_interval: None,
+        }
     }
 }

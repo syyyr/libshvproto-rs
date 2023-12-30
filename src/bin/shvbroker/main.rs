@@ -14,7 +14,7 @@ use simple_logger::SimpleLogger;
 use shv::rpc::Subscription;
 use shv::shvnode::{find_longest_prefix, ShvNode, RequestCommand, process_local_dir_ls, SIG_CHNG};
 use shv::util::{join_path, parse_log_verbosity, sha1_hash};
-use crate::config::{AccessControl, Config, default_config, Password};
+use crate::config::{AccessControl, BrokerConfig, Password};
 use crate::node::BrokerCommand;
 use clap::{Parser};
 
@@ -57,25 +57,11 @@ pub(crate) fn main() -> Result<()> {
     log!(target: "RpcMsg", Level::Debug, "RPC message");
     log!(target: "Acc", Level::Debug, "Access control message");
 
-    let (config, create_default_config_file) = if let Some(config_file) = &cli_opts.config {
-        if Path::new(&config_file).exists() {
-            info!("Loading config file: {config_file}");
-            (Config::from_file(config_file)?, false)
-        } else {
-            (default_config(), true)
-        }
+    let config = if let Some(config_file) = &cli_opts.config {
+        BrokerConfig::from_file_or_default(config_file, cli_opts.create_default_config)?
     } else {
-        (default_config(), false)
+        Default::default()
     };
-    if create_default_config_file {
-        let config_file = &cli_opts.config.unwrap();
-        let config_path = Path::new(config_file);
-        if let Some(config_dir) = config_path.parent() {
-            fs::create_dir_all(config_dir)?;
-        }
-        info!("Creating default config file: {config_file}");
-        fs::write(config_file, serde_yaml::to_string(&config)?)?;
-    }
     let (access, create_editable_access_file) = loop {
         let mut create_editable_access_file = false;
         if let Some(data_dir) = &config.data_directory {
@@ -108,7 +94,7 @@ pub(crate) fn main() -> Result<()> {
     task::block_on(accept_loop(&config, access))
 }
 
-async fn accept_loop(config: &Config, access: AccessControl) -> Result<()> {
+async fn accept_loop(config: &BrokerConfig, access: AccessControl) -> Result<()> {
     if let Some(address) = &config.listen.tcp {
         info!("Listening on TCP: {}", address);
         let listener = TcpListener::bind(address).await?;
