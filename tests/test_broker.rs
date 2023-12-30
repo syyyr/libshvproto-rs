@@ -13,7 +13,7 @@ mod common;
 fn test_broker() -> shv::Result<()> {
     let mut broker_process_guard = KillProcessGuard::new(Command::new("target/debug/shvbroker")
         .arg("-v").arg(".:W")
-        //.arg("-v").arg("Acl")
+        //.arg("-v").arg("Acc")
         .spawn()?);
     thread::sleep(Duration::from_millis(100));
     assert!(broker_process_guard.is_running());

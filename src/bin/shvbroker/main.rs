@@ -1,5 +1,6 @@
 use std::{collections::hash_map::{Entry, HashMap}, fs};
 use std::collections::BTreeMap;
+use std::path::Path;
 use futures::{select, FutureExt, StreamExt};
 use async_std::{channel, io::BufReader, net::{TcpListener, TcpStream}, prelude::*, task};
 use glob::Pattern;
@@ -12,8 +13,8 @@ use shv::RpcMessageMetaTags;
 use simple_logger::SimpleLogger;
 use shv::rpc::Subscription;
 use shv::shvnode::{find_longest_prefix, ShvNode, RequestCommand, process_local_dir_ls, SIG_CHNG};
-use shv::util::{parse_log_verbosity, sha1_hash};
-use crate::config::{Config, default_config, Password};
+use shv::util::{join_path, parse_log_verbosity, sha1_hash};
+use crate::config::{AccessControl, Config, default_config, Password};
 use crate::node::BrokerCommand;
 use clap::{Parser};
 
@@ -51,27 +52,53 @@ pub(crate) fn main() -> Result<()> {
     //warn!("warn message");
     //error!("error message");
     log!(target: "RpcMsg", Level::Debug, "RPC message");
-    log!(target: "Acl", Level::Debug, "ACL message");
+    log!(target: "Acc", Level::Debug, "Access control message");
 
     let config = if let Some(config_file) = &cli_opts.config {
-        let s = fs::read_to_string(config_file)?;
-        serde_yaml::from_str(&s)?
+        info!("Opening config file: {config_file}");
+        Config::from_file(config_file)?
     } else {
         default_config()
     };
-    fs::create_dir_all("/tmp/shvbroker")?;
-    fs::write("/tmp/shvbroker/config.yaml", serde_yaml::to_string(&config)?)?;
-
-    task::block_on(accept_loop(&config))
+    let (access, create_editable_access_file) = loop {
+        let mut create_editable_access_file = false;
+        if let Some(data_dir) = &config.data_directory {
+            if config.editable_access {
+                let file_name = join_path(data_dir, "access.yaml");
+                if Path::new(&file_name).exists() {
+                    info!("Opening access file {file_name}");
+                    match AccessControl::from_file(&file_name) {
+                        Ok(acc) => {
+                            break (acc, false);
+                        }
+                        Err(err) => {
+                            error!("Cannot read access file: {file_name} - {err}");
+                        }
+                    }
+                } else {
+                    create_editable_access_file = true;
+                }
+            }
+        }
+        break (config.access.clone(), create_editable_access_file);
+    };
+    if create_editable_access_file {
+        let data_dir = &config.data_directory.clone().unwrap_or("/tmp/shvbroker/data".into());
+        fs::create_dir_all(data_dir)?;
+        let access_file = join_path(data_dir, "access.yaml");
+        info!("Creating access file {access_file}");
+        fs::write(access_file, serde_yaml::to_string(&access)?)?;
+    }
+    task::block_on(accept_loop(&config, access))
 }
 
-async fn accept_loop(config: &Config) -> Result<()> {
+async fn accept_loop(config: &Config, access: AccessControl) -> Result<()> {
     if let Some(address) = &config.listen.tcp {
         info!("Listening on TCP: {}", address);
         let listener = TcpListener::bind(address).await?;
         let mut client_id = 0;
         let (broker_sender, broker_receiver) = channel::unbounded();
-        let broker_task = task::spawn(broker_loop(broker_receiver));
+        let broker_task = task::spawn(broker_loop(broker_receiver, access));
         let mut incoming = listener.incoming();
         while let Some(stream) = incoming.next().await {
             let stream = stream?;
@@ -338,7 +365,7 @@ impl ParsedAccessRule {
 struct Broker {
     peers: HashMap<CliId, Peer>,
     mounts: BTreeMap<String, Mount<crate::node::BrokerCommand>>,
-    config: Config,
+    access: AccessControl,
     role_access: HashMap<String, Vec<ParsedAccessRule>>,
 }
 fn find_mount<'a, 'b, K>(mounts: &'a mut BTreeMap<String, Mount<K>>, shv_path: &'b str) -> Option<(&'a mut Mount<K>, &'b str)> {
@@ -350,35 +377,33 @@ fn find_mount<'a, 'b, K>(mounts: &'a mut BTreeMap<String, Mount<K>>, shv_path: &
 }
 
 impl Broker {
-    fn new(config: Config) -> Self {
+    fn new(access: AccessControl) -> Self {
         let mut role_access: HashMap<String, Vec<ParsedAccessRule>> = Default::default();
-        for (name, role) in &config.roles {
-            if let Some(access) = &role.access {
-                let mut list: Vec<ParsedAccessRule> = Default::default();
-                for rule in access {
-                    match ParsedAccessRule::new(&rule.paths, &rule.methods, &rule.grant) {
-                        Ok(rule) => {
-                            list.push(rule);
-                        }
-                        Err(err) => {
-                            error!("Parse access rule error: {}", err);
-                        }
+        for (name, role) in &access.roles {
+            let mut list: Vec<ParsedAccessRule> = Default::default();
+            for rule in &role.access {
+                match ParsedAccessRule::new(&rule.paths, &rule.methods, &rule.grant) {
+                    Ok(rule) => {
+                        list.push(rule);
+                    }
+                    Err(err) => {
+                        error!("Parse access rule error: {}", err);
                     }
                 }
-                if !list.is_empty() {
-                    role_access.insert(name.clone(), list);
-                }
+            }
+            if !list.is_empty() {
+                role_access.insert(name.clone(), list);
             }
         }
         Self {
             peers: Default::default(),
             mounts: Default::default(),
-            config,
+            access: access,
             role_access,
         }
     }
     pub fn sha_password(&self, user: &str) -> Option<Vec<u8>> {
-        match self.config.users.get(user) {
+        match self.access.users.get(user) {
             None => None,
             Some(user) => {
                 match &user.password {
@@ -432,18 +457,16 @@ impl Broker {
         }
         let mut new_roles = flatten_roles.clone();
         for role in flatten_roles {
-            if let Some(cfg_role) = self.config.roles.get(role) {
-                if let Some(roles) = &cfg_role.roles {
-                    for r2 in roles {
-                        add_unique_role(&mut new_roles, r2);
-                    }
+            if let Some(cfg_role) = self.access.roles.get(role) {
+                for r2 in &cfg_role.roles {
+                    add_unique_role(&mut new_roles, r2);
                 }
             }
         }
         new_roles
     }
     fn flatten_roles(&self, user: &str) -> Option<Vec<&str>> {
-        if let Some(user) = self.config.users.get(user) {
+        if let Some(user) = self.access.users.get(user) {
             let flatten_roles: Vec<&str> = user.roles.iter().map(|s| s.as_str()).collect();
             Some(self.flatten_roles_helper(flatten_roles))
         } else {
@@ -451,7 +474,7 @@ impl Broker {
         }
     }
     fn grant_for_request(&self, client_id: CliId, frame: &RpcFrame) -> Option<String> {
-        log!(target: "Acl", Level::Debug, "======================= grant_for_request {}", &frame);
+        log!(target: "Acc", Level::Debug, "======================= grant_for_request {}", &frame);
         let shv_path = frame.shv_path().unwrap_or_default();
         let method = frame.method().unwrap_or("");
         if method.is_empty() {
@@ -459,14 +482,14 @@ impl Broker {
         } else {
             if let Some(peer) = self.peers.get(&client_id) {
                 if let Some(flatten_roles) = self.flatten_roles(&peer.user) {
-                    log!(target: "Acl", Level::Debug, "user: {}, flatten roles: {:?}", &peer.user, flatten_roles);
+                    log!(target: "Acc", Level::Debug, "user: {}, flatten roles: {:?}", &peer.user, flatten_roles);
                     for role_name in flatten_roles {
                         if let Some(rules) = self.role_access.get(role_name) {
-                            log!(target: "Acl", Level::Debug, "----------- access for role: {}", role_name);
+                            log!(target: "Acc", Level::Debug, "----------- access for role: {}", role_name);
                             for rule in rules {
-                                log!(target: "Acl", Level::Debug, "\trule: {}", rule.path_method);
+                                log!(target: "Acc", Level::Debug, "\trule: {}", rule.path_method);
                                 if rule.path_method.match_shv_method(shv_path, method) {
-                                    log!(target: "Acl", Level::Debug, "\t\t HIT");
+                                    log!(target: "Acc", Level::Debug, "\t\t HIT");
                                     return Some(rule.grant.clone());
                                 }
                             }
@@ -538,8 +561,8 @@ impl Broker {
         }
     }
 }
-async fn broker_loop(events: Receiver<ClientEvent>) {
-    let mut broker = Broker::new(default_config());
+async fn broker_loop(events: Receiver<ClientEvent>, access: AccessControl) {
+    let mut broker = Broker::new(access);
 
     //let yaml = serde_yaml::to_string(&broker.config).unwrap();
     //println!("yaml = \n{}", yaml);
