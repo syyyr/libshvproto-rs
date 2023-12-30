@@ -1,9 +1,7 @@
-use std::{
-    collections::hash_map::{Entry, HashMap},
-};
+use std::{collections::hash_map::{Entry, HashMap}, fs};
 use std::collections::BTreeMap;
 use futures::{select, FutureExt, StreamExt};
-use async_std::{channel, io::BufReader, net::{TcpListener, TcpStream, ToSocketAddrs}, prelude::*, task};
+use async_std::{channel, io::BufReader, net::{TcpListener, TcpStream}, prelude::*, task};
 use glob::Pattern;
 use rand::distributions::{Alphanumeric, DistString};
 use log::*;
@@ -26,18 +24,21 @@ type Receiver<T> = async_std::channel::Receiver<T>;
 mod config;
 mod node;
 #[derive(Parser, Debug)]
-struct Opt {
+struct CliOpts {
+    /// Config file path
+    #[arg(long)]
+    config: Option<String>,
     /// Verbose mode (module, .)
     #[arg(short = 'v', long = "verbose")]
     verbose: Option<String>,
 }
 
 pub(crate) fn main() -> Result<()> {
-    let opt = Opt::parse();
+    let cli_opts = CliOpts::parse();
 
     let mut logger = SimpleLogger::new();
     logger = logger.with_level(LevelFilter::Info);
-    if let Some(module_names) = opt.verbose {
+    if let Some(module_names) = cli_opts.verbose {
         for (module, level) in parse_log_verbosity(&module_names, module_path!()) {
             logger = logger.with_module_level(module, level);
         }
@@ -52,28 +53,37 @@ pub(crate) fn main() -> Result<()> {
     log!(target: "RpcMsg", Level::Debug, "RPC message");
     log!(target: "Acl", Level::Debug, "ACL message");
 
-    let port = 3755;
-    let host = "127.0.0.1";
-    let address = format!("{}:{}", host, port);
-    info!("Listening on: {}", &address);
-    task::block_on(accept_loop(address))
+    let config = if let Some(config_file) = &cli_opts.config {
+        let s = fs::read_to_string(config_file)?;
+        serde_yaml::from_str(&s)?
+    } else {
+        default_config()
+    };
+    fs::create_dir_all("/tmp/shvbroker")?;
+    fs::write("/tmp/shvbroker/config.yaml", serde_yaml::to_string(&config)?)?;
+
+    task::block_on(accept_loop(&config))
 }
 
-async fn accept_loop(addr: impl ToSocketAddrs) -> Result<()> {
-    let listener = TcpListener::bind(addr).await?;
-
-    let mut client_id = 0;
-    let (broker_sender, broker_receiver) = channel::unbounded();
-    let broker = task::spawn(broker_loop(broker_receiver));
-    let mut incoming = listener.incoming();
-    while let Some(stream) = incoming.next().await {
-        let stream = stream?;
-        debug!("Accepting from: {}", stream.peer_addr()?);
-        client_id += 1;
-        spawn_and_log_error(client_loop(client_id, broker_sender.clone(), stream));
+async fn accept_loop(config: &Config) -> Result<()> {
+    if let Some(address) = &config.listen.tcp {
+        info!("Listening on TCP: {}", address);
+        let listener = TcpListener::bind(address).await?;
+        let mut client_id = 0;
+        let (broker_sender, broker_receiver) = channel::unbounded();
+        let broker_task = task::spawn(broker_loop(broker_receiver));
+        let mut incoming = listener.incoming();
+        while let Some(stream) = incoming.next().await {
+            let stream = stream?;
+            debug!("Accepting from: {}", stream.peer_addr()?);
+            client_id += 1;
+            spawn_and_log_error(client_loop(client_id, broker_sender.clone(), stream));
+        }
+        drop(broker_sender);
+        broker_task.await;
+    } else {
+        return Err("No port to listen on specified".into());
     }
-    drop(broker_sender);
-    broker.await;
     Ok(())
 }
 enum LoginResult {
@@ -343,19 +353,21 @@ impl Broker {
     fn new(config: Config) -> Self {
         let mut role_access: HashMap<String, Vec<ParsedAccessRule>> = Default::default();
         for (name, role) in &config.roles {
-            let mut list: Vec<ParsedAccessRule> = Default::default();
-            for rule in &role.access {
-                match ParsedAccessRule::new(&rule.patterns, &rule.methods, &rule.grant) {
-                    Ok(rule) => {
-                        list.push(rule);
-                    }
-                    Err(err) => {
-                        error!("Parse access rule error: {}", err);
+            if let Some(access) = &role.access {
+                let mut list: Vec<ParsedAccessRule> = Default::default();
+                for rule in access {
+                    match ParsedAccessRule::new(&rule.paths, &rule.methods, &rule.grant) {
+                        Ok(rule) => {
+                            list.push(rule);
+                        }
+                        Err(err) => {
+                            error!("Parse access rule error: {}", err);
+                        }
                     }
                 }
-            }
-            if !list.is_empty() {
-                role_access.insert(name.clone(), list);
+                if !list.is_empty() {
+                    role_access.insert(name.clone(), list);
+                }
             }
         }
         Self {
@@ -421,8 +433,10 @@ impl Broker {
         let mut new_roles = flatten_roles.clone();
         for role in flatten_roles {
             if let Some(cfg_role) = self.config.roles.get(role) {
-                for r2 in &cfg_role.roles {
-                    add_unique_role(&mut new_roles, r2);
+                if let Some(roles) = &cfg_role.roles {
+                    for r2 in roles {
+                        add_unique_role(&mut new_roles, r2);
+                    }
                 }
             }
         }
