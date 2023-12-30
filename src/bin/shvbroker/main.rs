@@ -29,6 +29,9 @@ struct CliOpts {
     /// Config file path
     #[arg(long)]
     config: Option<String>,
+    /// Create default config file if one specified by --config is not found
+    #[arg(short, long)]
+    create_default_config: bool,
     /// Verbose mode (module, .)
     #[arg(short = 'v', long = "verbose")]
     verbose: Option<String>,
@@ -54,19 +57,32 @@ pub(crate) fn main() -> Result<()> {
     log!(target: "RpcMsg", Level::Debug, "RPC message");
     log!(target: "Acc", Level::Debug, "Access control message");
 
-    let config = if let Some(config_file) = &cli_opts.config {
-        info!("Opening config file: {config_file}");
-        Config::from_file(config_file)?
+    let (config, create_default_config_file) = if let Some(config_file) = &cli_opts.config {
+        if Path::new(&config_file).exists() {
+            info!("Loading config file: {config_file}");
+            (Config::from_file(config_file)?, false)
+        } else {
+            (default_config(), true)
+        }
     } else {
-        default_config()
+        (default_config(), false)
     };
+    if create_default_config_file {
+        let config_file = &cli_opts.config.unwrap();
+        let config_path = Path::new(config_file);
+        if let Some(config_dir) = config_path.parent() {
+            fs::create_dir_all(config_dir)?;
+        }
+        info!("Creating default config file: {config_file}");
+        fs::write(config_file, serde_yaml::to_string(&config)?)?;
+    }
     let (access, create_editable_access_file) = loop {
         let mut create_editable_access_file = false;
         if let Some(data_dir) = &config.data_directory {
             if config.editable_access {
                 let file_name = join_path(data_dir, "access.yaml");
                 if Path::new(&file_name).exists() {
-                    info!("Opening access file {file_name}");
+                    info!("Loading access file {file_name}");
                     match AccessControl::from_file(&file_name) {
                         Ok(acc) => {
                             break (acc, false);
