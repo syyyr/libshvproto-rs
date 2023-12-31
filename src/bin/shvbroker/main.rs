@@ -91,12 +91,13 @@ async fn accept_loop(config: BrokerConfig, access: AccessControl) -> Result<()> 
     if let Some(address) = config.listen.tcp.clone() {
         let (broker_sender, broker_receiver) = channel::unbounded();
         let parent_broker_peer_config = config.parent_broker.clone();
-        let broker_task = task::spawn(broker::broker_loop(broker_receiver, config, access));
+        let broker_task = task::spawn(broker::broker_loop(broker_receiver, access));
         if parent_broker_peer_config.enabled {
             spawn_and_log_error(peer::parent_broker_peer_loop(1, parent_broker_peer_config, broker_sender.clone()));
         }
         info!("Listening on TCP: {}", address);
         let listener = TcpListener::bind(address).await?;
+        info!("bind OK");
         let mut client_id = 2; // parent broker has client_id == 1
         let mut incoming = listener.incoming();
         while let Some(stream) = incoming.next().await {

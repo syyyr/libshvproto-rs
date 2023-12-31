@@ -15,6 +15,7 @@ impl KillProcessGuard {
 
     pub fn is_running(&mut self) -> bool {
         let status = self.child.try_wait().unwrap();
+        //println!("shvbroker is_running status: {:?}", status);
         status.is_none()
     }
 }

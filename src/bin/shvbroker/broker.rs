@@ -8,7 +8,7 @@ use shv::rpcframe::RpcFrame;
 use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use shv::shvnode::{find_longest_prefix, process_local_dir_ls, RequestCommand, ShvNode, SIG_CHNG};
 use shv::util::sha1_hash;
-use crate::config::{AccessControl, BrokerConfig, Password};
+use crate::config::{AccessControl, Password};
 use crate::{node, Receiver, Sender};
 use crate::node::BrokerCommand;
 
@@ -296,7 +296,7 @@ impl Broker {
         }
     }
 }
-pub(crate) async fn broker_loop(events: Receiver<ClientEvent>, _config: BrokerConfig, access: AccessControl) {
+pub(crate) async fn broker_loop(events: Receiver<ClientEvent>, access: AccessControl) {
 
     let mut broker = Broker::new(access);
 
