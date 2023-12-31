@@ -84,7 +84,6 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
     let login_params = LoginParams {
         user,
         password,
-        heartbeat_interval: None,
         ..Default::default()
     };
 

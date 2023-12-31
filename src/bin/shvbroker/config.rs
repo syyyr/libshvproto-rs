@@ -12,9 +12,17 @@ pub struct BrokerConfig {
     pub editable_access: bool,
     #[serde(default)]
     pub data_directory: Option<String>,
-    pub parent_broker: Option<ClientConfig>,
+    #[serde(default)]
+    pub parent_broker: ParentBrokerConfig,
     #[serde(default)]
     pub access: AccessControl,
+}
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct ParentBrokerConfig {
+    #[serde(default)]
+    pub disabled:bool,
+    pub client: ClientConfig,
+    pub exported_root: String,
 }
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct AccessControl {
@@ -93,7 +101,7 @@ impl Default for BrokerConfig {
             listen: Listen { tcp: Some("localhost:3755".to_string()), ssl: None },
             editable_access: false,
             data_directory: None,
-            parent_broker: None,
+            parent_broker: Default::default(),
             access: AccessControl {
                 users: HashMap::from([
                     ("admin".to_string(), User { password: Password::Plain("admin".into()), roles: vec!["su".to_string()] }),

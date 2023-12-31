@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 use async_std::io;
+use duration_str::parse;
 use log::{info};
 use serde::{Deserialize, Serialize};
 use crate::{RpcMessage, RpcValue};
@@ -34,7 +35,7 @@ pub struct LoginParams {
     pub login_type: LoginType,
     pub device_id: String,
     pub mount_point: String,
-    pub heartbeat_interval: Option<Duration>,
+    pub heartbeat_interval: Duration,
     //pub protocol: Protocol,
 }
 
@@ -46,8 +47,7 @@ impl Default for LoginParams {
             login_type: LoginType::SHA1,
             device_id: "".to_string(),
             mount_point: "".to_string(),
-            heartbeat_interval: Some(Duration::from_secs(60)),
-            //protocol: Protocol::ChainPack,
+            heartbeat_interval: Duration::from_secs(60),
         }
     }
 }
@@ -61,12 +61,7 @@ impl LoginParams {
         login.insert("type".into(), RpcValue::from(self.login_type.to_str()));
         map.insert("login".into(), RpcValue::from(login));
         let mut options = crate::Map::new();
-        if let Some(hbi) = self.heartbeat_interval {
-            options.insert(
-                "idleWatchDogTimeOut".into(),
-                RpcValue::from(hbi.as_secs() * 3),
-            );
-        }
+        options.insert("idleWatchDogTimeOut".into(), RpcValue::from(self.heartbeat_interval.as_secs() * 3));
         let mut device = crate::Map::new();
         if !self.device_id.is_empty() {
             device.insert("deviceId".into(), RpcValue::from(&self.device_id));
@@ -105,7 +100,7 @@ where R: io::Read + std::marker::Unpin,
     }
 }
 fn default_heartbeat() -> String { "1m".into() }
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ClientConfig {
     pub url: String,
     pub device_id: Option<String>,
@@ -141,6 +136,9 @@ impl ClientConfig {
             fs::write(file_path, serde_yaml::to_string(&config)?)?;
         }
         Ok(config)
+    }
+    pub fn heartbeat_interval_duration(&self) -> crate::Result<std::time::Duration> {
+        Ok(parse(&self.heartbeat_interval)?)
     }
 }
 impl Default for ClientConfig {

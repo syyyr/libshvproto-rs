@@ -103,7 +103,6 @@ async fn try_main_reconnect(config: &ClientConfig) -> shv::Result<()> {
     }
 }
 async fn try_main(config: &ClientConfig) -> shv::Result<()> {
-
     let url = Url::parse(&config.url)?;
     let (scheme, host, port) = (url.scheme(), url.host_str().unwrap_or_default(), url.port().unwrap_or(3755));
     if scheme != "tcp" {
@@ -120,20 +119,19 @@ async fn try_main(config: &ClientConfig) -> shv::Result<()> {
 
     // login
     let (user, password) = login_from_url(&url);
+    let heartbeat_interval = config.heartbeat_interval_duration()?;
     let login_params = LoginParams{
         user,
         password,
-        mount_point: match &config.mount { None => {"".to_string()} Some(str) => {str.clone()} },
-        device_id: match &config.device_id { None => {"".to_string()} Some(str) => {str.clone()} },
+        mount_point: (&config.mount.clone().unwrap_or_default()).to_owned(),
+        device_id: (&config.device_id.clone().unwrap_or_default()).to_owned(),
+        heartbeat_interval,
         ..Default::default()
     };
 
     info!("Connected OK");
-    client::login(&mut frame_reader, &mut writer, &login_params).await?;
-
-    let heartbeat_interval = &config.heartbeat_interval;
-    let heartbeat_interval = duration_str::parse(heartbeat_interval).unwrap_or(std::time::Duration::from_secs(60));
     info!("Heartbeat interval set to: {:?}", heartbeat_interval);
+    client::login(&mut frame_reader, &mut writer, &login_params).await?;
 
     let mut mounts: BTreeMap<String, Box<dyn ShvNode<()>>> = BTreeMap::new();
     mounts.insert(".app".into(), Box::new(AppNode { app_name: "device", ..Default::default() }));
