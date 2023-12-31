@@ -6,7 +6,7 @@ use duration_str::parse;
 use log::{info};
 use serde::{Deserialize, Serialize};
 use crate::{RpcMessage, RpcValue};
-use crate::connection::FrameReader;
+use crate::connection::{FrameReader, FrameWriter};
 use crate::util::sha1_password_hash;
 
 #[derive(Copy, Clone, Debug)]
@@ -76,12 +76,12 @@ impl LoginParams {
     }
 }
 
-pub async fn login<'a, R, W>(frame_reader: &mut FrameReader<'a, R>, writer: &mut W, login_params: &LoginParams) -> crate::Result<i32>
+pub async fn login<'r, 'w, R, W>(frame_reader: &mut FrameReader<'r, R>, frame_writer: &mut FrameWriter<'w, W>, login_params: &LoginParams) -> crate::Result<i32>
 where R: io::Read + std::marker::Unpin,
       W: io::Write + std::marker::Unpin
 {
     let rq = RpcMessage::new_request("", "hello", None);
-    crate::connection::send_message(writer, &rq).await?;
+    frame_writer.send_message(rq).await?;
     let resp = frame_reader.receive_message().await?.unwrap_or_default();
     if !resp.is_success() {
         return Err(resp.error().unwrap().to_rpcvalue().to_cpon().into());
@@ -92,7 +92,7 @@ where R: io::Read + std::marker::Unpin,
     let mut login_params = login_params.clone();
     login_params.password = std::str::from_utf8(&hash)?.into();
     let rq = RpcMessage::new_request("", "login", Some(login_params.to_rpcvalue()));
-    crate::connection::send_message(writer, &rq).await?;
+    frame_writer.send_message(rq).await?;
     let resp = frame_reader.receive_message().await?.ok_or("Socked closed")?;
     match resp.result()?.as_map().get("clientId") {
         None => { Ok(0) }

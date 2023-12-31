@@ -3,36 +3,37 @@ use async_std::io;
 use crate::rpcframe::{Protocol, RpcFrame};
 use futures::{AsyncReadExt, AsyncWriteExt};
 use log::*;
-use crate::{ChainPackWriter, RpcMessage};
+use crate::{ChainPackWriter, MetaMap, RpcMessage, RpcMessageMetaTags, RpcValue};
+use crate::rpcmessage::{RpcError, RpcErrorCode, RqId};
 // use log::*;
 
 //pub trait Reader = async_std::io::Write + std::marker::Unpin;
-pub async fn send_frame<W: io::Write + std::marker::Unpin>(writer: &mut W, frame: RpcFrame) -> crate::Result<()> {
-    log!(target: "RpcMsg", Level::Debug, "S<== {}", &frame.to_rpcmesage().unwrap_or_default());
-    let mut meta_data = Vec::new();
-    {
-        let mut wr = ChainPackWriter::new(&mut meta_data);
-        wr.write_meta(&frame.meta)?;
-    }
-    let mut header = Vec::new();
-    let mut wr = ChainPackWriter::new(&mut header);
-    let msg_len = 1 + meta_data.len() + frame.data.len();
-    wr.write_uint_data(msg_len as u64)?;
-    header.push(frame.protocol as u8);
-    writer.write(&header).await?;
-    writer.write(&meta_data).await?;
-    writer.write(&frame.data).await?;
-    // Ensure the encoded frame is written to the socket. The calls above
-    // are to the buffered stream and writes. Calling `flush` writes the
-    // remaining contents of the buffer to the socket.
-    writer.flush().await?;
-    Ok(())
-}
-pub async fn send_message<W: async_std::io::Write + std::marker::Unpin>(writer: &mut W, msg: &RpcMessage) -> crate::Result<()> {
-    let frame = RpcFrame::from_rpcmessage(Protocol::ChainPack, &msg)?;
-    send_frame(writer, frame).await?;
-    Ok(())
-}
+// pub async fn send_frame<W: io::Write + std::marker::Unpin>(writer: &mut W, frame: RpcFrame) -> crate::Result<()> {
+//     log!(target: "RpcMsg", Level::Debug, "S<== {}", &frame.to_rpcmesage().unwrap_or_default());
+//     let mut meta_data = Vec::new();
+//     {
+//         let mut wr = ChainPackWriter::new(&mut meta_data);
+//         wr.write_meta(&frame.meta)?;
+//     }
+//     let mut header = Vec::new();
+//     let mut wr = ChainPackWriter::new(&mut header);
+//     let msg_len = 1 + meta_data.len() + frame.data.len();
+//     wr.write_uint_data(msg_len as u64)?;
+//     header.push(frame.protocol as u8);
+//     writer.write(&header).await?;
+//     writer.write(&meta_data).await?;
+//     writer.write(&frame.data).await?;
+//     // Ensure the encoded frame is written to the socket. The calls above
+//     // are to the buffered stream and writes. Calling `flush` writes the
+//     // remaining contents of the buffer to the socket.
+//     writer.flush().await?;
+//     Ok(())
+// }
+// pub async fn send_message<W: async_std::io::Write + std::marker::Unpin>(writer: &mut W, msg: &RpcMessage) -> crate::Result<()> {
+//     let frame = RpcFrame::from_rpcmessage(Protocol::ChainPack, &msg)?;
+//     send_frame(writer, frame).await?;
+//     Ok(())
+// }
 
 pub struct FrameReader<'a, R: async_std::io::Read + std::marker::Unpin> {
     buffer: Vec<u8>,
@@ -40,8 +41,8 @@ pub struct FrameReader<'a, R: async_std::io::Read + std::marker::Unpin> {
 }
 
 impl<'a, R: io::Read + std::marker::Unpin> FrameReader<'a, R> {
-    pub fn new(reader: &'a mut R) -> FrameReader<'a, R> {
-        FrameReader {
+    pub fn new(reader: &'a mut R) -> Self {
+        Self {
             buffer: vec![],
             reader
         }
@@ -99,41 +100,60 @@ impl<'a, R: io::Read + std::marker::Unpin> FrameReader<'a, R> {
 
 
 
-/*
-pub async fn call_rpc_method(&self, request: RpcMessage) -> crate::Result<RpcMessage> {
-    if !request.is_request() {
-        return Err("Not request".into());
+pub struct FrameWriter<'a, W: async_std::io::Write + std::marker::Unpin> {
+    writer: &'a mut W,
+}
+impl<'a, W: io::Write + std::marker::Unpin> FrameWriter<'a, W> {
+    pub fn new(writer: &'a mut W) -> Self {
+        Self {
+            writer,
+        }
     }
-    let rq_id = request.request_id().ok_or("Request ID missing")?;
-    trace!("sending RPC request id: {} msg: {}", rq_id, request);
-    self.send_message(&request).await?;
-    let mut client = self.clone();
-    match future::timeout(
-        Duration::from_millis(DEFAULT_RPC_CALL_TIMEOUT_MS),
-        async move {
-            loop {
-                let frame = client.receive_frame().await?;
-                trace!(target: "rpcmsg", "{} maybe response: {}", rq_id, frame);
-                if let Some(id) = frame.request_id() {
-                    if id == rq_id {
-                        let resp = frame.to_rpcmesage()?;
-                        trace!("{} .............. got response: {}", rq_id, resp);
-                        return Ok(resp);
-                    }
-                }
-            }
-        },
-    )
-        .await
-    {
-        Ok(resp) => resp,
-        Err(_) => Err(format!(
-            "Response to request id: {} didn't arrive within {} msec.",
-            rq_id, DEFAULT_RPC_CALL_TIMEOUT_MS
-        )
-            .into()),
+
+    pub async fn send_frame(&mut self, frame: RpcFrame) -> crate::Result<()> {
+        log!(target: "RpcMsg", Level::Debug, "S<== {}", &frame.to_rpcmesage().unwrap_or_default());
+        let mut meta_data = Vec::new();
+        {
+            let mut wr = ChainPackWriter::new(&mut meta_data);
+            wr.write_meta(&frame.meta)?;
+        }
+        let mut header = Vec::new();
+        let mut wr = ChainPackWriter::new(&mut header);
+        let msg_len = 1 + meta_data.len() + frame.data.len();
+        wr.write_uint_data(msg_len as u64)?;
+        header.push(frame.protocol as u8);
+        self.writer.write(&header).await?;
+        self.writer.write(&meta_data).await?;
+        self.writer.write(&frame.data).await?;
+        // Ensure the encoded frame is written to the socket. The calls above
+        // are to the buffered stream and writes. Calling `flush` writes the
+        // remaining contents of the buffer to the socket.
+        self.writer.flush().await?;
+        Ok(())
     }
+
+    pub async fn send_message(&mut self, msg: RpcMessage) -> crate::Result<()> {
+        let frame = RpcFrame::from_rpcmessage(Protocol::ChainPack, &msg)?;
+        self.send_frame(frame).await?;
+        Ok(())
+    }
+    pub async fn send_error(&mut self, meta: MetaMap, errmsg: &str) -> crate::Result<()> {
+        let mut msg = RpcMessage::from_meta(meta);
+        msg.set_error(RpcError{ code: RpcErrorCode::MethodCallException, message: errmsg.into()});
+        self.send_message(msg).await
+    }
+    pub async fn send_result(&mut self, meta: MetaMap, result: RpcValue) -> crate::Result<()> {
+        let mut msg = RpcMessage::from_meta(meta);
+        msg.set_result(result);
+        self.send_message(msg).await
+    }
+    pub async fn send_request(&mut self, shv_path: &str, method: &str, param: Option<RpcValue>) -> crate::Result<RqId> {
+        let rpcmsg = RpcMessage::new_request(shv_path, method, param);
+        let rqid = rpcmsg.request_id().expect("Request ID should exist here.");
+        self.send_message(rpcmsg).await?;
+        Ok(rqid)
+    }
+
 }
 
- */
 

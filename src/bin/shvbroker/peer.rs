@@ -8,115 +8,101 @@ use rand::distributions::{Alphanumeric, DistString};
 use url::Url;
 use shv::{client, RpcMessage, RpcMessageMetaTags, RpcValue};
 use shv::client::LoginParams;
-use shv::rpcmessage::{RpcError, RpcErrorCode};
+use shv::rpcframe::RpcFrame;
 use shv::shvnode::METH_PING;
 use shv::util::{join_path, login_from_url, sha1_hash};
 use crate::broker::{ClientEvent, LoginResult, PeerEvent};
 use crate::config::ParentBrokerConfig;
 use crate::Sender;
 
-async fn send_error(mut response: RpcMessage, mut writer: &TcpStream, errmsg: &str) -> crate::Result<()> {
-    response.set_error(RpcError{ code: RpcErrorCode::MethodCallException, message: errmsg.into()});
-    shv::connection::send_message(&mut writer, &response).await
-}
-async fn send_result(mut response: RpcMessage, mut writer: &TcpStream, result: RpcValue) -> crate::Result<()> {
-    response.set_result(result);
-    shv::connection::send_message(&mut writer, &response).await
-}
-
 pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<ClientEvent>, stream: TcpStream) -> crate::Result<()> {
-    let (socket_reader, mut frame_writer) = (&stream, &stream);
+    let (socket_reader, mut writer) = (&stream, &stream);
     let (peer_writer, peer_receiver) = channel::unbounded::<PeerEvent>();
 
     broker_writer.send(ClientEvent::NewPeer { client_id, sender: peer_writer }).await.unwrap();
 
     //let stream_wr = stream.clone();
     let mut brd = BufReader::new(socket_reader);
+
     let mut frame_reader = shv::connection::FrameReader::new(&mut brd);
+    let mut frame_writer = shv::connection::FrameWriter::new(&mut writer);
+
     let mut device_options = RpcValue::null();
     let login_result = loop {
-        let login_fut = async {
+        let nonce = {
             let frame = match frame_reader.receive_frame().await? {
-                None => return crate::Result::Ok(LoginResult::ClientSocketClosed),
+                None => break LoginResult::ClientSocketClosed,
                 Some(frame) => { frame }
             };
             let rpcmsg = frame.to_rpcmesage()?;
-            let resp = rpcmsg.prepare_response()?;
-            if rpcmsg.method().unwrap_or("") == "hello" {
-                let nonce = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
-                let mut result = shv::Map::new();
-                result.insert("nonce".into(), RpcValue::from(&nonce));
-                send_result(resp, frame_writer, result.into()).await?;
+            let resp_meta = RpcFrame::prepare_response_meta(&frame.meta)?;
+            if rpcmsg.method().unwrap_or("") != "hello" {
+                frame_writer.send_error(resp_meta, "Invalid login message.").await?;
+                continue;
+            }
+            let nonce = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
+            let mut result = shv::Map::new();
+            result.insert("nonce".into(), RpcValue::from(&nonce));
+            frame_writer.send_result(resp_meta, result.into()).await?;
+            nonce
+        };
+        {
+            let frame = match frame_reader.receive_frame().await? {
+                None => break LoginResult::ClientSocketClosed,
+                Some(frame) => { frame }
+            };
+            let rpcmsg = frame.to_rpcmesage()?;
+            let resp_meta = RpcFrame::prepare_response_meta(&frame.meta)?;
+            if rpcmsg.method().unwrap_or("") != "login" {
+                frame_writer.send_error(resp_meta, "Invalid login message.").await?;
+                continue;
+            }
+            let params = rpcmsg.param().ok_or("No login params")?.as_map();
+            let login = params.get("login").ok_or("Invalid login params")?.as_map();
+            let user = login.get("user").ok_or("User login param is missing")?.as_str();
+            let password = login.get("password").ok_or("Password login param is missing")?.as_str();
+            let login_type = login.get("type").map(|v| v.as_str()).unwrap_or("");
 
-                let frame = match frame_reader.receive_frame().await? {
-                    None => return crate::Result::Ok(LoginResult::ClientSocketClosed),
-                    Some(frame) => { frame }
-                };
-                let rpcmsg = frame.to_rpcmesage()?;
-                let resp = rpcmsg.prepare_response()?;
-                if rpcmsg.method().unwrap_or("") == "login" {
-                    let params = rpcmsg.param().ok_or("No login params")?.as_map();
-                    let login = params.get("login").ok_or("Invalid login params")?.as_map();
-                    let user = login.get("user").ok_or("User login param is missing")?.as_str();
-                    let password = login.get("password").ok_or("Password login param is missing")?.as_str();
-                    let login_type = login.get("type").map(|v| v.as_str()).unwrap_or("");
-
-                    broker_writer.send(ClientEvent::GetPassword { client_id, user: user.to_string() }).await.unwrap();
-                    match peer_receiver.recv().await? {
-                        PeerEvent::PasswordSha1(broker_shapass) => {
-                            let chkpwd = || {
-                                match broker_shapass {
-                                    None => {false}
-                                    Some(broker_shapass) => {
-                                        if login_type == "PLAIN" {
-                                            let client_shapass = sha1_hash(password.as_bytes());
-                                            client_shapass == broker_shapass
-                                        } else {
-                                            //info!("nonce: {}", nonce);
-                                            //info!("broker password: {}", std::str::from_utf8(&broker_shapass).unwrap());
-                                            //info!("client password: {}", password);
-                                            let mut data = nonce.as_bytes().to_vec();
-                                            data.extend_from_slice(&broker_shapass[..]);
-                                            let broker_shapass = sha1_hash(&data);
-                                            password.as_bytes() == broker_shapass
-                                        }
-                                    }
+            broker_writer.send(ClientEvent::GetPassword { client_id, user: user.to_string() }).await.unwrap();
+            match peer_receiver.recv().await? {
+                PeerEvent::PasswordSha1(broker_shapass) => {
+                    let chkpwd = || {
+                        match broker_shapass {
+                            None => {false}
+                            Some(broker_shapass) => {
+                                if login_type == "PLAIN" {
+                                    let client_shapass = sha1_hash(password.as_bytes());
+                                    client_shapass == broker_shapass
+                                } else {
+                                    //info!("nonce: {}", nonce);
+                                    //info!("broker password: {}", std::str::from_utf8(&broker_shapass).unwrap());
+                                    //info!("client password: {}", password);
+                                    let mut data = nonce.as_bytes().to_vec();
+                                    data.extend_from_slice(&broker_shapass[..]);
+                                    let broker_shapass = sha1_hash(&data);
+                                    password.as_bytes() == broker_shapass
                                 }
-                            };
-                            if chkpwd() {
-                                let mut result = shv::Map::new();
-                                result.insert("clientId".into(), RpcValue::from(client_id));
-                                send_result(resp, frame_writer, result.into()).await?;
-                                if let Some(options) = params.get("options") {
-                                    if let Some(device) = options.as_map().get("device") {
-                                        device_options = device.clone();
-                                    }
-                                }
-                                crate::Result::Ok(LoginResult::Ok)
-                            } else {
-                                send_error(resp, frame_writer, &format!("Invalid login credentials.")).await?;
-                                Ok(LoginResult::LoginError)
                             }
                         }
-                        _ => {
-                            panic!("Internal error, PeerEvent::PasswordSha1 expected");
+                    };
+                    if chkpwd() {
+                        let mut result = shv::Map::new();
+                        result.insert("clientId".into(), RpcValue::from(client_id));
+                        frame_writer.send_result(resp_meta, result.into()).await?;
+                        if let Some(options) = params.get("options") {
+                            if let Some(device) = options.as_map().get("device") {
+                                device_options = device.clone();
+                            }
                         }
+                        break LoginResult::Ok;
+                    } else {
+                        frame_writer.send_error(resp_meta, &format!("Invalid login credentials.")).await?;
+                        continue;
                     }
-                } else {
-                    send_error(resp, frame_writer, &format!("login message expected.")).await?;
-                    Ok(LoginResult::LoginError)
                 }
-            } else {
-                send_error(resp, frame_writer, &format!("hello message expected.")).await?;
-                Ok(LoginResult::LoginError)
-            }
-        };
-        match login_fut.await {
-            Ok(login_result) => {
-                break login_result;
-            }
-            Err(errmsg) => {
-                warn!("{}", errmsg);
+                _ => {
+                    panic!("Internal error, PeerEvent::PasswordSha1 expected");
+                }
             }
         }
     };
@@ -163,11 +149,11 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<ClientEvent>
                             }
                             PeerEvent::Frame(frame) => {
                                 // log!(target: "RpcMsg", Level::Debug, "<---- Send frame, client id: {}", client_id);
-                                shv::connection::send_frame(&mut frame_writer, frame).await?;
+                                frame_writer.send_frame(frame).await?;
                             }
                             PeerEvent::Message(rpcmsg) => {
                                 // log!(target: "RpcMsg", Level::Debug, "<---- Send message, client id: {}", client_id);
-                                shv::connection::send_message(&mut frame_writer, &rpcmsg).await?;
+                                frame_writer.send_message(rpcmsg).await?;
                             },
                         }
                     }
@@ -190,10 +176,11 @@ pub async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig,
     // Establish a connection
     info!("Connecting to parent broker: {address}");
     let stream = TcpStream::connect(&address).await?;
-    let (reader, mut frame_writer) = (&stream, &stream);
+    let (reader, mut writer) = (&stream, &stream);
 
     let mut brd = BufReader::new(reader);
     let mut frame_reader = shv::connection::FrameReader::new(&mut brd);
+    let mut frame_writer = shv::connection::FrameWriter::new(&mut writer);
 
     // login
     let (user, password) = login_from_url(&url);
@@ -221,7 +208,7 @@ pub async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig,
                 assert!(res_timeout.is_err());
                 // send heartbeat
                 let msg = RpcMessage::new_request(".app", METH_PING, None);
-                shv::connection::send_message(&mut frame_writer, &msg).await?;
+                frame_writer.send_message(msg).await?;
             },
             res_frame = frame_reader.receive_frame().fuse() => match res_frame {
                 Ok(None) => {
@@ -255,11 +242,11 @@ pub async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig,
                         }
                         PeerEvent::Frame(frame) => {
                             // log!(target: "RpcMsg", Level::Debug, "<---- Send frame, client id: {}", client_id);
-                            shv::connection::send_frame(&mut frame_writer, frame).await?;
+                            frame_writer.send_frame(frame).await?;
                         }
                         PeerEvent::Message(rpcmsg) => {
                             // log!(target: "RpcMsg", Level::Debug, "<---- Send message, client id: {}", client_id);
-                            shv::connection::send_message(&mut frame_writer, &rpcmsg).await?;
+                            frame_writer.send_message(rpcmsg).await?;
                         },
                     }
                 }

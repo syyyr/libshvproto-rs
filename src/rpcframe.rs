@@ -59,7 +59,7 @@ impl RpcFrame {
                 value = rd.read_value()?;
             }
         }
-        RpcMessage::new(self.meta.clone(), value).map_err(|err| err.into())
+        Ok(RpcMessage::from_rpcvalue(RpcValue::new(value, Some(self.meta.clone())))?)
     }
 
     /// The message has already been validated with `check`.

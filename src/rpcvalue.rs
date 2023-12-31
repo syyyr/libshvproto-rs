@@ -37,7 +37,6 @@ pub type List = Vec<RpcValue>;
 pub type Map = BTreeMap<String, RpcValue>;
 pub type IMap = BTreeMap<i32, RpcValue>;
 
-#[allow(non_snake_case)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
 	Null,

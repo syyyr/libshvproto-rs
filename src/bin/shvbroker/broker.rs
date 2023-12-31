@@ -15,7 +15,6 @@ use crate::node::BrokerCommand;
 pub(crate) enum LoginResult {
     Ok,
     ClientSocketClosed,
-    LoginError,
 }
 
 #[derive(Debug)]

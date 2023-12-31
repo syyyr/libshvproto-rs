@@ -116,6 +116,7 @@ async fn try_main(config: &ClientConfig) -> shv::Result<()> {
 
     let mut brd = BufReader::new(reader);
     let mut frame_reader = shv::connection::FrameReader::new(&mut brd);
+    let mut frame_writer = shv::connection::FrameWriter::new(&mut writer);
 
     // login
     let (user, password) = login_from_url(&url);
@@ -131,7 +132,7 @@ async fn try_main(config: &ClientConfig) -> shv::Result<()> {
 
     info!("Connected OK");
     info!("Heartbeat interval set to: {:?}", heartbeat_interval);
-    client::login(&mut frame_reader, &mut writer, &login_params).await?;
+    client::login(&mut frame_reader, &mut frame_writer, &login_params).await?;
 
     let mut mounts: BTreeMap<String, Box<dyn ShvNode<()>>> = BTreeMap::new();
     mounts.insert(".app".into(), Box::new(AppNode { app_name: "device", ..Default::default() }));
@@ -143,7 +144,7 @@ async fn try_main(config: &ClientConfig) -> shv::Result<()> {
             Err(_e) => {
                 // send heartbeat
                 let msg = RpcMessage::new_request(".app", METH_PING, None);
-                shv::connection::send_message(&mut writer, &msg).await?;
+                frame_writer.send_message(msg).await?;
                 continue;
             }
             Ok(recv_result) => {
@@ -174,7 +175,7 @@ async fn try_main(config: &ClientConfig) -> shv::Result<()> {
                                 if let Ok(meta) = response_meta {
                                     let command = if let Command::PropertyChanged(value) = &command {
                                         let sig = RpcMessage::new_signal(shv_path, SIG_CHNG, Some(value.clone()));
-                                        shv::connection::send_message(&mut writer, &sig).await?;
+                                        frame_writer.send_message(sig).await?;
                                         Command::Result(().into())
                                     } else {
                                         command
@@ -183,18 +184,18 @@ async fn try_main(config: &ClientConfig) -> shv::Result<()> {
                                     match command {
                                         RequestCommand::Result(value) => {
                                             resp.set_result(value);
+                                            if let Err(error) = frame_writer.send_message(resp).await {
+                                                error!("Error writing to peer socket: {error}");
+                                            }
                                         }
                                         RequestCommand::Error(error) => {
                                             resp.set_error(error);
-                                            shv::connection::send_message(&mut writer, &resp).await?;
+                                            if let Err(error) = frame_writer.send_message(resp).await {
+                                                error!("Error writing to peer socket: {error}");
+                                            }
                                         }
                                         _ => {  }
                                     };
-                                    if resp.is_success() || resp.is_error() {
-                                        if let Err(error) = shv::connection::send_message(&mut writer, &resp).await {
-                                            error!("Error writing to peer socket: {error}");
-                                        }
-                                    }
                                 } else {
                                     warn!("Invalid request frame received.");
                                 }
