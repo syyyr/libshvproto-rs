@@ -92,7 +92,7 @@ async fn accept_loop(config: BrokerConfig, access: AccessControl) -> Result<()> 
         let (broker_sender, broker_receiver) = channel::unbounded();
         let parent_broker_peer_config = config.parent_broker.clone();
         let broker_task = task::spawn(broker::broker_loop(broker_receiver, config, access));
-        if !parent_broker_peer_config.disabled {
+        if parent_broker_peer_config.enabled {
             spawn_and_log_error(peer::parent_broker_peer_loop(1, parent_broker_peer_config, broker_sender.clone()));
         }
         info!("Listening on TCP: {}", address);

@@ -126,6 +126,8 @@ impl ClientConfig {
                     Err(format!("Cannot read config file: {file_name} - {err}").into())
                 }
             }
+        } else if !create_if_not_exist {
+            return Err(format!("Cannot find config file: {file_name}").into())
         }
         let config = Default::default();
         if create_if_not_exist {
