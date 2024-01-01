@@ -11,7 +11,7 @@ use shv::client::LoginParams;
 use shv::rpcframe::RpcFrame;
 use shv::shvnode::METH_PING;
 use shv::util::{join_path, login_from_url, sha1_hash};
-use crate::broker::{ClientEvent, LoginResult, PeerEvent};
+use crate::broker::{ClientEvent, LoginResult, PeerEvent, PeerKind};
 use crate::config::ParentBrokerConfig;
 use crate::Sender;
 
@@ -19,7 +19,7 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<ClientEvent>
     let (socket_reader, mut writer) = (&stream, &stream);
     let (peer_writer, peer_receiver) = channel::unbounded::<PeerEvent>();
 
-    broker_writer.send(ClientEvent::NewPeer { client_id, sender: peer_writer }).await.unwrap();
+    broker_writer.send(ClientEvent::NewPeer { client_id, sender: peer_writer, peer_kind: PeerKind::Client }).await.unwrap();
 
     //let stream_wr = stream.clone();
     let mut brd = BufReader::new(socket_reader);
@@ -199,7 +199,7 @@ pub async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig,
     client::login(&mut frame_reader, &mut frame_writer, &login_params).await?;
 
     let (peer_writer, peer_receiver) = channel::unbounded::<PeerEvent>();
-    broker_writer.send(ClientEvent::NewPeer { client_id, sender: peer_writer }).await.unwrap();
+    broker_writer.send(ClientEvent::NewPeer { client_id, sender: peer_writer, peer_kind: PeerKind::ParentBroker }).await.unwrap();
 
     loop {
         let fut_timeout = future::timeout(heartbeat_interval, future::pending::<()>());

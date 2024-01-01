@@ -26,6 +26,7 @@ pub(crate) enum ClientEvent {
     NewPeer {
         client_id: CliId,
         sender: Sender<PeerEvent>,
+        peer_kind: PeerKind,
     },
     RegisterDevice {
         client_id: CliId,
@@ -49,11 +50,19 @@ pub(crate) enum PeerEvent {
     DisconnectByBroker,
 }
 #[derive(Debug)]
+pub enum PeerKind {
+    Client,
+    ParentBroker,
+    #[allow(dead_code)]
+    ChildBroker,
+}
+#[derive(Debug)]
 struct Peer {
     sender: Sender<PeerEvent>,
     user: String,
     mount_point: Option<String>,
     subscriptions: Vec<Subscription>,
+    peer_kind: PeerKind,
 }
 impl Peer {
     fn is_signal_subscribed(&self, path: &str, method: &str) -> bool {
@@ -161,9 +170,17 @@ impl Broker {
                 }
             }
             if let Some(device_id) = device_id {
-                let mount_point = "test/".to_owned() + &device_id;
-                info!("Client id: {}, device id: {} mounted on path: '{}'", client_id, device_id, &mount_point);
-                break Some(mount_point);
+                break match self.access.mounts.get(&device_id) {
+                    None => {
+                        warn!("Cannot find mount-point for device ID: {device_id}");
+                        None
+                    }
+                    Some(mount) => {
+                        let mount_point = mount.path.clone();
+                        info!("Client id: {}, device id: {} mounted on path: '{}'", client_id, device_id, &mount_point);
+                        Some(mount_point)
+                    }
+                };
             }
             break None;
         } {
@@ -216,19 +233,33 @@ impl Broker {
             None
         } else {
             if let Some(peer) = self.peers.get(&client_id) {
-                if let Some(flatten_roles) = self.flatten_roles(&peer.user) {
-                    log!(target: "Acc", Level::Debug, "user: {}, flatten roles: {:?}", &peer.user, flatten_roles);
-                    for role_name in flatten_roles {
-                        if let Some(rules) = self.role_access.get(role_name) {
-                            log!(target: "Acc", Level::Debug, "----------- access for role: {}", role_name);
-                            for rule in rules {
-                                log!(target: "Acc", Level::Debug, "\trule: {}", rule.path_method);
-                                if rule.path_method.match_shv_method(shv_path, method) {
-                                    log!(target: "Acc", Level::Debug, "\t\t HIT");
-                                    return Some(rule.grant.clone());
+                match peer.peer_kind {
+                    PeerKind::Client => {
+                        if let Some(flatten_roles) = self.flatten_roles(&peer.user) {
+                            log!(target: "Acc", Level::Debug, "user: {}, flatten roles: {:?}", &peer.user, flatten_roles);
+                            for role_name in flatten_roles {
+                                if let Some(rules) = self.role_access.get(role_name) {
+                                    log!(target: "Acc", Level::Debug, "----------- access for role: {}", role_name);
+                                    for rule in rules {
+                                        log!(target: "Acc", Level::Debug, "\trule: {}", rule.path_method);
+                                        if rule.path_method.match_shv_method(shv_path, method) {
+                                            log!(target: "Acc", Level::Debug, "\t\t HIT");
+                                            return Some(rule.grant.clone());
+                                        }
+                                    }
                                 }
                             }
                         }
+                    }
+                    PeerKind::ParentBroker => {
+                        match frame.access() {
+                            None => { return None }
+                            Some(access) => { return Some(access.to_owned()) }
+                        };
+                    }
+                    PeerKind::ChildBroker => {
+                        warn!("Child broker request are not supported yet.");
+                        return None;
                     }
                 }
             }
@@ -316,7 +347,9 @@ pub(crate) async fn broker_loop(events: Receiver<ClientEvent>, access: AccessCon
                             type Command = RequestCommand<BrokerCommand>;
                             let shv_path = frame.shv_path().unwrap_or_default().to_string();
                             let response_meta= RpcFrame::prepare_response_meta(&frame.meta);
-                            let command = match broker.grant_for_request(client_id, &frame) {
+
+                            let grant_for_request = broker.grant_for_request(client_id, &frame);
+                            let command = match grant_for_request {
                                 None => {
                                     Command::Error(RpcError::new(RpcErrorCode::PermissionDenied, &format!("Cannot resolve call method grant for current user.")))
                                 }
@@ -453,7 +486,7 @@ pub(crate) async fn broker_loop(events: Receiver<ClientEvent>, access: AccessCon
                             }
                         }
                     }
-                    ClientEvent::NewPeer { client_id, sender } => match broker.peers.entry(client_id) {
+                    ClientEvent::NewPeer { client_id, sender, peer_kind } => match broker.peers.entry(client_id) {
                         Entry::Occupied(..) => (),
                         Entry::Vacant(entry) => {
                             entry.insert(Peer {
@@ -461,6 +494,7 @@ pub(crate) async fn broker_loop(events: Receiver<ClientEvent>, access: AccessCon
                                 user: "".to_string(),
                                 mount_point: None,
                                 subscriptions: vec![],
+                                peer_kind,
                             });
                         }
                     },
@@ -487,5 +521,4 @@ pub(crate) async fn broker_loop(events: Receiver<ClientEvent>, access: AccessCon
             }
         }
     }
-    //drop(peers);
 }

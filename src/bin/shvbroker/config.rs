@@ -28,6 +28,7 @@ pub struct ParentBrokerConfig {
 pub struct AccessControl {
     pub users: HashMap<String, User>,
     pub roles: HashMap<String, Role>,
+    pub mounts: HashMap<String, Mount>,
 }
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Listen {
@@ -59,6 +60,12 @@ pub struct AccessRule {
     #[serde(default)]
     pub methods: String,
     pub grant: String,
+}
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Mount {
+    pub path: String,
+    #[serde(default)]
+    pub description: String,
 }
 impl AccessControl {
     pub fn from_file(file_name: &str) -> shv::Result<Self> {
@@ -143,6 +150,9 @@ impl Default for BrokerConfig {
                             AccessRule { paths: "**".to_string(), methods: "".to_string(), grant: "bws".to_string() },
                         ],
                     }),
+                ]),
+                mounts: HashMap::from([
+                    ("test-device".into(), Mount{ path: "shv/dev/test".to_string(), description: "Testing device mount-point".to_string() })
                 ]),
             },
         }
