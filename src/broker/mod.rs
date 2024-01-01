@@ -185,7 +185,7 @@ impl Broker {
                         None
                     }
                     Some(mount) => {
-                        let mount_point = mount.path.clone();
+                        let mount_point = mount.mount_point.clone();
                         info!("Client id: {}, device id: {} mounted on path: '{}'", client_id, device_id, &mount_point);
                         Some(mount_point)
                     }

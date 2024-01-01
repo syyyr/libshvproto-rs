@@ -63,7 +63,8 @@ pub struct AccessRule {
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Mount {
-    pub path: String,
+    #[serde(rename = "mountPoint")]
+    pub mount_point: String,
     #[serde(default)]
     pub description: String,
 }
@@ -152,7 +153,7 @@ impl Default for BrokerConfig {
                     }),
                 ]),
                 mounts: HashMap::from([
-                    ("test-device".into(), Mount{ path: "shv/dev/test".to_string(), description: "Testing device mount-point".to_string() })
+                    ("test-device".into(), Mount{ mount_point: "shv/dev/test".to_string(), description: "Testing device mount-point".to_string() })
                 ]),
             },
         }
