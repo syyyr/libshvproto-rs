@@ -385,7 +385,7 @@ pub(crate) async fn broker_loop(events: Receiver<ClientEvent>, access: AccessCon
                                                         if node.is_request_granted(&rpcmsg2) {
                                                             node.process_request(&rpcmsg2)
                                                         } else {
-                                                            let err = RpcError::new(RpcErrorCode::PermissionDenied, &format!("Request to call {}:{} is not granted.", rpcmsg2.shv_path().unwrap_or_default(), rpcmsg2.method().unwrap_or_default()));
+                                                            let err = RpcError::new(RpcErrorCode::PermissionDenied, &format!("Method doesn't exist or request to call {}:{} is not granted.", shv_path, rpcmsg2.method().unwrap_or_default()));
                                                             Command::Error(err)
                                                         }
                                                     } else {
@@ -560,6 +560,9 @@ pub async fn accept_loop(config: BrokerConfig, access: AccessControl) -> crate::
 
 #[cfg(test)]
 mod tests {
+    use crate::broker::node::METH_SUBSCRIBE;
+    use crate::broker::node::METH_UNSUBSCRIBE;
+    use crate::Map;
     use super::*;
 
     #[async_std::test]
@@ -612,6 +615,23 @@ mod tests {
         assert_eq!(m.get("mountPoint").unwrap(), &RpcValue::from("shv/test/device"));
         assert_eq!(m.get("userName").unwrap(), &RpcValue::from("admin"));
         assert_eq!(m.get("subscriptions").unwrap(), &RpcValue::from(List::new()));
+
+        // subscriptions
+        let subs_param = Map::from([("paths".to_string(), RpcValue::from("shv/**"))]);
+        {
+            call(".app/broker/currentClient", METH_SUBSCRIBE, Some(RpcValue::from(subs_param.clone())), &call_ctx).await;
+            let resp = call(".app/broker/currentClient", "info", None, &call_ctx).await;
+            let subs = resp.as_map().get("subscriptions").unwrap();
+            let subs_list = subs.as_list();
+            assert_eq!(subs_list.len(), 1);
+        }
+        {
+            call(".app/broker/currentClient", METH_UNSUBSCRIBE, Some(RpcValue::from(subs_param.clone())), &call_ctx).await;
+            let resp = call(".app/broker/currentClient", "info", None, &call_ctx).await;
+            let subs = resp.as_map().get("subscriptions").unwrap();
+            let subs_list = subs.as_list();
+            assert_eq!(subs_list.len(), 0);
+        }
 
         broker_task.cancel().await;
     }

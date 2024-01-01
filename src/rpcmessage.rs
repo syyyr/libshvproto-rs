@@ -383,11 +383,13 @@ impl TryFrom<i32> for RpcErrorCode {
             x if x == RpcErrorCode::MethodCallTimeout as i32 => Ok(RpcErrorCode::MethodCallTimeout),
             x if x == RpcErrorCode::MethodCallCancelled as i32 => Ok(RpcErrorCode::MethodCallCancelled),
             x if x == RpcErrorCode::MethodCallException as i32 => Ok(RpcErrorCode::MethodCallException),
+            x if x == RpcErrorCode::PermissionDenied as i32 => Ok(RpcErrorCode::PermissionDenied),
             x if x == RpcErrorCode::Unknown as i32 => Ok(RpcErrorCode::Unknown),
             _ => Err(()),
         }
     }
 }
+
 pub struct RpcError {
     pub code: RpcErrorCode,
     pub message: String,

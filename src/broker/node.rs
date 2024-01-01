@@ -66,8 +66,8 @@ const APP_BROKER_CURRENT_CLIENT_METHODS: [MetaMethod; 3] = [
     MetaMethod { name: METH_UNSUBSCRIBE, flags: Flag::None as u32, access: Access::Read, param: "SubscribeParams", result: "void", description: "" },
 ];
 const METH_INFO: &str = "info";
-const METH_SUBSCRIBE: &str = "subscribe";
-const METH_UNSUBSCRIBE: &str = "unsubscribe";
+pub const METH_SUBSCRIBE: &str = "subscribe";
+pub const METH_UNSUBSCRIBE: &str = "unsubscribe";
 
 pub(crate) struct AppBrokerCurrentClientNode {}
 impl ShvNode<BrokerCommand> for AppBrokerCurrentClientNode {
