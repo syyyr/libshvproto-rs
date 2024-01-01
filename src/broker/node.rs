@@ -1,8 +1,8 @@
-use shv::metamethod::{Access, Flag, MetaMethod};
-use shv::{RpcMessage, RpcMessageMetaTags};
-use shv::rpc::Subscription;
-use shv::rpcmessage::{CliId, RpcError};
-use shv::shvnode::{RequestCommand, ShvNode};
+use crate::metamethod::{Access, Flag, MetaMethod};
+use crate::{RpcMessage, RpcMessageMetaTags};
+use crate::rpc::Subscription;
+use crate::rpcmessage::{CliId, RpcError};
+use crate::shvnode::{RequestCommand, ShvNode};
 
 const METH_CLIENT_INFO: &str = "clientInfo";
 const METH_MOUNTED_CLIENT_INFO: &str = "mountedClientInfo";
@@ -86,7 +86,7 @@ impl ShvNode<BrokerCommand> for AppBrokerCurrentClientNode {
                         RequestCommand::<BrokerCommand>::Custom(BrokerCommand::Subscribe(subscription))
                     }
                     Err(err) => {
-                        RequestCommand::Error(RpcError{ code: shv::rpcmessage::RpcErrorCode::InvalidParam, message: err.to_string() })
+                        RequestCommand::Error(RpcError{ code: crate::rpcmessage::RpcErrorCode::InvalidParam, message: err.to_string() })
                     }
                 }
             }
@@ -96,7 +96,7 @@ impl ShvNode<BrokerCommand> for AppBrokerCurrentClientNode {
                         RequestCommand::<BrokerCommand>::Custom(BrokerCommand::Unsubscribe(subscription))
                     }
                     Err(err) => {
-                        RequestCommand::Error(RpcError{ code: shv::rpcmessage::RpcErrorCode::InvalidParam, message: err.to_string() })
+                        RequestCommand::Error(RpcError{ code: crate::rpcmessage::RpcErrorCode::InvalidParam, message: err.to_string() })
                     }
                 }
             }

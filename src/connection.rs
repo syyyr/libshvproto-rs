@@ -1,39 +1,10 @@
 use crate::writer::Writer;
 use async_std::io;
-use crate::rpcframe::{Protocol, RpcFrame};
+use crate::rpcframe::{RpcFrame};
 use futures::{AsyncReadExt, AsyncWriteExt};
 use log::*;
 use crate::{ChainPackWriter, MetaMap, RpcMessage, RpcMessageMetaTags, RpcValue};
 use crate::rpcmessage::{RpcError, RpcErrorCode, RqId};
-// use log::*;
-
-//pub trait Reader = async_std::io::Write + std::marker::Unpin;
-// pub async fn send_frame<W: io::Write + std::marker::Unpin>(writer: &mut W, frame: RpcFrame) -> crate::Result<()> {
-//     log!(target: "RpcMsg", Level::Debug, "S<== {}", &frame.to_rpcmesage().unwrap_or_default());
-//     let mut meta_data = Vec::new();
-//     {
-//         let mut wr = ChainPackWriter::new(&mut meta_data);
-//         wr.write_meta(&frame.meta)?;
-//     }
-//     let mut header = Vec::new();
-//     let mut wr = ChainPackWriter::new(&mut header);
-//     let msg_len = 1 + meta_data.len() + frame.data.len();
-//     wr.write_uint_data(msg_len as u64)?;
-//     header.push(frame.protocol as u8);
-//     writer.write(&header).await?;
-//     writer.write(&meta_data).await?;
-//     writer.write(&frame.data).await?;
-//     // Ensure the encoded frame is written to the socket. The calls above
-//     // are to the buffered stream and writes. Calling `flush` writes the
-//     // remaining contents of the buffer to the socket.
-//     writer.flush().await?;
-//     Ok(())
-// }
-// pub async fn send_message<W: async_std::io::Write + std::marker::Unpin>(writer: &mut W, msg: &RpcMessage) -> crate::Result<()> {
-//     let frame = RpcFrame::from_rpcmessage(Protocol::ChainPack, &msg)?;
-//     send_frame(writer, frame).await?;
-//     Ok(())
-// }
 
 pub struct FrameReader<'a, R: async_std::io::Read + std::marker::Unpin> {
     buffer: Vec<u8>,
@@ -133,7 +104,7 @@ impl<'a, W: io::Write + std::marker::Unpin> FrameWriter<'a, W> {
     }
 
     pub async fn send_message(&mut self, msg: RpcMessage) -> crate::Result<()> {
-        let frame = RpcFrame::from_rpcmessage(Protocol::ChainPack, &msg)?;
+        let frame = RpcFrame::from_rpcmessage(msg)?;
         self.send_frame(frame).await?;
         Ok(())
     }

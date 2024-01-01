@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use log::info;
 use serde::{Serialize, Deserialize};
-use shv::client::ClientConfig;
+use crate::client::ClientConfig;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BrokerConfig {
@@ -68,13 +68,13 @@ pub struct Mount {
     pub description: String,
 }
 impl AccessControl {
-    pub fn from_file(file_name: &str) -> shv::Result<Self> {
+    pub fn from_file(file_name: &str) -> crate::Result<Self> {
         let content = fs::read_to_string(file_name)?;
         Ok(serde_yaml::from_str(&content)?)
     }
 }
 impl BrokerConfig {
-    pub fn from_file(file_name: &str) -> shv::Result<Self> {
+    pub fn from_file(file_name: &str) -> crate::Result<Self> {
         let content = fs::read_to_string(file_name)?;
         Ok(serde_yaml::from_str(&content)?)
     }

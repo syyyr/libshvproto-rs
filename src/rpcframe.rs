@@ -2,7 +2,7 @@ use std::fmt;
 use std::io::{Cursor, BufReader};
 // use tracing::{instrument};
 use bytes::Buf;
-use crate::{ChainPackReader, ChainPackWriter, CponReader, CponWriter, MetaMap, RpcMessage, RpcMessageMetaTags, rpctype, RpcValue};
+use crate::{ChainPackReader, ChainPackWriter, CponReader, MetaMap, RpcMessage, RpcMessageMetaTags, rpctype, RpcValue};
 use crate::writer::Writer;
 use crate::reader::Reader;
 use log::*;
@@ -31,20 +31,14 @@ impl RpcFrame {
     pub fn new(protocol: Protocol, meta: MetaMap, data: Vec<u8>) -> RpcFrame {
         RpcFrame { protocol, meta, data }
     }
-    pub fn from_rpcmessage(protocol: Protocol, msg: &RpcMessage) -> crate::Result<RpcFrame> {
+    pub fn from_rpcmessage(msg: RpcMessage) -> crate::Result<RpcFrame> {
         let mut data = Vec::new();
-        match &protocol {
-            Protocol::ChainPack => {
-                let mut wr = ChainPackWriter::new(&mut data);
-                wr.write_value(&msg.as_rpcvalue().value())?;
-            }
-            Protocol::Cpon => {
-                let mut wr = CponWriter::new(&mut data);
-                wr.write_value(&msg.as_rpcvalue().value())?;
-            }
+        {
+            let mut wr = ChainPackWriter::new(&mut data);
+            wr.write_value(&msg.as_rpcvalue().value())?;
         }
         let meta = msg.as_rpcvalue().meta().clone();
-        Ok(RpcFrame { protocol, meta, data })
+        Ok(RpcFrame { protocol: Protocol::ChainPack, meta, data })
     }
     pub fn to_rpcmesage(&self) -> crate::Result<RpcMessage> {
         let mut buff = BufReader::new(&*self.data);

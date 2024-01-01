@@ -9,7 +9,7 @@ edition = "2021"
 simple_logger = { git = "https://github.com/fvacek/rust-simple_logger.git", branch = "main", features = ["stderr"] }
 
 futures = "0.3.29"
-async-std = "1.12.0"
+async-std = { version = "1.12.0", features = ["attributes"] }
 log = "0.4.20"
 bytes = "1.5.0"
 sha1 = "0.10.6"

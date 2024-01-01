@@ -1,16 +1,25 @@
+use async_std::{channel, task};
+use async_std::net::TcpListener;
+use crate::broker::config::{AccessControl, BrokerConfig, Password};
 use std::collections::{BTreeMap, HashMap};
 use std::collections::hash_map::Entry;
 use glob::Pattern;
-use log::{error, info, Level, log, warn};
-use shv::{List, RpcMessage, RpcMessageMetaTags, RpcValue, rpcvalue, util};
-use shv::rpc::Subscription;
-use shv::rpcframe::RpcFrame;
-use shv::rpcmessage::{CliId, RpcError, RpcErrorCode};
-use shv::shvnode::{find_longest_prefix, process_local_dir_ls, RequestCommand, ShvNode, SIG_CHNG};
-use shv::util::sha1_hash;
-use crate::config::{AccessControl, Password};
-use crate::{node, Receiver, Sender};
-use crate::node::BrokerCommand;
+use log::{debug, error, info, Level, log, warn};
+use crate::{List, RpcMessage, RpcMessageMetaTags, RpcValue, rpcvalue, util};
+use crate::rpc::Subscription;
+use crate::rpcframe::RpcFrame;
+use crate::rpcmessage::{CliId, RpcError, RpcErrorCode};
+use crate::shvnode::{find_longest_prefix, process_local_dir_ls, RequestCommand, ShvNode, SIG_CHNG};
+use crate::util::sha1_hash;
+use crate::broker::node::BrokerCommand;
+use async_std::stream::StreamExt;
+
+pub mod config;
+pub mod peer;
+pub mod node;
+
+type Sender<T> = async_std::channel::Sender<T>;
+type Receiver<T> = async_std::channel::Receiver<T>;
 
 pub(crate) enum LoginResult {
     Ok,
@@ -87,7 +96,7 @@ struct ParsedAccessRule {
     grant: String,
 }
 impl ParsedAccessRule {
-    pub fn new(path: &str, method: &str, grant: &str) -> shv::Result<Self> {
+    pub fn new(path: &str, method: &str, grant: &str) -> crate::Result<Self> {
         let method = if method.is_empty() { "?*" } else { method };
         let path = if path.is_empty() { "**" } else { path };
         match Pattern::new(method) {
@@ -108,7 +117,7 @@ impl ParsedAccessRule {
 }
 struct Broker {
     peers: HashMap<CliId, Peer>,
-    mounts: BTreeMap<String, Mount<crate::node::BrokerCommand>>,
+    mounts: BTreeMap<String, Mount<crate::broker::node::BrokerCommand>>,
     access: AccessControl,
     role_access: HashMap<String, Vec<ParsedAccessRule>>,
 }
@@ -331,7 +340,7 @@ pub(crate) async fn broker_loop(events: Receiver<ClientEvent>, access: AccessCon
 
     let mut broker = Broker::new(access);
 
-    broker.mounts.insert(".app".into(), Mount::Node(Box::new(shv::shvnode::AppNode { app_name: "shvbroker", ..Default::default() })));
+    broker.mounts.insert(".app".into(), Mount::Node(Box::new(crate::shvnode::AppNode { app_name: "shvbroker", ..Default::default() })));
     broker.mounts.insert(".app/broker".into(), Mount::Node(Box::new(node::AppBrokerNode {  })));
     broker.mounts.insert(".app/broker/currentClient".into(), Mount::Node(Box::new(node::AppBrokerCurrentClientNode {  })));
     loop {
@@ -520,5 +529,90 @@ pub(crate) async fn broker_loop(events: Receiver<ClientEvent>, access: AccessCon
                 }
             }
         }
+    }
+}
+pub async fn accept_loop(config: BrokerConfig, access: AccessControl) -> crate::Result<()> {
+    if let Some(address) = config.listen.tcp.clone() {
+        let (broker_sender, broker_receiver) = channel::unbounded();
+        let parent_broker_peer_config = config.parent_broker.clone();
+        let broker_task = task::spawn(crate::broker::broker_loop(broker_receiver, access));
+        if parent_broker_peer_config.enabled {
+            crate::spawn_and_log_error(peer::parent_broker_peer_loop(1, parent_broker_peer_config, broker_sender.clone()));
+        }
+        info!("Listening on TCP: {}", address);
+        let listener = TcpListener::bind(address).await?;
+        info!("bind OK");
+        let mut client_id = 2; // parent broker has client_id == 1
+        let mut incoming = listener.incoming();
+        while let Some(stream) = incoming.next().await {
+            let stream = stream?;
+            debug!("Accepting from: {}", stream.peer_addr()?);
+            crate::spawn_and_log_error(peer::peer_loop(client_id, broker_sender.clone(), stream));
+            client_id += 1;
+        }
+        drop(broker_sender);
+        broker_task.await;
+    } else {
+        return Err("No port to listen on specified".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[async_std::test]
+    async fn test_broker_loop() {
+        let config = BrokerConfig::default();
+        let access = config.access.clone();
+        let (broker_writer, broker_reader) = channel::unbounded();
+        //let parent_broker_peer_config = config.parent_broker.clone();
+        let broker_task = task::spawn(crate::broker::broker_loop(broker_reader, access));
+
+        let (peer_writer, peer_reader) = channel::unbounded::<PeerEvent>();
+        let client_id = 2;
+
+        struct CallCtx<'a> {
+            writer: &'a Sender<ClientEvent>,
+            reader: &'a Receiver<PeerEvent>,
+            client_id: CliId,
+        }
+        async fn call(path: &str, method: &str, param: Option<RpcValue>, ctx: &CallCtx<'_>) -> RpcValue {
+            let msg = RpcMessage::new_request(path, method, param);
+            let frame = RpcFrame::from_rpcmessage(msg).expect("valid message");
+            ctx.writer.send(ClientEvent::Frame { client_id: ctx.client_id, frame }).await.unwrap();
+            if let PeerEvent::Message(msg) = ctx.reader.recv().await.unwrap() {
+                msg.result().unwrap().clone()
+            } else {
+                panic!("Response expected");
+            }
+        }
+        let call_ctx = CallCtx{
+            writer: &broker_writer,
+            reader: &peer_reader,
+            client_id,
+        };
+
+        // login
+        broker_writer.send(ClientEvent::NewPeer { client_id, sender: peer_writer, peer_kind: PeerKind::Client }).await.unwrap();
+        broker_writer.send(ClientEvent::GetPassword { client_id, user: "admin".into() }).await.unwrap();
+        peer_reader.recv().await.unwrap();
+        let register_device = ClientEvent::RegisterDevice { client_id, device_id: Some("test-device".into()), mount_point: Default::default() };
+        broker_writer.send(register_device).await.unwrap();
+
+        // device should be mounted as 'shv/dev/test'
+        let resp = call("shv/dev", "ls", Some("test".into()), &call_ctx).await;
+        assert_eq!(resp, RpcValue::from(true));
+
+        // test current client info
+        let resp = call(".app/broker/currentClient", "info", None, &call_ctx).await;
+        let m = resp.as_map();
+        assert_eq!(m.get("clientId").unwrap(), &RpcValue::from(2));
+        assert_eq!(m.get("mountPoint").unwrap(), &RpcValue::from("shv/dev/test"));
+        assert_eq!(m.get("userName").unwrap(), &RpcValue::from("admin"));
+        assert_eq!(m.get("subscriptions").unwrap(), &RpcValue::from(List::new()));
+
+        broker_task.cancel().await;
     }
 }

@@ -15,10 +15,10 @@ pub mod connection;
 pub mod client;
 pub mod shvnode;
 pub mod rpc;
+pub mod broker;
 
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
-pub type Result<T> = std::result::Result<T, Error>;
-
+use std::future::Future;
+use async_std::task;
 pub use datetime::DateTime;
 pub use decimal::Decimal;
 pub use metamap::MetaMap;
@@ -30,3 +30,17 @@ pub use writer::{Writer, WriteResult};
 
 pub use chainpack::{ChainPackReader, ChainPackWriter};
 pub use cpon::{CponReader, CponWriter};
+
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type Result<T> = std::result::Result<T, Error>;
+
+pub fn spawn_and_log_error<F>(fut: F) -> task::JoinHandle<()>
+    where
+        F: Future<Output = crate::Result<()>> + Send + 'static,
+{
+    task::spawn(async move {
+        if let Err(e) = fut.await {
+            eprintln!("{}", e)
+        }
+    })
+}
