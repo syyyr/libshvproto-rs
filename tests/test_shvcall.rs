@@ -33,14 +33,14 @@ fn test_call_ping_stdin() -> shv::Result<()> {
     assert!(broker_process_guard.is_running());
 
     println!("---shvcall---: .app:ping()");
-    assert_eq!(shv_call(".app", "ping", "")?, RpcValue::null());
+    assert_eq!(shv_call(".app", "ping", "", None)?, RpcValue::null());
 
     println!("---shvcall---: .app:name()");
     let calls: Vec<String> = vec![
         ".app:ping".into(),
         ".app:name".into(),
     ];
-    let values = shv_call_many(calls, ShvCallOutputFormat::Value)?;
+    let values = shv_call_many(calls, ShvCallOutputFormat::Value, None)?;
     let expected = vec!["null", r#""shvbroker""#];
     for (no, val) in values.iter().enumerate() {
         assert_eq!(&expected[no], val);

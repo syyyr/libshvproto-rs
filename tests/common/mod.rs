@@ -92,10 +92,11 @@ impl ShvCallOutputFormat {
         }
     }
 }
-pub fn shv_call(path: &str, method: &str, param: &str) -> shv::Result<RpcValue> {
+pub fn shv_call(path: &str, method: &str, param: &str, port: Option<i32>) -> shv::Result<RpcValue> {
+    let port = port.unwrap_or(3755);
     let output = Command::new("target/debug/shvcall")
         .arg("-v").arg(".:T")
-        .arg("--url").arg("tcp://admin:admin@localhost")
+        .arg("--url").arg(format!("tcp://admin@localhost:{port}?password=admin"))
         .arg("--path").arg(path)
         .arg("--method").arg(method)
         .arg("--param").arg(param)
@@ -104,11 +105,12 @@ pub fn shv_call(path: &str, method: &str, param: &str) -> shv::Result<RpcValue> 
 
     result_from_output(output)
 }
-pub fn shv_call_many(calls: Vec<String>, output_format: ShvCallOutputFormat) -> shv::Result<Vec<String>> {
+pub fn shv_call_many(calls: Vec<String>, output_format: ShvCallOutputFormat, port: Option<i32>) -> shv::Result<Vec<String>> {
+    let port = port.unwrap_or(3755);
     let mut cmd = Command::new("target/debug/shvcall");
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .arg("--url").arg("tcp://admin:admin@localhost")
+        .arg("--url").arg(format!("tcp://admin@localhost:{port}?password=admin"))
         .arg("--output-format").arg(output_format.as_str())
         .arg("-v").arg(".:I");
     let mut child = cmd.spawn()?;

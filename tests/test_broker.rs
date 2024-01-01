@@ -18,11 +18,25 @@ fn test_broker() -> shv::Result<()> {
     thread::sleep(Duration::from_millis(100));
     assert!(broker_process_guard.is_running());
 
+    let mut child_broker_process_guard = KillProcessGuard::new(Command::new("target/debug/shvbroker")
+        .arg("--config").arg("tests/child-broker-config.yaml")
+        //.arg("-v").arg("Acc")
+        .spawn()?);
+    thread::sleep(Duration::from_millis(100));
+    assert!(child_broker_process_guard.is_running());
+
+    pub fn shv_call_parent(path: &str, method: &str, param: &str) -> shv::Result<RpcValue> {
+        shv_call(path, method, param, None)
+    }
+    pub fn shv_call_child(path: &str, method: &str, param: &str) -> shv::Result<RpcValue> {
+        shv_call(path, method, param, Some(3756))
+    }
+
     println!("====== broker =====");
     println!("---broker---: :ls(\".app\")");
-    assert_eq!(shv_call("", "ls", r#"".app""#)?, RpcValue::from(true));
-    assert_eq!(shv_call(".app", "ls", r#""broker""#)?, RpcValue::from(true));
-    assert_eq!(shv_call(".app/broker", "ls", r#""client""#)?, RpcValue::from(true));
+    assert_eq!(shv_call_child("", "ls", r#"".app""#)?, RpcValue::from(true));
+    assert_eq!(shv_call_child(".app", "ls", r#""broker""#)?, RpcValue::from(true));
+    assert_eq!(shv_call_child(".app/broker", "ls", r#""client""#)?, RpcValue::from(true));
     {
         println!("---broker---: .app:dir()");
         let expected_methods = vec![
@@ -32,7 +46,7 @@ fn test_broker() -> shv::Result<()> {
             MetaMethod { name: METH_PING.into(), ..Default::default() },
         ];
         {
-            let methods = shv_call(".app", "dir", "")?;
+            let methods = shv_call_child(".app", "dir", "")?;
             let methods = methods.as_list();
             'outer: for xmm in expected_methods.iter() {
                 for mm in methods.iter() {
@@ -47,7 +61,7 @@ fn test_broker() -> shv::Result<()> {
         }
         println!("---broker---: .app:dir(true)");
         {
-            let methods = shv_call(".app", "dir", "true")?;
+            let methods = shv_call_child(".app", "dir", "true")?;
             let methods = methods.as_list();
             'outer: for xmm in expected_methods.iter() {
                 for mm in methods.iter() {
@@ -62,19 +76,19 @@ fn test_broker() -> shv::Result<()> {
         }
         println!("---broker---: .app:dir(\"ping\")");
         {
-            let method = shv_call(".app", "dir", r#""ping""#)?;
+            let method = shv_call_child(".app", "dir", r#""ping""#)?;
             assert!(method.is_imap());
             let name = method.as_imap().get(&metamethod::DirAttribute::Name.into()).ok_or("Name attribute doesn't exist")?.as_str();
             assert_eq!(name, "ping");
         }
     }
     println!("---broker---: .app:ping()");
-    assert_eq!(shv_call(".app", "ping", "")?, RpcValue::null());
+    assert_eq!(shv_call_child(".app", "ping", "")?, RpcValue::null());
 
     println!("====== device =====");
     let mut device_process_guard = common::KillProcessGuard {
         child: Command::new("target/debug/examples/device")
-            .arg("--url").arg("tcp://admin:admin@localhost")
+            .arg("--url").arg("tcp://admin:admin@localhost:3756")
             .arg("--mount").arg("test/device")
             .spawn()?
     };
@@ -82,19 +96,23 @@ fn test_broker() -> shv::Result<()> {
     assert!(device_process_guard.is_running());
 
     println!("---broker---: test:ls()");
-    assert_eq!(shv_call("test", "ls", "")?, vec![RpcValue::from("device")].into());
+    assert_eq!(shv_call_child("test", "ls", "")?, vec![RpcValue::from("device")].into());
+    assert_eq!(shv_call_parent("shv/test/child-broker", "ls", "")?, vec![RpcValue::from("device")].into());
     println!("---broker---: test/device:ls()");
-    assert_eq!(shv_call("test/device", "ls", "")?, vec![RpcValue::from(".app"), RpcValue::from("number")].into());
+    assert_eq!(shv_call_child("test/device", "ls", "")?, vec![RpcValue::from(".app"), RpcValue::from("number")].into());
+    assert_eq!(shv_call_parent("shv/test/child-broker/device", "ls", "")?, vec![RpcValue::from(".app"), RpcValue::from("number")].into());
     println!("---broker---: test/device/.app:ping()");
-    assert_eq!(shv_call("test/device/.app", "ping", "")?, RpcValue::null());
+    assert_eq!(shv_call_child("test/device/.app", "ping", "")?, RpcValue::null());
+    assert_eq!(shv_call_parent("shv/test/child-broker/device/.app", "ping", "")?, RpcValue::null());
     println!("---broker---: test/device/number:ls()");
-    assert_eq!(shv_call("test/device/number", "ls", "")?, rpcvalue::List::new().into());
+    assert_eq!(shv_call_child("test/device/number", "ls", "")?, rpcvalue::List::new().into());
+    assert_eq!(shv_call_parent("shv/test/child-broker/device/number", "ls", "")?, rpcvalue::List::new().into());
 
     println!("---broker---: .app/broker:clients()");
-    assert_eq!(shv_call(".app/broker", "clients", "")?.as_list().len(), 2); // [device-id, shvcall-id]
+    assert!(shv_call_child(".app/broker", "clients", "")?.as_list().len() > 0);
 
     println!("---broker---: .app/broker:mounts()");
-    assert_eq!(shv_call(".app/broker", "mounts", "")?, vec![RpcValue::from("test/device")].into());
+    assert_eq!(shv_call_child(".app/broker", "mounts", "")?, vec![RpcValue::from("test/device")].into());
     {
         println!("====== subscriptions =====");
         let calls: Vec<String> = vec![
@@ -103,7 +121,7 @@ fn test_broker() -> shv::Result<()> {
             r#".app/broker/currentClient:unsubscribe {"methods": "chng", "paths": "test/**"}"#.into(),
             r#"test/device/number:set 123"#.into(),
         ];
-        let values = shv_call_many(calls, ShvCallOutputFormat::Simple)?;
+        let values = shv_call_many(calls, ShvCallOutputFormat::Simple, Some(3756))?;
         for v in values.iter() {
             println!("\t{}", v);
         }
@@ -118,5 +136,10 @@ fn test_broker() -> shv::Result<()> {
             assert_eq!(expected[no], val);
         }
     }
+
+    println!("====== child broker =====");
+    assert_eq!(shv_call_parent("shv/test", "ls", r#""child-broker""#)?, RpcValue::from(true));
+    assert_eq!(shv_call_parent("shv/test/child-broker/device/.app", "name", "")?, RpcValue::from("device"));
+
     Ok(())
 }

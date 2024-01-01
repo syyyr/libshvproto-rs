@@ -116,6 +116,7 @@ impl Default for BrokerConfig {
                 users: HashMap::from([
                     ("admin".to_string(), User { password: Password::Plain("admin".into()), roles: vec!["su".to_string()] }),
                     ("user".to_string(), User { password: Password::Plain("user".into()), roles: vec!["client".to_string()] }),
+                    ("child-broker".to_string(), User { password: Password::Plain("child-broker".into()), roles: vec!["child-broker".to_string()] }),
                     ("tester".to_string(), User { password: Password::Sha1("ab4d8d2a5f480a137067da17100271cd176607a1".into()), roles: vec!["tester".to_string()] }),
                 ]),
                 roles: HashMap::from([
@@ -126,6 +127,8 @@ impl Default for BrokerConfig {
                         ].into(),
                     }),
                     ("client".to_string(), Role { roles: vec!["ping".to_string(), "subscribe".to_string(), "browse".to_string()], access: vec![] }),
+                    ("device".to_string(), Role { roles: vec!["client".to_string()], access: vec![] }),
+                    ("child-broker".to_string(), Role { roles: vec!["device".to_string()], access: vec![] }),
                     ("tester".to_string(), Role {
                         roles: vec!["client".to_string()].into(),
                         access: vec![
@@ -153,7 +156,8 @@ impl Default for BrokerConfig {
                     }),
                 ]),
                 mounts: HashMap::from([
-                    ("test-device".into(), Mount{ mount_point: "shv/dev/test".to_string(), description: "Testing device mount-point".to_string() })
+                    ("test-device".into(), Mount{ mount_point: "shv/test/device".to_string(), description: "Testing device mount-point".to_string() }),
+                    ("test-child-broker".into(), Mount{ mount_point: "shv/test/child-broker".to_string(), description: "Testing child broker mount-point".to_string() }),
                 ]),
             },
         }

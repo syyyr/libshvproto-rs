@@ -537,7 +537,7 @@ pub async fn accept_loop(config: BrokerConfig, access: AccessControl) -> crate::
         let parent_broker_peer_config = config.parent_broker.clone();
         let broker_task = task::spawn(crate::broker::broker_loop(broker_receiver, access));
         if parent_broker_peer_config.enabled {
-            crate::spawn_and_log_error(peer::parent_broker_peer_loop(1, parent_broker_peer_config, broker_sender.clone()));
+            crate::spawn_and_log_error(peer::parent_broker_peer_loop_with_reconnect(1, parent_broker_peer_config, broker_sender.clone()));
         }
         info!("Listening on TCP: {}", address);
         let listener = TcpListener::bind(address).await?;
@@ -602,14 +602,14 @@ mod tests {
         broker_writer.send(register_device).await.unwrap();
 
         // device should be mounted as 'shv/dev/test'
-        let resp = call("shv/dev", "ls", Some("test".into()), &call_ctx).await;
+        let resp = call("shv/test", "ls", Some("device".into()), &call_ctx).await;
         assert_eq!(resp, RpcValue::from(true));
 
         // test current client info
         let resp = call(".app/broker/currentClient", "info", None, &call_ctx).await;
         let m = resp.as_map();
         assert_eq!(m.get("clientId").unwrap(), &RpcValue::from(2));
-        assert_eq!(m.get("mountPoint").unwrap(), &RpcValue::from("shv/dev/test"));
+        assert_eq!(m.get("mountPoint").unwrap(), &RpcValue::from("shv/test/device"));
         assert_eq!(m.get("userName").unwrap(), &RpcValue::from("admin"));
         assert_eq!(m.get("subscriptions").unwrap(), &RpcValue::from(List::new()));
 

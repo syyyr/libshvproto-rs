@@ -3,7 +3,7 @@ use async_std::io::BufReader;
 use async_std::net::TcpStream;
 use futures::select;
 use futures::FutureExt;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use rand::distributions::{Alphanumeric, DistString};
 use url::Url;
 use crate::{client, RpcMessage, RpcMessageMetaTags, RpcValue};
@@ -165,8 +165,37 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<ClientEvent>
     info!("Client loop exit, client id: {}", client_id);
     Ok(())
 }
+pub(crate) async fn parent_broker_peer_loop_with_reconnect(client_id: i32, config: ParentBrokerConfig, broker_writer: Sender<ClientEvent>) -> crate::Result<()> {
+    let url = Url::parse(&config.client.url)?;
+    if url.scheme() != "tcp" {
+        return Err(format!("Scheme {} is not supported yet.", url.scheme()).into());
+    }
+    let reconnect_interval: std::time::Duration = loop {
+        if let Some(time_str) = &config.client.reconnect_interval {
+            if let Ok(interval) = duration_str::parse(time_str) {
+                break interval
+            }
+        }
+        const DEFAULT_RECONNECT_INTERVAL_SEC: u64 = 10;
+        info!("Parent broker connection reconnect interval is not set explicitly, default value {DEFAULT_RECONNECT_INTERVAL_SEC} will be used.");
+        break std::time::Duration::from_secs(DEFAULT_RECONNECT_INTERVAL_SEC)
+    };
+    info!("Reconnect interval set to: {:?}", reconnect_interval);
+    loop {
+        match parent_broker_peer_loop(client_id, config.clone(), broker_writer.clone()).await {
+            Ok(_) => {
+                info!("Parent broker peer loop finished without error");
+            }
+            Err(err) => {
+                error!("Parent broker peer loop finished with error: {err}");
+            }
+        }
+        info!("Reconnecting to parent broker after: {:?}", reconnect_interval);
+        async_std::task::sleep(reconnect_interval).await;
+    }
+}
+
 pub(crate) async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, broker_writer: Sender<ClientEvent>) -> crate::Result<()> {
-    info!("Connecting to parent broker: {}", &config.client.url);
     let url = Url::parse(&config.client.url)?;
     let (scheme, host, port) = (url.scheme(), url.host_str().unwrap_or_default(), url.port().unwrap_or(3755));
     if scheme != "tcp" {
@@ -174,7 +203,7 @@ pub(crate) async fn parent_broker_peer_loop(client_id: i32, config: ParentBroker
     }
     let address = format!("{host}:{port}");
     // Establish a connection
-    info!("Connecting to parent broker: {address}");
+    info!("Connecting to parent broker: tcp://{address}");
     let stream = TcpStream::connect(&address).await?;
     let (reader, mut writer) = (&stream, &stream);
 
@@ -195,7 +224,7 @@ pub(crate) async fn parent_broker_peer_loop(client_id: i32, config: ParentBroker
     };
 
     info!("Parent broker connected OK");
-    warn!("Heartbeat interval set to: {:?}", &heartbeat_interval);
+    info!("Heartbeat interval set to: {:?}", &heartbeat_interval);
     client::login(&mut frame_reader, &mut frame_writer, &login_params).await?;
 
     let (peer_writer, peer_receiver) = channel::unbounded::<PeerEvent>();
