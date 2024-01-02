@@ -216,7 +216,7 @@ struct IntPropertyNode {
     value: i32,
 }
 impl ShvNode<()> for IntPropertyNode {
-    fn methods(&self) -> Vec<&MetaMethod> {
+    fn defined_methods(&self) -> Vec<&MetaMethod> {
         DIR_LS_METHODS.iter().chain(PROPERTY_METHODS.iter()).collect()
     }
 

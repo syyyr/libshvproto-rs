@@ -223,7 +223,13 @@ pub enum RequestCommand<K> {
     Custom(K),
 }
 pub trait ShvNode<K> {
-    fn methods(&self) -> Vec<&MetaMethod>;
+    fn common_methods(&self) -> Vec<& MetaMethod> {
+        DIR_LS_METHODS.iter().collect()
+    }
+    fn defined_methods(&self) -> Vec<&MetaMethod>;
+    fn methods(&self) -> Vec<&MetaMethod> {
+        self.common_methods().into_iter().chain(self.defined_methods().into_iter()).collect()
+    }
     fn is_request_granted(&self, rq: &RpcMessage) -> bool {
         let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
@@ -232,13 +238,9 @@ pub trait ShvNode<K> {
                 None => { return false }
                 Some(rq_level) => {
                     let method = rq.method().unwrap_or_default();
-                    if method == METH_LS || method == METH_DIR {
-                        return rq_level >= Access::Browse
-                    } else {
-                        for mm in self.methods().into_iter() {
-                            if mm.name == method {
-                                return rq_level >= mm.access
-                            }
+                    for mm in self.methods().into_iter() {
+                        if mm.name == method {
+                            return rq_level >= mm.access
                         }
                     }
                 }
@@ -265,7 +267,7 @@ pub trait ShvNode<K> {
     fn process_dir(&mut self, rq: &RpcMessage) -> RequestCommand<K> {
         let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
-            let resp = dir(DIR_LS_METHODS.iter().chain(self.methods().into_iter()), rq.param().into());
+            let resp = dir(self.methods().into_iter(), rq.param().into());
             RequestCommand::Result(resp)
         } else {
             let errmsg = format!("Unknown method '{}:{}()', invalid path.", rq.shv_path().unwrap_or_default(), rq.method().unwrap_or_default());
@@ -340,7 +342,7 @@ const APP_METHODS: [MetaMethod; 4] = [
 ];
 
 impl<K> ShvNode<K> for AppNode {
-    fn methods(&self) -> Vec<&MetaMethod> {
+    fn defined_methods(&self) -> Vec<&MetaMethod> {
         APP_METHODS.iter().collect()
     }
 
@@ -372,7 +374,7 @@ impl Default for AppDeviceNode {
     }
 }
 impl<K> ShvNode<K> for AppDeviceNode {
-    fn methods(&self) -> Vec<&MetaMethod> {
+    fn defined_methods(&self) -> Vec<&MetaMethod> {
         DEVICE_METHODS.iter().collect()
     }
 

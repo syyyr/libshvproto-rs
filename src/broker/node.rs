@@ -29,7 +29,7 @@ pub enum BrokerCommand {
 }
 pub(crate) struct AppBrokerNode {}
 impl ShvNode<BrokerCommand> for AppBrokerNode {
-    fn methods(&self) -> Vec<&MetaMethod> {
+    fn defined_methods(&self) -> Vec<&MetaMethod> {
         APP_BROKER_METHODS.iter().collect()
     }
 
@@ -71,7 +71,7 @@ pub const METH_UNSUBSCRIBE: &str = "unsubscribe";
 
 pub(crate) struct AppBrokerCurrentClientNode {}
 impl ShvNode<BrokerCommand> for AppBrokerCurrentClientNode {
-    fn methods(&self) -> Vec<&MetaMethod> {
+    fn defined_methods(&self) -> Vec<&MetaMethod> {
         APP_BROKER_CURRENT_CLIENT_METHODS.iter().collect()
     }
 
