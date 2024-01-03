@@ -3,14 +3,14 @@ use async_std::net::TcpListener;
 use crate::broker::config::{AccessControl, BrokerConfig, Password};
 use std::collections::{BTreeMap, HashMap};
 use std::collections::hash_map::Entry;
-use glob::Pattern;
+use glob::{Pattern};
 use log::{debug, error, info, Level, log, warn};
 use crate::{List, RpcMessage, RpcMessageMetaTags, RpcValue, rpcvalue, util};
 use crate::rpc::Subscription;
 use crate::rpcframe::RpcFrame;
 use crate::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use crate::shvnode::{find_longest_prefix, process_local_dir_ls, RequestCommand, ShvNode, SIG_CHNG};
-use crate::util::sha1_hash;
+use crate::util::{sha1_hash, split_glob_on_match};
 use crate::broker::node::BrokerCommand;
 use async_std::stream::StreamExt;
 
@@ -62,8 +62,6 @@ pub(crate) enum PeerEvent {
 pub enum PeerKind {
     Client,
     ParentBroker,
-    #[allow(dead_code)]
-    ChildBroker,
 }
 #[derive(Debug)]
 struct Peer {
@@ -193,13 +191,36 @@ impl Broker {
             }
             break None;
         } {
-            self.mounts.insert(mount_point.clone(), Mount::Peer(Device { client_id }));
             if let Some(peer) = self.peers.get_mut(&client_id) {
                 peer.mount_point = Some(mount_point.clone());
+                self.mounts.insert(mount_point.clone(), Mount::Peer(Device { client_id }));
+                self.propagate_subscriptions_to_device(&mount_point);
+            } else {
+                warn!("Cannot mount device with invalid client ID: {client_id}");
             }
         };
         let client_path = format!(".app/broker/client/{}", client_id);
         self.mounts.insert(client_path, Mount::Peer(Device { client_id }));
+    }
+    fn propagate_subscriptions_to_device(&self, mount_point: &str) {
+        if let Some(mount) = self.mounts.get(mount_point) {
+            if let crate::broker::Mount::Peer(device) = mount {
+                let mut subscribed = HashMap::new();
+                for (id, peer) in &self.peers {
+                    if id == &device.client_id { continue }
+                    for subscr in &peer.subscriptions {
+                        subscribed.insert(subscr.to_string(), (subscr.paths.as_str(), subscr.methods.as_str()));
+                    }
+                }
+                for (_sig, (paths, _methods)) in subscribed {
+                    if let Ok(Some((_local, _remote))) = split_glob_on_match(paths, mount_point) {
+                        // TODO call subscribe
+                    } else {
+                        error!("Internal error, paths patterns should be valid and checked here.")
+                    }
+                }
+            }
+        }
     }
     pub fn client_id_to_mount_point(&self, client_id: CliId) -> Option<String> {
         match self.peers.get(&client_id) {
@@ -266,10 +287,6 @@ impl Broker {
                             Some(access) => { return Some(access.to_owned()) }
                         };
                     }
-                    PeerKind::ChildBroker => {
-                        warn!("Child broker request are not supported yet.");
-                        return None;
-                    }
                 }
             }
             None
@@ -285,7 +302,7 @@ impl Broker {
         ]
         )
     }
-    pub fn client_info(&mut self, client_id: CliId) -> Option<rpcvalue::Map> {
+    fn client_info(&mut self, client_id: CliId) -> Option<rpcvalue::Map> {
         match self.peers.get(&client_id) {
             None => { None }
             Some(peer) => {
@@ -301,7 +318,7 @@ impl Broker {
             }
         }
     }
-    pub fn mounted_client_info(&mut self, mount_point: &str) -> Option<rpcvalue::Map> {
+    fn mounted_client_info(&mut self, mount_point: &str) -> Option<rpcvalue::Map> {
         for (client_id, peer) in &self.peers {
             if let Some(mount_point1) = &peer.mount_point {
                 if mount_point1 == mount_point {
@@ -311,28 +328,36 @@ impl Broker {
         }
         None
     }
-    pub fn clients(&self) -> rpcvalue::List {
+    fn clients(&self) -> rpcvalue::List {
         let ids: rpcvalue::List = self.peers.iter().map(|(id, _)| RpcValue::from(*id) ).collect();
         ids
     }
-    pub fn mounts(&self) -> rpcvalue::List {
+    fn mounts(&self) -> rpcvalue::List {
         self.peers.iter().filter(|(_id, peer)| peer.mount_point.is_some()).map(|(_id, peer)| {
             RpcValue::from(peer.mount_point.clone().unwrap())
         } ).collect()
     }
-    pub fn subscribe(&mut self, client_id: CliId, subscription: Subscription) {
+    fn subscribe(&mut self, client_id: CliId, subscription: Subscription) {
         log!(target: "Subscr", Level::Debug, "New subscription for client id: {} - {}", client_id, &subscription);
         if let Some(peer) = self.peers.get_mut(&client_id) {
             peer.subscriptions.push(subscription);
         }
     }
-    pub fn unsubscribe(&mut self, client_id: CliId, subscription: &Subscription) -> bool {
+    fn unsubscribe(&mut self, client_id: CliId, subscription: &Subscription) -> bool {
         if let Some(peer) = self.peers.get_mut(&client_id) {
             let cnt = peer.subscriptions.len();
             peer.subscriptions.retain(|subscr| subscr != subscription);
             cnt != peer.subscriptions.len()
         } else {
             false
+        }
+    }
+    fn subscriptions(&self, client_id: CliId) -> List {
+        if let Some(peer) = self.peers.get(&client_id) {
+            let subs: List = peer.subscriptions.iter().map(|subs| subs.to_rpcvalue()).collect();
+            subs
+        } else {
+            List::default()
         }
     }
 }
@@ -437,6 +462,10 @@ pub(crate) async fn broker_loop(events: Receiver<ClientEvent>, access: AccessCon
                                     BrokerCommand::Unsubscribe(subscr) => {
                                         let ok = broker.unsubscribe(client_id, &subscr);
                                         Command::Result(ok.into())
+                                    }
+                                    BrokerCommand::Subscriptions => {
+                                        let result = broker.subscriptions(client_id);
+                                        Command::Result(result.into())
                                     }
                                 }
                             } else {

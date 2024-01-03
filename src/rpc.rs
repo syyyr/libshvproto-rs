@@ -10,7 +10,8 @@ pub struct Subscription {
 }
 impl Subscription {
     pub fn new(paths: &str, methods: &str) -> crate::Result<Self> {
-        let paths = if paths.is_empty() { "**" } else { paths };
+        // empty path matches SHV root, for example 'lschng' on root can signalize new service
+        //let paths = if paths.is_empty() { "**" } else { paths };
         let methods = if methods.is_empty() { "?*" } else { methods };
         match Pattern::new(methods) {
             Ok(methods) => {
@@ -42,10 +43,19 @@ impl Subscription {
         m.insert("methods".into(), self.methods.as_str().into());
         RpcValue::from(m)
     }
+    pub fn to_string(&self) -> String {
+        format!("{}:{}", self.paths.as_str(), self.methods.as_str())
+    }
+    pub fn split_str(s: &str) -> (&str, &str) {
+        let mut it = s.split(':');
+        let paths = it.next().unwrap_or("");
+        let methods = it.next().unwrap_or("");
+        (paths, methods)
+    }
 }
 impl Display for Subscription {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{{paths: {}, methods: {}}}", self.paths.as_str(), self.methods.as_str())
+        write!(f, "{}:{}", self.paths.as_str(), self.methods.as_str())
     }
 }
 impl Into<RpcValue> for Subscription {

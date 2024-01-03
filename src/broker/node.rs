@@ -26,6 +26,7 @@ pub enum BrokerCommand {
     CurrentClientInfo,
     Subscribe(Subscription),
     Unsubscribe(Subscription),
+    Subscriptions,
 }
 pub(crate) struct AppBrokerNode {}
 impl ShvNode<BrokerCommand> for AppBrokerNode {
@@ -68,6 +69,7 @@ const APP_BROKER_CURRENT_CLIENT_METHODS: [MetaMethod; 3] = [
 const METH_INFO: &str = "info";
 pub const METH_SUBSCRIBE: &str = "subscribe";
 pub const METH_UNSUBSCRIBE: &str = "unsubscribe";
+pub const METH_SUBSCRIBTIONS: &str = "subscriptions";
 
 pub(crate) struct AppBrokerCurrentClientNode {}
 impl ShvNode<BrokerCommand> for AppBrokerCurrentClientNode {
@@ -99,6 +101,9 @@ impl ShvNode<BrokerCommand> for AppBrokerCurrentClientNode {
                         RequestCommand::Error(RpcError{ code: crate::rpcmessage::RpcErrorCode::InvalidParam, message: err.to_string() })
                     }
                 }
+            }
+            Some(METH_SUBSCRIBTIONS) => {
+                RequestCommand::<BrokerCommand>::Custom(BrokerCommand::Subscriptions)
             }
             _ => {
                 ShvNode::<BrokerCommand>::process_dir_ls(self, rq)

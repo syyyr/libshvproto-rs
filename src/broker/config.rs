@@ -128,7 +128,11 @@ impl Default for BrokerConfig {
                     }),
                     ("client".to_string(), Role { roles: vec!["ping".to_string(), "subscribe".to_string(), "browse".to_string()], access: vec![] }),
                     ("device".to_string(), Role { roles: vec!["client".to_string()], access: vec![] }),
-                    ("child-broker".to_string(), Role { roles: vec!["device".to_string()], access: vec![] }),
+                    ("child-broker".to_string(), Role { roles: vec!["device".to_string()],
+                        access: vec![
+                            AccessRule { paths: "test/**".to_string(), methods: "".to_string(), grant: "cfg".to_string() },
+                        ]
+                    }),
                     ("tester".to_string(), Role {
                         roles: vec!["client".to_string()].into(),
                         access: vec![
