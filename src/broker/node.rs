@@ -61,15 +61,16 @@ impl ShvNode<BrokerCommand> for AppBrokerNode {
     }
 }
 
-const APP_BROKER_CURRENT_CLIENT_METHODS: [MetaMethod; 3] = [
+const APP_BROKER_CURRENT_CLIENT_METHODS: [MetaMethod; 4] = [
     MetaMethod { name: METH_INFO, flags: Flag::None as u32, access: Access::Browse, param: "Int", result: "ClientInfo", description: "" },
-    MetaMethod { name: METH_SUBSCRIBE, flags: Flag::None as u32, access: Access::Read, param: "SubscribeParams", result: "void", description: "" },
-    MetaMethod { name: METH_UNSUBSCRIBE, flags: Flag::None as u32, access: Access::Read, param: "SubscribeParams", result: "void", description: "" },
+    MetaMethod { name: METH_SUBSCRIBE, flags: Flag::None as u32, access: Access::Browse, param: "SubscribeParams", result: "void", description: "" },
+    MetaMethod { name: METH_UNSUBSCRIBE, flags: Flag::None as u32, access: Access::Browse, param: "SubscribeParams", result: "void", description: "" },
+    MetaMethod { name: METH_SUBSCRIPTIONS, flags: Flag::None as u32, access: Access::Browse, param: "void", result: "List", description: "" },
 ];
 const METH_INFO: &str = "info";
 pub const METH_SUBSCRIBE: &str = "subscribe";
 pub const METH_UNSUBSCRIBE: &str = "unsubscribe";
-pub const METH_SUBSCRIBTIONS: &str = "subscriptions";
+pub const METH_SUBSCRIPTIONS: &str = "subscriptions";
 
 pub(crate) struct AppBrokerCurrentClientNode {}
 impl ShvNode<BrokerCommand> for AppBrokerCurrentClientNode {
@@ -102,7 +103,7 @@ impl ShvNode<BrokerCommand> for AppBrokerCurrentClientNode {
                     }
                 }
             }
-            Some(METH_SUBSCRIBTIONS) => {
+            Some(METH_SUBSCRIPTIONS) => {
                 RequestCommand::<BrokerCommand>::Custom(BrokerCommand::Subscriptions)
             }
             _ => {

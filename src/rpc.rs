@@ -38,10 +38,7 @@ impl Subscription {
         Self::new(paths, methods)
     }
     pub fn to_rpcvalue(&self) -> RpcValue {
-        let mut m = Map::new();
-        m.insert("paths".into(), self.paths.as_str().into());
-        m.insert("methods".into(), self.methods.as_str().into());
-        RpcValue::from(m)
+        Self::path_method_to_rpcvalue(self.paths.as_str(), self.methods.as_str())
     }
     pub fn to_string(&self) -> String {
         format!("{}:{}", self.paths.as_str(), self.methods.as_str())
@@ -51,6 +48,12 @@ impl Subscription {
         let paths = it.next().unwrap_or("");
         let methods = it.next().unwrap_or("");
         (paths, methods)
+    }
+    pub fn path_method_to_rpcvalue(path: &str, method: &str) -> RpcValue {
+        let mut m = Map::new();
+        m.insert("paths".into(), path.into());
+        m.insert("methods".into(), method.into());
+        RpcValue::from(m)
     }
 }
 impl Display for Subscription {
