@@ -7,6 +7,10 @@ use crate::metamethod::Access;
 use crate::rpcframe::RpcFrame;
 use crate::rpcmessage::{RpcError, RpcErrorCode};
 
+pub const DOT_LOCAL_GRANT: &str = "dot-local";
+pub const DOT_LOCAL_DIR: &str = ".local";
+pub const DOT_LOCAL_HACK: &str = "dot-local-hack";
+
 pub enum DirParam {
     Brief,
     Full,
@@ -86,7 +90,12 @@ pub fn process_local_dir_ls<V,K>(mounts: &BTreeMap<String, V>, frame: &RpcFrame)
         return None
     }
     let shv_path = frame.shv_path().unwrap_or_default();
-    let children_on_path = children_on_path(&mounts, shv_path);
+    let mut children_on_path = children_on_path(&mounts, shv_path);
+    if let Some(children_on_path) = children_on_path.as_mut() {
+        if frame.meta.get(DOT_LOCAL_HACK).is_some() {
+            children_on_path.insert(0, DOT_LOCAL_DIR.into());
+        }
+    }
     let mount = find_longest_prefix(mounts, &shv_path);
     let is_mount_point = mount.is_some();
     let is_leaf = match &children_on_path {
@@ -109,16 +118,13 @@ pub fn process_local_dir_ls<V,K>(mounts: &BTreeMap<String, V>, frame: &RpcFrame)
     if method == METH_LS && !is_leaf {
         // ls on not-leaf node must be resolved locally
         if let Ok(rpcmsg) = frame.to_rpcmesage() {
-            let ls = ls(&mounts, shv_path, rpcmsg.param().into());
+            let ls = ls_children_to_result(children_on_path, rpcmsg.param().into());
             return Some(ls)
         } else {
             return Some(RequestCommand::Error(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
         }
     }
     None
-}
-fn ls<V, K>(mounts: &BTreeMap<String, V>, shv_path: &str, param: LsParam) -> RequestCommand<K> {
-    ls_children_to_result(children_on_path(mounts, shv_path), param)
 }
 fn ls_children_to_result<K>(children: Option<Vec<String>>, param: LsParam) -> RequestCommand<K> {
     match param {
@@ -234,9 +240,8 @@ pub trait ShvNode<K> {
         let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
             let level_str = rq.access().unwrap_or_default();
-            match Access::from_str(level_str) {
-                None => { return false }
-                Some(rq_level) => {
+            for level_str in level_str.split(',') {
+                if let Some(rq_level) = Access::from_str(level_str) {
                     let method = rq.method().unwrap_or_default();
                     for mm in self.methods().into_iter() {
                         if mm.name == method {

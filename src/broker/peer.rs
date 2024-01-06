@@ -9,7 +9,7 @@ use url::Url;
 use crate::{client, RpcMessage, RpcMessageMetaTags, RpcValue};
 use crate::client::LoginParams;
 use crate::rpcframe::RpcFrame;
-use crate::shvnode::METH_PING;
+use crate::shvnode::{DOT_LOCAL_DIR, DOT_LOCAL_GRANT, DOT_LOCAL_HACK, METH_PING};
 use crate::util::{join_path, login_from_url, sha1_hash};
 use crate::broker::{PeerToBrokerMessage, LoginResult, BrokerToPeerMessage, PeerKind};
 use crate::broker::config::ParentBrokerConfig;
@@ -20,7 +20,7 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<PeerToBroker
     let (socket_reader, mut writer) = (&stream, &stream);
     let (peer_writer, peer_reader) = channel::unbounded::<BrokerToPeerMessage>();
 
-    broker_writer.send(PeerToBrokerMessage::NewPeer { client_id, sender: peer_writer, peer_kind: PeerKind::Client }).await.unwrap();
+    broker_writer.send(PeerToBrokerMessage::NewPeer { client_id, sender: peer_writer, peer_kind: PeerKind::Client }).await?;
 
     //let stream_wr = stream.clone();
     let mut brd = BufReader::new(socket_reader);
@@ -201,7 +201,7 @@ pub(crate) async fn parent_broker_peer_loop_with_reconnect(client_id: i32, confi
     }
 }
 
-pub(crate) async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, broker_writer: Sender<PeerToBrokerMessage>) -> crate::Result<()> {
+async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, broker_writer: Sender<PeerToBrokerMessage>) -> crate::Result<()> {
     let url = Url::parse(&config.client.url)?;
     let (scheme, host, port) = (url.scheme(), url.host_str().unwrap_or_default(), url.port().unwrap_or(3755));
     if scheme != "tcp" {
@@ -253,13 +253,31 @@ pub(crate) async fn parent_broker_peer_loop(client_id: i32, config: ParentBroker
                 }
                 Ok(Some(mut frame)) => {
                     if frame.is_request() {
-                        let shv_path = frame.shv_path().unwrap_or_default();
+                        fn is_dot_local_granted(frame: &RpcFrame) -> bool {
+                                let access = frame.access().unwrap_or_default();
+                                access.split(',').find(|s| *s == DOT_LOCAL_GRANT).is_some()
+                        }
+                        fn is_dot_local_request(frame: &RpcFrame) -> bool {
+                            let shv_path = frame.shv_path().unwrap_or_default();
+                            if shv_path.starts_with(DOT_LOCAL_DIR)&& (shv_path.len() == DOT_LOCAL_DIR.len() || shv_path[DOT_LOCAL_DIR.len() ..].starts_with('/')) {
+                                return is_dot_local_granted(frame);
+                            }
+                            false
+                        }
+                        let shv_path = frame.shv_path().unwrap_or_default().to_owned();
                         let shv_path = if shv_path.starts_with("/") {
                             // parent broker can send requests with absolute path
                             // to call subscribe(), rejectNotSubscribe() etc.
                             shv_path[1 ..].to_string()
+                        } else if is_dot_local_request(&frame) {
+                            let shv_path = &shv_path[DOT_LOCAL_DIR.len() ..];
+                            let shv_path = if shv_path.starts_with('/') { &shv_path[1 ..] } else { shv_path };
+                            shv_path.to_string()
                         } else {
-                            join_path(&config.exported_root, shv_path)
+                            if shv_path.is_empty() && is_dot_local_granted(&frame) {
+                                frame.meta.insert(DOT_LOCAL_HACK, true.into());
+                            }
+                            join_path(&config.exported_root, &shv_path)
                         };
                         frame.set_shvpath(&shv_path);
                         broker_writer.send(PeerToBrokerMessage::FrameReceived { client_id, frame }).await.unwrap();

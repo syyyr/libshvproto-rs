@@ -1,7 +1,7 @@
 use crate::metamethod::{Access, Flag, MetaMethod};
 use crate::{RpcMessage, RpcMessageMetaTags};
-use crate::rpc::Subscription;
-use crate::rpcmessage::{CliId, RpcError};
+use crate::rpc::{Subscription};
+use crate::rpcmessage::{CliId};
 use crate::shvnode::{RequestCommand, ShvNode};
 
 const METH_CLIENT_INFO: &str = "clientInfo";
@@ -17,7 +17,7 @@ const APP_BROKER_METHODS: [MetaMethod; 5] = [
     MetaMethod { name: METH_MOUNTS, param: "void", result: "List[String]", access: Access::SuperService, flags: Flag::None as u32, description: "" },
     MetaMethod { name: METH_DISCONNECT_CLIENT, param: "Int", result: "void", access: Access::SuperService, flags: Flag::None as u32, description: "" },
 ];
-pub enum BrokerCommand {
+pub enum BrokerNodeCommand {
     ClientInfo(CliId),
     MountedClientInfo(String),
     Clients,
@@ -29,33 +29,33 @@ pub enum BrokerCommand {
     Subscriptions,
 }
 pub(crate) struct AppBrokerNode {}
-impl ShvNode<BrokerCommand> for AppBrokerNode {
+impl ShvNode<BrokerNodeCommand> for AppBrokerNode {
     fn defined_methods(&self) -> Vec<&MetaMethod> {
         APP_BROKER_METHODS.iter().collect()
     }
 
-    fn process_request(&mut self, rq: &RpcMessage) -> RequestCommand<BrokerCommand> {
+    fn process_request(&mut self, rq: &RpcMessage) -> RequestCommand<BrokerNodeCommand> {
         match rq.method() {
             Some(METH_CLIENT_INFO) => {
                 let client_id = rq.param().unwrap_or_default().as_i32();
-                RequestCommand::<BrokerCommand>::Custom(BrokerCommand::ClientInfo(client_id))
+                RequestCommand::<BrokerNodeCommand>::Custom(BrokerNodeCommand::ClientInfo(client_id))
             }
             Some(METH_MOUNTED_CLIENT_INFO) => {
                 let mount_point = rq.param().unwrap_or_default().as_str();
-                RequestCommand::<BrokerCommand>::Custom(BrokerCommand::MountedClientInfo(mount_point.to_owned()))
+                RequestCommand::<BrokerNodeCommand>::Custom(BrokerNodeCommand::MountedClientInfo(mount_point.to_owned()))
             }
             Some(METH_CLIENTS) => {
-                RequestCommand::<BrokerCommand>::Custom(BrokerCommand::Clients)
+                RequestCommand::<BrokerNodeCommand>::Custom(BrokerNodeCommand::Clients)
             }
             Some(METH_MOUNTS) => {
-                RequestCommand::<BrokerCommand>::Custom(BrokerCommand::Mounts)
+                RequestCommand::<BrokerNodeCommand>::Custom(BrokerNodeCommand::Mounts)
             }
             Some(METH_DISCONNECT_CLIENT) => {
                 let client_id = rq.param().unwrap_or_default().as_i32();
-                RequestCommand::<BrokerCommand>::Custom(BrokerCommand::DisconnectClient(client_id))
+                RequestCommand::<BrokerNodeCommand>::Custom(BrokerNodeCommand::DisconnectClient(client_id))
             }
             _ => {
-                ShvNode::<BrokerCommand>::process_dir_ls(self, rq)
+                ShvNode::<BrokerNodeCommand>::process_dir_ls(self, rq)
             }
         }
     }
@@ -73,41 +73,29 @@ pub const METH_UNSUBSCRIBE: &str = "unsubscribe";
 pub const METH_SUBSCRIPTIONS: &str = "subscriptions";
 
 pub(crate) struct AppBrokerCurrentClientNode {}
-impl ShvNode<BrokerCommand> for AppBrokerCurrentClientNode {
+impl ShvNode<BrokerNodeCommand> for AppBrokerCurrentClientNode {
     fn defined_methods(&self) -> Vec<&MetaMethod> {
         APP_BROKER_CURRENT_CLIENT_METHODS.iter().collect()
     }
 
-    fn process_request(&mut self, rq: &RpcMessage) -> RequestCommand<BrokerCommand> {
+    fn process_request(&mut self, rq: &RpcMessage) -> RequestCommand<BrokerNodeCommand> {
         match rq.method() {
             Some(METH_INFO) => {
-                RequestCommand::<BrokerCommand>::Custom(BrokerCommand::CurrentClientInfo)
+                RequestCommand::<BrokerNodeCommand>::Custom(BrokerNodeCommand::CurrentClientInfo)
             }
             Some(METH_SUBSCRIBE) => {
-                match Subscription::from_rpcvalue(rq.param().unwrap_or_default()) {
-                    Ok(subscription) => {
-                        RequestCommand::<BrokerCommand>::Custom(BrokerCommand::Subscribe(subscription))
-                    }
-                    Err(err) => {
-                        RequestCommand::Error(RpcError{ code: crate::rpcmessage::RpcErrorCode::InvalidParam, message: err.to_string() })
-                    }
-                }
+                let subscription = Subscription::from_rpcvalue(rq.param().unwrap_or_default());
+                RequestCommand::<BrokerNodeCommand>::Custom(BrokerNodeCommand::Subscribe(subscription))
             }
             Some(METH_UNSUBSCRIBE) => {
-                match Subscription::from_rpcvalue(rq.param().unwrap_or_default()) {
-                    Ok(subscription) => {
-                        RequestCommand::<BrokerCommand>::Custom(BrokerCommand::Unsubscribe(subscription))
-                    }
-                    Err(err) => {
-                        RequestCommand::Error(RpcError{ code: crate::rpcmessage::RpcErrorCode::InvalidParam, message: err.to_string() })
-                    }
-                }
+                let subscription = Subscription::from_rpcvalue(rq.param().unwrap_or_default());
+                RequestCommand::<BrokerNodeCommand>::Custom(BrokerNodeCommand::Unsubscribe(subscription))
             }
             Some(METH_SUBSCRIPTIONS) => {
-                RequestCommand::<BrokerCommand>::Custom(BrokerCommand::Subscriptions)
+                RequestCommand::<BrokerNodeCommand>::Custom(BrokerNodeCommand::Subscriptions)
             }
             _ => {
-                ShvNode::<BrokerCommand>::process_dir_ls(self, rq)
+                ShvNode::<BrokerNodeCommand>::process_dir_ls(self, rq)
             }
         }
     }

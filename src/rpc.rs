@@ -3,12 +3,63 @@ use glob::Pattern;
 use crate::RpcValue;
 use crate::Map;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Subscription {
+    pub paths: String,
+    pub methods: String,
+}
+impl Subscription {
+    pub fn new(paths: &str, methods: &str) -> Self {
+        let methods = if methods.is_empty() { "?*" } else { methods };
+        Self {
+            paths: paths.to_string(),
+            methods: methods.to_string(),
+        }
+    }
+    pub fn split(subscr: &str) -> (&str, &str) {
+        match subscr.find(':') {
+            None => { (subscr, "?*") }
+            Some(ix) => {
+                let methods = &subscr[ix+1 ..];
+                let methods = if methods.is_empty() { "?*" } else { methods };
+                (&subscr[0 .. ix], methods)
+            }
+        }
+    }
+    pub fn from_str(subscription: &str) -> Self {
+        let (paths, methods) = Self::split(subscription);
+        Self::new(paths, methods)
+    }
+    pub fn from_rpcvalue(value: &RpcValue) -> Self {
+        let m = value.as_map();
+        let methods = m.get("method").unwrap_or(m.get("methods").unwrap_or_default()).as_str();
+        let paths = m.get("path").unwrap_or(m.get("paths").unwrap_or_default()).as_str();
+        Self::new(paths, methods)
+    }
+
+    pub fn to_rpcvalue(self) -> RpcValue {
+        let mut m = Map::new();
+        m.insert("paths".into(), self.paths.into());
+        m.insert("methods".into(), self.methods.into());
+        RpcValue::from(m)
+    }
+    pub fn to_string(&self) -> String {
+        format!("{}:{}", self.paths, self.methods)
+    }
+
+}
+impl Display for Subscription {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.paths, self.methods)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct SubscriptionPattern {
     pub paths: Pattern,
     pub methods: Pattern,
 }
-impl Subscription {
+impl SubscriptionPattern {
     pub fn new(paths: &str, methods: &str) -> crate::Result<Self> {
         // empty path matches SHV root, for example 'lschng' on root can signalize new service
         //let paths = if paths.is_empty() { "**" } else { paths };
@@ -31,37 +82,34 @@ impl Subscription {
     pub fn match_shv_method(&self, path: &str, method: &str) -> bool {
         self.paths.matches(path) && self.methods.matches(method)
     }
-    pub fn from_rpcvalue(value: &RpcValue) -> crate::Result<Subscription> {
+    pub fn from_rpcvalue(value: &RpcValue) -> crate::Result<Self> {
         let m = value.as_map();
         let methods = m.get("method").unwrap_or(m.get("methods").unwrap_or_default()).as_str();
         let paths = m.get("path").unwrap_or(m.get("paths").unwrap_or_default()).as_str();
         Self::new(paths, methods)
     }
+    pub fn from_subscription(subscription: &Subscription) -> crate::Result<Self> {
+        Ok(Self::new(&subscription.paths, &subscription.methods)?)
+    }
     pub fn to_rpcvalue(&self) -> RpcValue {
-        Self::path_method_to_rpcvalue(self.paths.as_str(), self.methods.as_str())
+        self.as_subscription().to_rpcvalue()
     }
-    pub fn to_string(&self) -> String {
-        format!("{}:{}", self.paths.as_str(), self.methods.as_str())
+    pub fn as_subscription(&self) -> Subscription {
+        Subscription::new(self.paths.as_str(), self.methods.as_str())
     }
-    pub fn split_str(s: &str) -> (&str, &str) {
-        let mut it = s.split(':');
-        let paths = it.next().unwrap_or("");
-        let methods = it.next().unwrap_or("");
-        (paths, methods)
-    }
-    pub fn path_method_to_rpcvalue(path: &str, method: &str) -> RpcValue {
-        let mut m = Map::new();
-        m.insert("paths".into(), path.into());
-        m.insert("methods".into(), method.into());
-        RpcValue::from(m)
-    }
+    //pub fn split_str(s: &str) -> (&str, &str) {
+    //    let mut it = s.split(':');
+    //    let paths = it.next().unwrap_or("");
+    //    let methods = it.next().unwrap_or("");
+    //    (paths, methods)
+    //}
 }
-impl Display for Subscription {
+impl Display for SubscriptionPattern {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}", self.paths.as_str(), self.methods.as_str())
     }
 }
-impl Into<RpcValue> for Subscription {
+impl Into<RpcValue> for SubscriptionPattern {
     fn into(self) -> RpcValue {
         let mut map = Map::new();
         map.insert("paths".to_string(), self.paths.as_str().into());

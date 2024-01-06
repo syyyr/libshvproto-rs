@@ -71,7 +71,7 @@ impl RpcMessage {
         match self.key(Key::Result as i32) {
             None => {
                 match self.error() {
-                    None => {Err(RpcError{ code: RpcErrorCode::InternalError, message: "Invalid result".to_string() })}
+                    None => {Err(RpcError{ code: RpcErrorCode::InternalError, message: "Neither result nor error key found ins RPC response.".to_string() })}
                     Some(err) => {Err(err)}
                 }
             }
@@ -339,10 +339,10 @@ impl RpcMessageMetaTags for MetaMap {
 #[derive(Copy, Clone, Debug)]
 pub enum RpcErrorCode {
     NoError = 0,
-    InvalidRequest,	// The JSON sent is not a valid Request object.
+    InvalidRequest,	// The data sent is not a valid Request object.
     MethodNotFound,	// The method does not exist / is not available.
     InvalidParam,		// Invalid method parameter(s).
-    InternalError,		// Internal JSON-RPC error.
+    InternalError,		// Internal RPC error.
     ParseError,		// Invalid JSON was received by the server. An error occurred on the server while parsing the JSON text.
     MethodCallTimeout,
     MethodCallCancelled,

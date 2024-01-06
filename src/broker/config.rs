@@ -123,7 +123,7 @@ impl Default for BrokerConfig {
                     ("su".to_string(), Role {
                         roles: vec![],
                         access: vec![
-                            AccessRule { paths: "**".to_string(), methods: "".to_string(), grant: "su".to_string() },
+                            AccessRule { paths: "**".to_string(), methods: "".to_string(), grant: "su,dot-local".to_string() },
                         ].into(),
                     }),
                     ("client".to_string(), Role { roles: vec!["ping".to_string(), "subscribe".to_string(), "browse".to_string()], access: vec![] }),
