@@ -7,7 +7,6 @@ use crate::{RpcMessage};
 use crate::shvnode::METH_DIR;
 
 pub(crate) struct PendingBrokerRequest {
-    pub(crate) client_id: CliId,
     pub(crate) request_id: RqId,
     pub(crate) command: BrokerRequestCommand,
 }

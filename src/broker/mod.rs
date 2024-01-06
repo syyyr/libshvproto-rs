@@ -209,7 +209,7 @@ impl Broker {
         let peer = self.peers.get(&client_id).ok_or(format!("Invalid client ID: {client_id}"))?;
         let rqid = request.request_id().ok_or("Missing request ID")?;
         peer.sender.send(BrokerToPeerMessage::SendMessage(request)).await?;
-        self.pending_broker_requests.push(PendingBrokerRequest { client_id, request_id: rqid, command });
+        self.pending_broker_requests.push(PendingBrokerRequest { request_id: rqid, command });
         Ok(())
     }
     async fn process_pending_broker_request(&mut self, response_frame: &RpcFrame) -> crate::Result<()> {
@@ -676,7 +676,6 @@ pub(crate) async fn broker_loop(peers_messages: Receiver<PeerToBrokerMessage>, a
                         }
                         let client_path = format!(".app/broker/client/{}", client_id);
                         broker.mounts.remove(&client_path);
-                        broker.pending_broker_requests.retain(|call| call.client_id != client_id);
                     }
                     PeerToBrokerMessage::GetPassword { client_id, user } => {
                         let shapwd = broker.sha_password(&user);
