@@ -1,4 +1,5 @@
 use async_std::{channel, task};
+use async_std::channel::unbounded;
 use crate::broker::{Broker, BrokerToPeerMessage, PeerKind, PeerToBrokerMessage, Receiver, Sender};
 use crate::rpcmessage::CliId;
 use crate::{List, RpcMessage, RpcMessageMetaTags, RpcValue};
@@ -45,7 +46,8 @@ async fn call(path: &str, method: &str, param: Option<RpcValue>, ctx: &CallCtx<'
 fn test_broker() {
     let config = BrokerConfig::default();
     let access = config.access.clone();
-    let broker = Broker::new(access);
+    let (broker_command_sender, _broker_command_receiver) = unbounded();
+    let broker = Broker::new(access, broker_command_sender);
     let roles = broker.flatten_roles("child-broker").unwrap();
     assert_eq!(roles, vec!["child-broker", "device", "client", "ping", "subscribe", "browse"]);
 }
