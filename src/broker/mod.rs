@@ -8,13 +8,13 @@ use log::{debug, error, info, Level, log, warn};
 use crate::{List, RpcMessage, RpcMessageMetaTags, RpcValue, rpcvalue, util};
 use crate::rpc::{Subscription, SubscriptionPattern};
 use crate::rpcframe::RpcFrame;
-use crate::rpcmessage::{CliId, RpcError, RpcErrorCode};
+use crate::rpcmessage::{CliId, RpcError, RpcErrorCode, RqId};
 use crate::shvnode::{find_longest_prefix, METH_DIR, process_local_dir_ls, RequestCommand, ShvNode, SIG_CHNG};
 use crate::util::{sha1_hash, split_glob_on_match};
 use crate::broker::node::{BrokerNodeCommand, METH_SUBSCRIBE};
 use async_std::stream::StreamExt;
 use futures::select;
-use crate::broker::call::{BrokerCommand, PropagateSubscriptionsData, RpcCallData};
+use crate::broker::call::{BrokerCommand};
 use futures::FutureExt;
 
 pub mod config;
@@ -177,13 +177,17 @@ fn find_mount<'a, 'b, K>(mounts: &'a mut BTreeMap<String, Mount<K>>, shv_path: &
         None
     }
 }
-
+struct PendingRpcCall {
+    client_id: CliId,
+    request_id: RqId,
+    response_sender: Sender<RpcFrame>,
+}
 struct Broker {
     peers: HashMap<CliId, Peer>,
     mounts: BTreeMap<String, Mount<crate::broker::node::BrokerNodeCommand>>,
     access: AccessControl,
     role_access: HashMap<String, Vec<ParsedAccessRule>>,
-    rpc_calls: Vec<call::RpcCallData>,
+    pending_rpc_calls: Vec<PendingRpcCall>,
     broker_command_sender: Sender<BrokerCommand>,
 }
 
@@ -211,7 +215,7 @@ impl Broker {
             mounts: Default::default(),
             access: access,
             role_access,
-            rpc_calls: vec![],
+            pending_rpc_calls: vec![],
             broker_command_sender,
         }
     }
@@ -220,12 +224,12 @@ impl Broker {
     //    peer.sender.send(BrokerToPeerMessage::SendMessage(message)).await?;
     //    Ok(())
     //}
-    async fn start_broker_rpc_call(&mut self, data: RpcCallData) -> crate::Result<()> {
+    async fn start_broker_rpc_call(&mut self, request: RpcMessage, pending_call: PendingRpcCall) -> crate::Result<()> {
         //self.pending_calls.retain(|r| !r.sender.is_closed());
-        let peer = self.peers.get(&data.client_id).ok_or(format!("Invalid client ID: {}", data.client_id))?;
+        let peer = self.peers.get(&pending_call.client_id).ok_or(format!("Invalid client ID: {}", pending_call.client_id))?;
         // let rqid = data.request.request_id().ok_or("Missing request ID")?;
-        peer.sender.send(BrokerToPeerMessage::SendMessage(data.request.clone())).await?;
-        self.rpc_calls.push(data);
+        peer.sender.send(BrokerToPeerMessage::SendMessage(request)).await?;
+        self.pending_rpc_calls.push(pending_call);
         Ok(())
     }
     async fn process_pending_broker_rpc_call(&mut self, client_id: CliId, response_frame: RpcFrame) -> crate::Result<()> {
@@ -233,23 +237,30 @@ impl Broker {
         assert!(response_frame.caller_ids().is_empty());
         let rqid = response_frame.request_id().ok_or_else(|| "Request ID must be set.")?;
         let mut pending_call_ix = None;
-        for (ix, pc) in self.rpc_calls.iter().enumerate() {
-            if pc.request.request_id().unwrap_or_default() == rqid && pc.client_id == client_id {
+        for (ix, pc) in self.pending_rpc_calls.iter().enumerate() {
+            if pc.request_id == rqid && pc.client_id == client_id {
                 pending_call_ix = Some(ix);
                 break;
             }
         }
         if let Some(ix) = pending_call_ix {
-            let pending_call = self.rpc_calls.remove(ix);
+            let pending_call = self.pending_rpc_calls.remove(ix);
             pending_call.response_sender.send(response_frame).await?;
         }
         Ok(())
     }
     pub async fn process_broker_command(&mut self, broker_command: BrokerCommand) -> crate::Result<()> {
         match broker_command {
-            BrokerCommand::RpcCall(data) => { self.start_broker_rpc_call(data).await }
-            BrokerCommand::SetSubscribePath(data) => { self.set_subscribe_path(data.client_id, data.subscribe_path) }
-            BrokerCommand::PropagateSubscriptions(data) => { self.propagate_subscriptions_to_mounted_device(data.client_id).await }
+            BrokerCommand::RpcCall{ client_id, request, response_sender } => {
+                let rq_id = request.request_id().unwrap_or_default();
+                self.start_broker_rpc_call(request, PendingRpcCall {
+                    client_id,
+                    request_id: rq_id,
+                    response_sender,
+                }).await
+            }
+            BrokerCommand::SetSubscribePath{ client_id, subscribe_path } => { self.set_subscribe_path(client_id, subscribe_path) }
+            BrokerCommand::PropagateSubscriptions{ client_id } => { self.propagate_subscriptions_to_mounted_device(client_id).await }
             //BrokerCommand::CallSubscribe(data) => { self.call_subscribe_async(data.client_id, data.subscriptions) }
         }
     }
@@ -331,35 +342,35 @@ impl Broker {
         task::spawn(async move {
             async fn check_path(client_id: CliId, path: &str, broker_command_sender: &Sender<BrokerCommand>) -> crate::Result<bool> {
                 let (response_sender, response_receiver) = unbounded();
-                let cmd = BrokerCommand::RpcCall(RpcCallData {
+                let cmd = BrokerCommand::RpcCall {
                     client_id,
                     request: RpcMessage::new_request(path, METH_DIR, Some(METH_SUBSCRIBE.into())),
                     response_sender,
-                });
+                };
                 broker_command_sender.send(cmd).await?;
                 let resp = response_receiver.recv().await?.to_rpcmesage()?;
                 if let Ok(val) = resp.result() {
                     if !val.is_null() {
-                        let cmd = BrokerCommand::SetSubscribePath(call::SetSubscribePathData {
+                        let cmd = BrokerCommand::SetSubscribePath {
                             client_id,
                             subscribe_path: SubscribePath::CanSubscribe(path.to_string()),
-                        });
+                        };
                         broker_command_sender.send(cmd).await?;
                         return Ok(true);
                     }
                 }
                 Ok(false)
             }
-            let found_cmd = BrokerCommand::PropagateSubscriptions(PropagateSubscriptionsData{ client_id });
+            let found_cmd = BrokerCommand::PropagateSubscriptions { client_id };
             if let Some(true) = check_path(client_id, ".app/broker/currentClient", &broker_command_sender).await.ok() {
                 let _ = broker_command_sender.send(found_cmd).await;
             } else if let Some(true) = check_path(client_id,".broker/app", &broker_command_sender).await.ok() {
                 let _ = broker_command_sender.send(found_cmd).await;
             } else {
-                let cmd = BrokerCommand::SetSubscribePath(call::SetSubscribePathData {
+                let cmd = BrokerCommand::SetSubscribePath {
                     client_id,
                     subscribe_path: SubscribePath::NotBroker,
-                });
+                };
                 let _ = broker_command_sender.send(cmd).await;
             }
         });
@@ -395,11 +406,11 @@ impl Broker {
         task::spawn(async move {
             async fn call_subscribe(client_id: CliId, subscribe_path: &str, subscription: Subscription, broker_command_sender: &Sender<BrokerCommand>) -> crate::Result<()> {
                 let (response_sender, response_receiver) = unbounded();
-                let cmd = BrokerCommand::RpcCall(RpcCallData {
+                let cmd = BrokerCommand::RpcCall {
                     client_id,
                     request: RpcMessage::new_request(subscribe_path, METH_SUBSCRIBE, Some(subscription.to_rpcvalue())),
                     response_sender,
-                });
+                };
                 broker_command_sender.send(cmd).await?;
                 response_receiver.recv().await?.to_rpcmesage()?;
                 Ok(())
@@ -738,6 +749,7 @@ pub(crate) async fn broker_loop(peers_messages: Receiver<PeerToBrokerMessage>, a
                             }
                             let client_path = format!(".app/broker/client/{}", client_id);
                             broker.mounts.remove(&client_path);
+                            broker.pending_rpc_calls.retain(|c| c.client_id != client_id);
                         }
                         PeerToBrokerMessage::GetPassword { client_id, user } => {
                             let shapwd = broker.sha_password(&user);

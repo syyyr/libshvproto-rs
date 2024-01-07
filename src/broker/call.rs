@@ -4,24 +4,17 @@ use crate::rpcmessage::{CliId};
 use crate::{RpcMessage};
 
 pub enum BrokerCommand {
-    RpcCall(RpcCallData),
-    SetSubscribePath(SetSubscribePathData),
-    PropagateSubscriptions(PropagateSubscriptionsData),
+    RpcCall{
+        client_id: CliId,
+        request: RpcMessage,
+        response_sender: Sender<RpcFrame>,
+    },
+    SetSubscribePath{
+        client_id: CliId,
+        subscribe_path: SubscribePath,
+    },
+    PropagateSubscriptions{
+        client_id: CliId,
+    },
     //CallSubscribe(CallSubscribeData),
-}
-pub(crate) struct SetSubscribePathData {
-    pub(crate) client_id: CliId,
-    pub(crate) subscribe_path: SubscribePath,
-}
-pub(crate) struct PropagateSubscriptionsData {
-    pub(crate) client_id: CliId,
-}
-//pub(crate) struct CallSubscribeData {
-//    pub(crate) client_id: CliId,
-//    pub(crate) subscriptions: Vec<Subscription>,
-//}
-pub(crate) struct RpcCallData {
-    pub(crate) client_id: CliId,
-    pub(crate) request: RpcMessage,
-    pub(crate) response_sender: Sender<RpcFrame>,
 }
