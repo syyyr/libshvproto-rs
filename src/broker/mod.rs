@@ -48,6 +48,12 @@ pub(crate) enum PeerToBrokerMessage {
         device_id: Option<String>,
         mount_point: Option<String>,
     },
+    #[allow(dead_code)]
+    SetSubscribePath {
+        // used for testing, to bypass device discovery RPC Calls
+        client_id: CliId,
+        subscribe_path: SubscribePath,
+    },
     FrameReceived {
         client_id: CliId,
         frame: RpcFrame,
@@ -100,20 +106,20 @@ impl Peer {
         }
         false
     }
-    //pub fn is_broker(&self) -> Option<bool> {
-    //    match &self.subscribe_path {
-    //        None => { None }
-    //        Some(path) => {
-    //            match path {
-    //                SubscribePath::NotBroker => { Some(false) }
-    //                SubscribePath::CanSubscribe(_) => { Some(true) }
-    //            }
-    //        }
-    //    }
-    //}
+    pub fn is_broker(&self) -> crate::Result<bool> {
+        match &self.subscribe_path {
+            None => { Err(format!("Device mounted on: {:?} - not checked for broker capability yet.", self.mount_point).into()) }
+            Some(path) => {
+                match path {
+                    SubscribePath::NotBroker => { Ok(false) }
+                    SubscribePath::CanSubscribe(_) => { Ok(true) }
+                }
+            }
+        }
+    }
     pub fn broker_subscribe_path(&self) -> crate::Result<String> {
         match &self.subscribe_path {
-            None => { Err("Not discovered yet.".into()) }
+            None => { Err(format!("Device mounted on: {:?} - not checked for broker capability yet.", self.mount_point).into()) }
             Some(path) => {
                 match path {
                     SubscribePath::NotBroker => { Err("Not broker".into()) }
@@ -125,7 +131,7 @@ impl Peer {
 }
 
 #[derive(Debug, Clone)]
-enum SubscribePath {
+pub(crate) enum SubscribePath {
     NotBroker,
     CanSubscribe(String),
 }
@@ -266,6 +272,7 @@ impl Broker {
     }
     fn set_subscribe_path(&mut self, client_id: CliId, subscribe_path: SubscribePath) -> crate::Result<()> {
         let peer = self.peers.get_mut(&client_id).ok_or_else(|| format!("Invalid client ID: {client_id}"))?;
+        log!(target: "Subscr", Level::Debug, "Device mounted on: {:?}, client ID: {client_id} has subscribe method path set to: {:?}", peer.mount_point, subscribe_path);
         peer.subscribe_path = Some(subscribe_path);
         Ok(())
     }
@@ -317,20 +324,28 @@ impl Broker {
             } else {
                 warn!("Cannot mount device with invalid client ID: {client_id}");
             }
+        } else {
+            self.set_subscribe_path(client_id, SubscribePath::NotBroker)?;
         };
         Ok(())
     }
-    fn propagate_subscription_to_matching_devices(&mut self, client_id: CliId, new_subscription: &Subscription) -> crate::Result<()> {
+    fn propagate_subscription_to_matching_devices(&mut self, new_subscription: &Subscription) -> crate::Result<()> {
         // compare new_subscription with all mount-points to check
         // whether it should be propagated also to mounted device
         let mut to_subscribe = vec![];
-        for (mount_point, _) in self.mounts.iter() {
-            if let Ok(Some((_local, remote))) = split_glob_on_match(&new_subscription.paths, mount_point) {
-                to_subscribe.push((client_id, Subscription::new(remote, &new_subscription.methods)));
+        for (mount_point, mount) in self.mounts.iter() {
+            if let Mount::Peer(device) = mount {
+                if let Some(peer) = self.peers.get(&device.client_id) {
+                    if peer.is_broker()? {
+                        if let Ok(Some((_local, remote))) = split_glob_on_match(&new_subscription.paths, mount_point) {
+                            to_subscribe.push((device.client_id, Subscription::new(remote, &new_subscription.methods)));
+                        }
+                    }
+                }
             }
         }
-        for (client_id, subcription) in to_subscribe {
-            let to_subscribe = vec![subcription];
+        for (client_id, subscription) in to_subscribe {
+            let to_subscribe = vec![subscription];
             self.call_subscribe_async(client_id, to_subscribe)?;
         }
         Ok(())
@@ -342,9 +357,11 @@ impl Broker {
         task::spawn(async move {
             async fn check_path(client_id: CliId, path: &str, broker_command_sender: &Sender<BrokerCommand>) -> crate::Result<bool> {
                 let (response_sender, response_receiver) = unbounded();
+                let mut request = RpcMessage::new_request(path, METH_DIR, Some(METH_SUBSCRIBE.into()));
+                request.set_access("su");
                 let cmd = BrokerCommand::RpcCall {
                     client_id,
-                    request: RpcMessage::new_request(path, METH_DIR, Some(METH_SUBSCRIBE.into())),
+                    request,
                     response_sender,
                 };
                 broker_command_sender.send(cmd).await?;
@@ -362,7 +379,9 @@ impl Broker {
                 Ok(false)
             }
             let found_cmd = BrokerCommand::PropagateSubscriptions { client_id };
-            if let Some(true) = check_path(client_id, ".app/broker/currentClient", &broker_command_sender).await.ok() {
+            if let Some(true) = check_path(client_id, "/.app/broker/currentClient", &broker_command_sender).await.ok() {
+                let _ = broker_command_sender.send(found_cmd).await;
+            } else if let Some(true) = check_path(client_id, ".app/broker/currentClient", &broker_command_sender).await.ok() {
                 let _ = broker_command_sender.send(found_cmd).await;
             } else if let Some(true) = check_path(client_id,".broker/app", &broker_command_sender).await.ok() {
                 let _ = broker_command_sender.send(found_cmd).await;
@@ -401,7 +420,9 @@ impl Broker {
     }
     fn call_subscribe_async(&mut self, client_id: CliId, subscriptions: Vec<Subscription>) -> crate::Result<()> {
         let peer = self.peers.get_mut(&client_id).ok_or_else(|| format!("Invalid client ID: {client_id}"))?;
+        let mount_point = peer.mount_point.clone();
         let broker_command_sender = self.broker_command_sender.clone();
+        //info!("call_subscribe_async mount: {:?} client_id {:?} subscriptions {:?}", mount_point, client_id, subscriptions);
         let subscribe_path = peer.broker_subscribe_path()?;
         task::spawn(async move {
             async fn call_subscribe(client_id: CliId, subscribe_path: &str, subscription: Subscription, broker_command_sender: &Sender<BrokerCommand>) -> crate::Result<()> {
@@ -416,6 +437,7 @@ impl Broker {
                 Ok(())
             }
             for subscription in subscriptions {
+                log!(target: "Subscr", Level::Debug, "Propagating subscription {} to client ID: {client_id} mounted on {:?}", subscription, mount_point);
                 let _ = call_subscribe(client_id, &subscribe_path, subscription, &broker_command_sender).await;
             }
         });
@@ -532,7 +554,7 @@ impl Broker {
         log!(target: "Subscr", Level::Debug, "New subscription for client id: {} - {}", client_id, subscription);
         let peer = self.peers.get_mut(&client_id).ok_or_else(|| format!("Invalid client ID: {client_id}"))?;
         peer.subscriptions.push(SubscriptionPattern::from_subscription(subscription)?);
-        self.propagate_subscription_to_matching_devices(client_id, &subscription)?;
+        self.propagate_subscription_to_matching_devices(&subscription)?;
         Ok(())
     }
     fn unsubscribe(&mut self, client_id: CliId, subscription: &Subscription) -> crate::Result<bool> {
@@ -574,8 +596,8 @@ pub(crate) async fn broker_loop(peers_messages: Receiver<PeerToBrokerMessage>, a
                     info!("Peers channel closed, accept loop exited: {}", &e);
                     break;
                 }
-                Ok(event) => {
-                    match event {
+                Ok(message) => {
+                    match message {
                         PeerToBrokerMessage::FrameReceived { client_id, mut frame} => {
                             if frame.is_request() {
                                 type Command = RequestCommand<BrokerNodeCommand>;
@@ -740,6 +762,9 @@ pub(crate) async fn broker_loop(peers_messages: Receiver<PeerToBrokerMessage>, a
                         PeerToBrokerMessage::RegisterDevice { client_id, device_id, mount_point } => {
                             let _ = broker.mount_device(client_id, device_id, mount_point).await;
                         },
+                        PeerToBrokerMessage::SetSubscribePath {client_id, subscribe_path} => {
+                            let _ = broker.set_subscribe_path(client_id, subscribe_path);
+                        }
                         PeerToBrokerMessage::PeerGone { client_id } => {
                             broker.peers.remove(&client_id);
                             info!("Client id: {} disconnected.", client_id);

@@ -32,6 +32,10 @@ pub(crate) fn main() -> shv::Result<()> {
     }
     logger.init().unwrap();
 
+    log::info!("=====================================================");
+    log::info!("{} starting", std::module_path!());
+    log::info!("=====================================================");
+
     //trace!("trace message");
     //debug!("debug message");
     //info!("info message");

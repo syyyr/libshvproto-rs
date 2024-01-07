@@ -1,6 +1,6 @@
 use async_std::{channel, task};
 use async_std::channel::unbounded;
-use crate::broker::{Broker, BrokerToPeerMessage, PeerKind, PeerToBrokerMessage, Receiver, Sender};
+use crate::broker::{Broker, BrokerToPeerMessage, PeerKind, PeerToBrokerMessage, Receiver, Sender, SubscribePath};
 use crate::rpcmessage::CliId;
 use crate::{List, RpcMessage, RpcMessageMetaTags, RpcValue};
 use crate::broker::config::BrokerConfig;
@@ -75,6 +75,7 @@ async fn test_broker_loop() {
     peer_reader.recv().await.unwrap();
     let register_device = PeerToBrokerMessage::RegisterDevice { client_id, device_id: Some("test-device".into()), mount_point: Default::default() };
     broker_writer.send(register_device).await.unwrap();
+    broker_writer.send(PeerToBrokerMessage::SetSubscribePath { client_id, subscribe_path: SubscribePath::CanSubscribe(".app/broker/currentClient".into())}).await.unwrap();
 
     // device should be mounted as 'shv/dev/test'
     let resp = call("shv/test", "ls", Some("device".into()), &call_ctx).await;

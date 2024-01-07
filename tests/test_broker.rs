@@ -97,7 +97,7 @@ fn test_broker() -> shv::Result<()> {
 
     println!("---broker---: test:ls()");
     assert_eq!(shv_call_child("test", "ls", "")?, vec![RpcValue::from("device")].into());
-    assert_eq!(shv_call_parent("shv/test/child-broker", "ls", "")?, vec![RpcValue::from("device")].into());
+    assert_eq!(shv_call_parent("shv/test/child-broker", "ls", "")?, vec![RpcValue::from(".local"), RpcValue::from("device")].into());
     println!("---broker---: test/device:ls()");
     assert_eq!(shv_call_child("test/device", "ls", "")?, vec![RpcValue::from(".app"), RpcValue::from("number")].into());
     assert_eq!(shv_call_parent("shv/test/child-broker/device", "ls", "")?, vec![RpcValue::from(".app"), RpcValue::from("number")].into());
@@ -115,6 +115,8 @@ fn test_broker() -> shv::Result<()> {
     assert_eq!(shv_call_child(".app/broker", "mounts", "")?, vec![RpcValue::from("test/device")].into());
     {
         println!("====== subscriptions =====");
+        //let info = shv_call_child(".app/broker/currentClient", "info", "")?;
+        //println!("INFO: {info}");
         let calls: Vec<String> = vec![
             r#".app/broker/currentClient:subscribe {"methods": "chng", "paths": "test/**"}"#.into(),
             r#"test/device/number:set 42"#.into(),

@@ -26,7 +26,7 @@ struct Opts {
     method: Option<String>,
     #[arg(short = 'a', long = "param")]
     param: Option<String>,
-    /// Output format: [ cpon | chainpack | simple | value ], default is 'cpon'
+    /// Output format: [ cpon | chainpack | simple | value ]
     #[arg(short = 'o', long = "output-format", default_value = "cpon")]
     output_format: String,
     /// Verbose mode (module, .)
