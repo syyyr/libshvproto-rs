@@ -113,35 +113,37 @@ fn test_broker() -> shv::Result<()> {
 
     println!("---broker---: .app/broker:mounts()");
     assert_eq!(shv_call_child(".app/broker", "mounts", "")?, vec![RpcValue::from("test/device")].into());
-    {
-        println!("====== subscriptions =====");
+    println!("====== subscriptions =====");
+    fn check_subscription(property_path: &str, subscribe_path: &str, port: i32) -> shv::Result<()> {
         //let info = shv_call_child(".app/broker/currentClient", "info", "")?;
         //println!("INFO: {info}");
         let calls: Vec<String> = vec![
-            r#".app/broker/currentClient:subscribe {"methods": "chng", "paths": "test/**"}"#.into(),
-            r#"test/device/number:set 42"#.into(),
-            r#".app/broker/currentClient:unsubscribe {"methods": "chng", "paths": "test/**"}"#.into(),
-            r#"test/device/number:set 123"#.into(),
+            format!(r#".app/broker/currentClient:subscribe {{"methods": "chng", "paths": "{subscribe_path}"}}"#),
+            format!(r#"{property_path}:set 42"#),
+            format!(r#".app/broker/currentClient:unsubscribe {{"methods": "chng", "paths": "{subscribe_path}"}}"#),
+            format!(r#"{property_path}:set 123"#),
         ];
-        let values = shv_call_many(calls, ShvCallOutputFormat::Simple, Some(3756))?;
-        for v in values.iter() {
-            println!("\t{}", v);
-        }
-        let expected: Vec<&str> = vec![
-            "RES null", // response to subscribe
-            "SIG test/device/number:chng 42", // SIG chng
-            "RES null", // response to SET
-            "RES true", // response to unsubscribe
-            "RES null", // response to SET
+        let values = shv_call_many(calls, ShvCallOutputFormat::Simple, Some(port))?;
+        for v in values.iter() { println!("\t{}", v); }
+        let expected: Vec<String> = vec![
+            "RES null".into(), // response to subscribe
+            format!("SIG {property_path}:chng 42"), // SIG chng
+            "RES null".into(), // response to SET
+            "RES true".into(), // response to unsubscribe
+            "RES null".into(), // response to SET
         ];
         for (no, val) in values.iter().enumerate() {
-            assert_eq!(expected[no], val);
+            assert_eq!(&expected[no], val);
         }
+        Ok(())
     }
+    check_subscription("test/device/number", "test/**", 3756)?;
 
     println!("====== child broker =====");
     assert_eq!(shv_call_parent("shv/test", "ls", r#""child-broker""#)?, RpcValue::from(true));
     assert_eq!(shv_call_parent("shv/test/child-broker/device/.app", "name", "")?, RpcValue::from("device"));
+    assert_eq!(shv_call_parent("shv/test/child-broker/device/number", "get", "")?, RpcValue::from(123));
+    check_subscription("shv/test/child-broker/device/number", "shv/test/**", 3755)?;
 
     Ok(())
 }

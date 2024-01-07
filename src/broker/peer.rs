@@ -201,6 +201,18 @@ pub(crate) async fn parent_broker_peer_loop_with_reconnect(client_id: i32, confi
     }
 }
 
+fn cut_prefix(shv_path: &str, prefix: &str) -> Option<String> {
+    if shv_path.starts_with(prefix) && (shv_path.len() == prefix.len() || shv_path[prefix.len() ..].starts_with('/')) {
+        let shv_path = &shv_path[prefix.len() ..];
+        if shv_path.starts_with('/') {
+            Some(shv_path[1 ..].to_string())
+        } else {
+            Some(shv_path.to_string())
+        }
+    } else {
+        None
+    }
+}
 async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, broker_writer: Sender<PeerToBrokerMessage>) -> crate::Result<()> {
     let url = Url::parse(&config.client.url)?;
     let (scheme, host, port) = (url.scheme(), url.host_str().unwrap_or_default(), url.port().unwrap_or(3755));
@@ -235,7 +247,6 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
 
     let (broker_to_peer_sender, broker_to_peer_receiver) = channel::unbounded::<BrokerToPeerMessage>();
     broker_writer.send(PeerToBrokerMessage::NewPeer { client_id, sender: broker_to_peer_sender, peer_kind: PeerKind::ParentBroker }).await?;
-
     loop {
         let fut_timeout = future::timeout(heartbeat_interval, future::pending::<()>());
         select! {
@@ -303,11 +314,23 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
                         }
                         BrokerToPeerMessage::SendFrame(frame) => {
                             // log!(target: "RpcMsg", Level::Debug, "<---- Send frame, client id: {}", client_id);
+                            let mut frame = frame;
+                            if frame.is_signal() {
+                                if let Some(new_path) = cut_prefix(frame.shv_path().unwrap_or_default(), &config.exported_root) {
+                                    frame.set_shvpath(&new_path);
+                                }
+                            }
                             debug!("Sending rpc frame");
                             frame_writer.send_frame(frame).await?;
                         }
                         BrokerToPeerMessage::SendMessage(rpcmsg) => {
                             // log!(target: "RpcMsg", Level::Debug, "<---- Send message, client id: {}", client_id);
+                            let mut rpcmsg = rpcmsg;
+                            if rpcmsg.is_signal() {
+                                if let Some(new_path) = cut_prefix(rpcmsg.shv_path().unwrap_or_default(), &config.exported_root) {
+                                    rpcmsg.set_shvpath(&new_path);
+                                }
+                            }
                             debug!("Sending rpc message");
                             frame_writer.send_message(rpcmsg).await?;
                         },
@@ -316,5 +339,6 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
             }
         }
     };
+
     Ok(())
 }

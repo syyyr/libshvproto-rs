@@ -259,7 +259,10 @@ impl Broker {
         match broker_command {
             BrokerCommand::RpcCall{ client_id, request, response_sender } => {
                 let rq_id = request.request_id().unwrap_or_default();
-                self.start_broker_rpc_call(request, PendingRpcCall {
+                let mut rq2 = request;
+                // broker calls can have any access level, set 'su' to bypass client access control
+                rq2.set_access("su");
+                self.start_broker_rpc_call(rq2, PendingRpcCall {
                     client_id,
                     request_id: rq_id,
                     response_sender,
@@ -357,8 +360,7 @@ impl Broker {
         task::spawn(async move {
             async fn check_path(client_id: CliId, path: &str, broker_command_sender: &Sender<BrokerCommand>) -> crate::Result<bool> {
                 let (response_sender, response_receiver) = unbounded();
-                let mut request = RpcMessage::new_request(path, METH_DIR, Some(METH_SUBSCRIBE.into()));
-                request.set_access("su");
+                let request = RpcMessage::new_request(path, METH_DIR, Some(METH_SUBSCRIBE.into()));
                 let cmd = BrokerCommand::RpcCall {
                     client_id,
                     request,
