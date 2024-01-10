@@ -74,14 +74,20 @@ pub(crate) fn main() -> shv::Result<()> {
 
     task::block_on(try_main_reconnect(&config))
 }
-
+struct DeviceState {
+    mounts: BTreeMap<String, Box<dyn ShvNode<()>>>,
+}
 async fn try_main_reconnect(config: &ClientConfig) -> shv::Result<()> {
+    let mut device_state = DeviceState { mounts: Default::default() };
+    device_state.mounts.insert(".app".into(), Box::new(AppNode { app_name: "device", ..Default::default() }));
+    device_state.mounts.insert(".app/device".into(), Box::new(AppDeviceNode { device_name: "example", ..Default::default() }));
+    device_state.mounts.insert("number".into(), Box::new(IntPropertyNode{ value: 0 }));
     if let Some(time_str) = &config.reconnect_interval {
         match parse(time_str) {
             Ok(interval) => {
                 info!("Reconnect interval set to: {:?}", interval);
                 loop {
-                    match try_main(config).await {
+                    match try_main(config, &mut device_state).await {
                         Ok(_) => {
                             info!("Finished without error");
                             return Ok(())
@@ -99,10 +105,10 @@ async fn try_main_reconnect(config: &ClientConfig) -> shv::Result<()> {
             }
         }
     } else {
-        try_main(config).await
+        try_main(config, &mut device_state).await
     }
 }
-async fn try_main(config: &ClientConfig) -> shv::Result<()> {
+async fn try_main(config: &ClientConfig, device_state: &mut DeviceState) -> shv::Result<()> {
     let url = Url::parse(&config.url)?;
     let (scheme, host, port) = (url.scheme(), url.host_str().unwrap_or_default(), url.port().unwrap_or(3755));
     if scheme != "tcp" {
@@ -134,10 +140,6 @@ async fn try_main(config: &ClientConfig) -> shv::Result<()> {
     info!("Heartbeat interval set to: {:?}", heartbeat_interval);
     client::login(&mut frame_reader, &mut frame_writer, &login_params).await?;
 
-    let mut mounts: BTreeMap<String, Box<dyn ShvNode<()>>> = BTreeMap::new();
-    mounts.insert(".app".into(), Box::new(AppNode { app_name: "device", ..Default::default() }));
-    mounts.insert(".app/device".into(), Box::new(AppDeviceNode { device_name: "example", ..Default::default() }));
-    mounts.insert("number".into(), Box::new(IntPropertyNode{ value: 0 }));
     loop {
         let fut_receive_frame = frame_reader.receive_frame();
         match future::timeout(heartbeat_interval, fut_receive_frame).await {
@@ -156,12 +158,12 @@ async fn try_main(config: &ClientConfig) -> shv::Result<()> {
                         if frame.is_request() {
                             if let Ok(mut rpcmsg) = frame.to_rpcmesage() {
                                 let shv_path = frame.shv_path().unwrap_or_default();
-                                let local_result = process_local_dir_ls(&mounts, &frame);
+                                let local_result = process_local_dir_ls(&device_state.mounts, &frame);
                                 type Command = RequestCommand<()>;
                                 let command = match local_result {
                                     None => {
-                                        if let Some((mount, path)) = find_longest_prefix(&mounts, &shv_path) {
-                                            let node = mounts.get_mut(mount).unwrap();
+                                        if let Some((mount, path)) = find_longest_prefix(&device_state.mounts, &shv_path) {
+                                            let node = device_state.mounts.get_mut(mount).unwrap();
                                             rpcmsg.set_shvpath(path);
                                             node.process_request(&rpcmsg)
                                         } else {
