@@ -167,7 +167,7 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<PeerToBroker
             }
         }
     }
-    broker_writer.send(PeerToBrokerMessage::PeerGone { client_id }).await?;
+    broker_writer.send(PeerToBrokerMessage::PeerGone { peer_id: client_id }).await?;
     info!("Client loop exit, client id: {}", client_id);
     Ok(())
 }
