@@ -79,6 +79,13 @@ impl RpcMessage {
         }
     }
     pub fn set_result(&mut self, rv: RpcValue) -> &mut Self { self.set_key(Key::Result, Some(rv)); self }
+    pub fn set_result_or_error(&mut self, result: Result<RpcValue, RpcError>) -> &mut Self {
+        match result {
+            Ok(val) => { self.set_result(val) }
+            Err(err) => { self.set_error(err) }
+        };
+        self
+    }
     pub fn error(&self) -> Option<RpcError> {
         if let Some(rv) = self.key(Key::Error as i32) {
             return RpcError::from_rpcvalue(rv)
@@ -398,10 +405,10 @@ pub struct RpcError {
 enum RpcErrorKey { Code = 1, Message }
 
 impl RpcError {
-    pub fn new(code: RpcErrorCode, msg: &str) -> Self {
+    pub fn new(code: RpcErrorCode, msg: String) -> Self {
         RpcError {
             code,
-            message: msg.into(),
+            message: msg,
         }
     }
     pub fn from_rpcvalue(rv: &RpcValue) -> Option<Self> {

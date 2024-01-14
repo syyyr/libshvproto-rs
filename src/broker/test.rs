@@ -1,16 +1,16 @@
 use async_std::{channel, task};
-use async_std::channel::unbounded;
-use crate::broker::{BrokerToPeerMessage, PeerKind, PeerToBrokerMessage, Receiver, Sender, SubscribePath};
+use async_std::channel::{Receiver};
+use crate::broker::{BrokerToPeerMessage, PeerKind, BrokerCommand, Sender, SubscribePath};
 use crate::rpcmessage::CliId;
 use crate::{List, RpcMessage, RpcMessageMetaTags, RpcValue};
-use crate::broker::state::State;
+use crate::broker::broker::Broker;
 use crate::broker::config::BrokerConfig;
 use crate::broker::node::{METH_SUBSCRIBE, METH_UNSUBSCRIBE};
 use crate::rpcframe::RpcFrame;
 
 
 struct CallCtx<'a> {
-    writer: &'a Sender<PeerToBrokerMessage>,
+    writer: &'a Sender<BrokerCommand>,
     reader: &'a Receiver<BrokerToPeerMessage>,
     client_id: CliId,
 }
@@ -19,25 +19,29 @@ async fn call(path: &str, method: &str, param: Option<RpcValue>, ctx: &CallCtx<'
     let msg = RpcMessage::new_request(path, method, param);
     let frame = RpcFrame::from_rpcmessage(msg).expect("valid message");
     println!("request: {}", frame.to_rpcmesage().unwrap());
-    ctx.writer.send(PeerToBrokerMessage::FrameReceived { client_id: ctx.client_id, frame }).await.unwrap();
+    ctx.writer.send(BrokerCommand::FrameReceived { client_id: ctx.client_id, frame }).await.unwrap();
     let retval = loop {
-        if let BrokerToPeerMessage::SendMessage(msg) = ctx.reader.recv().await.unwrap() {
-            println!("response: {msg}");
-            if msg.is_response() {
-                match msg.result() {
-                    Ok(retval) => {
-                        break retval.clone();
-                    }
-                    Err(err) => {
-                        panic!("Invalid response received: {err} - {}", msg);
-                    }
+        let msg = ctx.reader.recv().await.unwrap();
+        let msg = match msg {
+            BrokerToPeerMessage::SendFrame(frame) => { frame.to_rpcmesage().unwrap() }
+            BrokerToPeerMessage::SendMessage(message) => { message }
+            _ => {
+                panic!("unexpected message: {:?}", msg);
+            }
+        };
+        println!("response: {msg}");
+        if msg.is_response() {
+            match msg.result() {
+                Ok(retval) => {
+                    break retval.clone();
                 }
-            } else {
-                // ignore RPC requests which might be issued after subscribe call
-                continue;
+                Err(err) => {
+                    panic!("Invalid response received: {err} - {}", msg);
+                }
             }
         } else {
-            panic!("Response expected");
+            // ignore RPC requests which might be issued after subscribe call
+            continue;
         }
     };
     retval
@@ -47,8 +51,7 @@ async fn call(path: &str, method: &str, param: Option<RpcValue>, ctx: &CallCtx<'
 fn test_broker() {
     let config = BrokerConfig::default();
     let access = config.access.clone();
-    let (broker_command_sender, _broker_command_receiver) = unbounded();
-    let broker = State::new(access, broker_command_sender);
+    let broker = Broker::new(access);
     let roles = broker.flatten_roles("child-broker").unwrap();
     assert_eq!(roles, vec!["child-broker", "device", "client", "ping", "subscribe", "browse"]);
 }
@@ -57,26 +60,29 @@ fn test_broker() {
 async fn test_broker_loop() {
     let config = BrokerConfig::default();
     let access = config.access.clone();
-    let (broker_writer, broker_reader) = channel::unbounded();
-    //let parent_broker_peer_config = config.parent_broker.clone();
-    let broker_task = task::spawn(crate::broker::broker_loop(broker_reader, access));
+    let broker = Broker::new(access);
+    let broker_sender = broker.command_sender.clone();
+    let broker_task = task::spawn(crate::broker::broker_loop(broker));
 
     let (peer_writer, peer_reader) = channel::unbounded::<BrokerToPeerMessage>();
     let client_id = 2;
 
     let call_ctx = CallCtx {
-        writer: &broker_writer,
+        writer: &broker_sender,
         reader: &peer_reader,
         client_id,
     };
 
     // login
-    broker_writer.send(PeerToBrokerMessage::NewPeer { client_id, sender: peer_writer, peer_kind: PeerKind::Client }).await.unwrap();
-    broker_writer.send(PeerToBrokerMessage::GetPassword { client_id, user: "admin".into() }).await.unwrap();
+    broker_sender.send(BrokerCommand::NewPeer { client_id, sender: peer_writer, peer_kind: PeerKind::Client }).await.unwrap();
+    broker_sender.send(BrokerCommand::GetPassword { client_id, user: "admin".into() }).await.unwrap();
     peer_reader.recv().await.unwrap();
-    let register_device = PeerToBrokerMessage::RegisterDevice { client_id, device_id: Some("test-device".into()), mount_point: Default::default() };
-    broker_writer.send(register_device).await.unwrap();
-    broker_writer.send(PeerToBrokerMessage::SetSubscribePath { client_id, subscribe_path: SubscribePath::CanSubscribe(".app/broker/currentClient".into())}).await.unwrap();
+    let register_device = BrokerCommand::RegisterDevice {
+        client_id, device_id: Some("test-device".into()),
+        mount_point: Default::default(),
+        subscribe_path: Some(SubscribePath::CanSubscribe(".app/broker/currentClient".into()))
+    };
+    broker_sender.send(register_device).await.unwrap();
 
     // device should be mounted as 'shv/dev/test'
     let resp = call("shv/test", "ls", Some("device".into()), &call_ctx).await;

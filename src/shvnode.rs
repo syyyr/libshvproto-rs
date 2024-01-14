@@ -10,6 +10,7 @@ use crate::rpcmessage::{RpcError, RpcErrorCode};
 pub const DOT_LOCAL_GRANT: &str = "dot-local";
 pub const DOT_LOCAL_DIR: &str = ".local";
 pub const DOT_LOCAL_HACK: &str = "dot-local-hack";
+pub const DIR_APP: &str = ".app";
 
 pub enum DirParam {
     Brief,
@@ -84,7 +85,8 @@ impl From<Option<&RpcValue>> for LsParam {
     }
 }
 
-pub fn process_local_dir_ls<V,K>(mounts: &BTreeMap<String, V>, frame: &RpcFrame) -> Option<RequestCommand<K>> {
+
+pub fn process_local_dir_ls<V>(mounts: &BTreeMap<String, V>, frame: &RpcFrame) -> Option<Result<RpcValue, RpcError>> {
     let method = frame.method().unwrap_or_default();
     if !(method == METH_DIR || method == METH_LS) {
         return None
@@ -104,15 +106,15 @@ pub fn process_local_dir_ls<V,K>(mounts: &BTreeMap<String, V>, frame: &RpcFrame)
     };
     if children_on_path.is_none() && !is_mount_point {
         // path doesn't exist
-        return Some(RequestCommand::Error(RpcError::new(RpcErrorCode::MethodNotFound, &format!("Invalid shv path: {}", shv_path))))
+        return Some(Err(RpcError::new(RpcErrorCode::MethodNotFound, format!("Invalid shv path: {}", shv_path))))
     }
     if method == METH_DIR && !is_mount_point {
         // dir in the middle of the tree must be resolved locally
         if let Ok(rpcmsg) = frame.to_rpcmesage() {
             let dir = dir(DIR_LS_METHODS.iter().into_iter(), rpcmsg.param().into());
-            return Some(RequestCommand::Result(dir))
+            return Some(Ok(dir))
         } else {
-            return Some(RequestCommand::Error(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
+            return Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, format!("Cannot convert RPC frame to Rpc message"))))
         }
     }
     if method == METH_LS && !is_leaf {
@@ -121,31 +123,31 @@ pub fn process_local_dir_ls<V,K>(mounts: &BTreeMap<String, V>, frame: &RpcFrame)
             let ls = ls_children_to_result(children_on_path, rpcmsg.param().into());
             return Some(ls)
         } else {
-            return Some(RequestCommand::Error(RpcError::new(RpcErrorCode::InvalidRequest, &format!("Cannot convert RPC frame to Rpc message"))))
+            return Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, format!("Cannot convert RPC frame to Rpc message"))))
         }
     }
     None
 }
-fn ls_children_to_result<K>(children: Option<Vec<String>>, param: LsParam) -> RequestCommand<K> {
+fn ls_children_to_result(children: Option<Vec<String>>, param: LsParam) -> Result<RpcValue, RpcError> {
     match param {
         LsParam::List => {
             match children {
                 None => {
-                    RequestCommand::Error(RpcError::new(RpcErrorCode::MethodCallException, "Invalid shv path"))
+                    Err(RpcError::new(RpcErrorCode::MethodCallException, "Invalid shv path".into()))
                 }
                 Some(dirs) => {
                     let res: rpcvalue::List = dirs.iter().map(|d| RpcValue::from(d)).collect();
-                    RequestCommand::Result(res.into())
+                    Ok(res.into())
                 }
             }
         }
         LsParam::Exists(path) => {
             match children {
                 None => {
-                    RequestCommand::Result(false.into())
+                    Ok(false.into())
                 }
                 Some(children) => {
-                    RequestCommand::Result(children.contains(&path).into())
+                    Ok(children.contains(&path).into())
                 }
             }
         }
@@ -221,80 +223,75 @@ pub fn find_longest_prefix<'a, 'b, V>(map: &'a BTreeMap<String, V>, shv_path: &'
     None
 }
 
-pub enum RequestCommand<K> {
-    Noop,
-    Result(RpcValue),
-    PropertyChanged(RpcValue),
-    Error(RpcError),
-    Custom(K),
+//pub enum RequestCommand<K> {
+//    Noop,
+//    Result(RpcValue),
+//    PropertyChanged(RpcValue),
+//    Error(RpcError),
+//    Custom(K),
+//}
+pub struct ShvNode {
+    pub(crate) methods: Vec<&'static MetaMethod>,
 }
-pub trait ShvNode<K> {
-    fn common_methods(&self) -> Vec<& MetaMethod> {
-        DIR_LS_METHODS.iter().collect()
-    }
-    fn defined_methods(&self) -> Vec<&MetaMethod>;
-    fn methods(&self) -> Vec<&MetaMethod> {
-        self.common_methods().into_iter().chain(self.defined_methods().into_iter()).collect()
-    }
-    fn is_request_granted(&self, rq: &RpcMessage) -> bool {
+impl ShvNode {
+    pub(crate) fn is_request_granted(&self, rq: &RpcFrame) -> Option<&'static MetaMethod> {
         let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
             let level_str = rq.access().unwrap_or_default();
             for level_str in level_str.split(',') {
                 if let Some(rq_level) = Access::from_str(level_str) {
                     let method = rq.method().unwrap_or_default();
-                    for mm in self.methods().into_iter() {
+                    for mm in &self.methods {
                         if mm.name == method {
-                            return rq_level >= mm.access
+                            return if rq_level >= mm.access { Some(*mm) } else { None }
                         }
                     }
                 }
             }
         }
-        false
+        None
     }
-    fn process_request(&mut self, rq: &RpcMessage) -> RequestCommand<K>;
-    fn process_dir_ls(&mut self, rq: &RpcMessage) -> RequestCommand<K> {
-        match rq.method() {
-            Some(METH_DIR) => {
-                self.process_dir(rq)
-            }
-            Some(METH_LS) => {
-                self.process_ls(rq)
-            }
-            _ => {
-                let errmsg = format!("Unknown method '{}:{}()', path.", rq.shv_path().unwrap_or_default(), rq.method().unwrap_or_default());
-                warn!("{}", &errmsg);
-                RequestCommand::Error(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
-            }
-        }
-    }
-    fn process_dir(&mut self, rq: &RpcMessage) -> RequestCommand<K> {
+    //fn process_dir_ls(&mut self, rq: &RpcMessage) -> RequestCommand<K> {
+    //    match rq.method() {
+    //        Some(METH_DIR) => {
+    //            self.process_dir(rq)
+    //        }
+    //        Some(METH_LS) => {
+    //            self.process_ls(rq)
+    //        }
+    //        _ => {
+    //            let errmsg = format!("Unknown method '{}:{}()', path.", rq.shv_path().unwrap_or_default(), rq.method().unwrap_or_default());
+    //            warn!("{}", &errmsg);
+    //            RequestCommand::Error(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
+    //        }
+    //    }
+    //}
+    pub fn process_dir(&self, rq: &RpcMessage) -> Result<RpcValue, RpcError> {
         let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
-            let resp = dir(self.methods().into_iter(), rq.param().into());
-            RequestCommand::Result(resp)
+            let resp = dir(self.methods.clone().into_iter(), rq.param().into());
+            Ok(resp)
         } else {
             let errmsg = format!("Unknown method '{}:{}()', invalid path.", rq.shv_path().unwrap_or_default(), rq.method().unwrap_or_default());
             warn!("{}", &errmsg);
-            RequestCommand::Error(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
+            Err(RpcError::new(RpcErrorCode::MethodNotFound, errmsg))
         }
     }
-    fn process_ls(&mut self, rq: &RpcMessage) -> RequestCommand<K> {
+    pub fn process_ls(&self, rq: &RpcMessage) -> Result<RpcValue, RpcError> {
         let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
             match LsParam::from(rq.param()) {
                 LsParam::List => {
-                    RequestCommand::Result(rpcvalue::List::new().into())
+                    Ok(rpcvalue::List::new().into())
                 }
                 LsParam::Exists(_path) => {
-                    RequestCommand::Result(false.into())
+                    Ok(false.into())
                 }
             }
         } else {
             let errmsg = format!("Unknown method '{}:{}()', invalid path.", rq.shv_path().unwrap_or_default(), rq.method().unwrap_or(""));
             warn!("{}", &errmsg);
-            RequestCommand::Error(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
+            Err(RpcError::new(RpcErrorCode::MethodNotFound, errmsg))
         }
     }
 }
@@ -311,10 +308,14 @@ pub const METH_PING: &str = "ping";
 pub const METH_VERSION: &str = "version";
 pub const METH_SERIAL_NUMBER: &str = "serialNumber";
 
+pub const META_METHOD_DIR: MetaMethod = MetaMethod { name: METH_DIR, flags: Flag::None as u32, access: Access::Browse, param: "DirParam", result: "DirResult", description: "" };
+pub const META_METHOD_LS: MetaMethod = MetaMethod { name: METH_LS, flags: Flag::None as u32, access: Access::Browse, param: "LsParam", result: "LsResult", description: "" };
+
 pub const DIR_LS_METHODS: [MetaMethod; 2] = [
     MetaMethod { name: METH_DIR, flags: Flag::None as u32, access: Access::Browse, param: "DirParam", result: "DirResult", description: "" },
     MetaMethod { name: METH_LS, flags: Flag::None as u32, access: Access::Browse, param: "LsParam", result: "LsResult", description: "" },
 ];
+/*
 pub const PROPERTY_METHODS: [MetaMethod; 3] = [
     MetaMethod { name: METH_GET, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
     MetaMethod { name: METH_SET, flags: Flag::IsSetter as u32, access: Access::Browse, param: "", result: "", description: "" },
@@ -325,6 +326,7 @@ const DEVICE_METHODS: [MetaMethod; 3] = [
     MetaMethod { name: METH_VERSION, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
     MetaMethod { name: METH_SERIAL_NUMBER, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
 ];
+ */
 pub struct AppNode {
     pub app_name: &'static str,
     pub shv_version_major: i32,
@@ -339,31 +341,38 @@ impl Default for AppNode {
         }
     }
 }
-const APP_METHODS: [MetaMethod; 4] = [
-    MetaMethod { name: METH_SHV_VERSION_MAJOR, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
-    MetaMethod { name: METH_SHV_VERSION_MINOR, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
-    MetaMethod { name: METH_NAME, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" },
-    MetaMethod { name: METH_PING, flags: Flag::None as u32, access: Access::Browse, param: "", result: "", description: "" },
-];
 
-impl<K> ShvNode<K> for AppNode {
-    fn defined_methods(&self) -> Vec<&MetaMethod> {
-        APP_METHODS.iter().collect()
+const META_METH_APP_SHV_VERSION_MAJOR: MetaMethod = MetaMethod { name: METH_SHV_VERSION_MAJOR, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" };
+const META_METH_APP_SHV_VERSION_MINOR: MetaMethod = MetaMethod { name: METH_SHV_VERSION_MINOR, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" };
+const META_METH_APP_NAME: MetaMethod = MetaMethod { name: METH_NAME, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" };
+const META_METH_APP_PING: MetaMethod = MetaMethod { name: METH_PING, flags: Flag::None as u32, access: Access::Browse, param: "", result: "", description: "" };
+
+impl AppNode {
+    pub fn new_shvnode(&self) -> ShvNode {
+        ShvNode { methods: vec![
+            &META_METHOD_DIR,
+            &META_METHOD_LS,
+            &META_METH_APP_SHV_VERSION_MAJOR,
+            &META_METH_APP_SHV_VERSION_MINOR,
+            &META_METH_APP_NAME,
+            &META_METH_APP_PING,
+        ] }
     }
 
-    fn process_request(&mut self, rq: &RpcMessage) -> RequestCommand<K> {
-        if rq.shv_path().unwrap_or_default().is_empty() {
-            match rq.method() {
-                Some(METH_SHV_VERSION_MAJOR) => { return RequestCommand::Result(self.shv_version_major.into())  }
-                Some(METH_SHV_VERSION_MINOR) => { return RequestCommand::Result(self.shv_version_minor.into())  }
-                Some(METH_NAME) => { return RequestCommand::Result(RpcValue::from(self.app_name))  }
-                Some(METH_PING) => { return RequestCommand::Result(().into())  }
-                _ => {}
-            }
-        }
-        <AppNode as ShvNode<K>>::process_dir_ls(self, rq)
-    }
+    //fn process_request(&mut self, rq: &RpcMessage) -> RequestCommand<K> {
+    //    if rq.shv_path().unwrap_or_default().is_empty() {
+    //        match rq.method() {
+    //            Some(METH_SHV_VERSION_MAJOR) => { return RequestCommand::Result(self.shv_version_major.into())  }
+    //            Some(METH_SHV_VERSION_MINOR) => { return RequestCommand::Result(self.shv_version_minor.into())  }
+    //            Some(METH_NAME) => { return RequestCommand::Result(RpcValue::from(self.app_name))  }
+    //            Some(METH_PING) => { return RequestCommand::Result(().into())  }
+    //            _ => {}
+    //        }
+    //    }
+    //    <AppNode as ShvNode<K>>::process_dir_ls(self, rq)
+    //}
 }
+/*
 pub struct AppDeviceNode {
     pub device_name: &'static str,
     pub version: &'static str,
@@ -405,3 +414,5 @@ impl<K> ShvNode<K> for AppDeviceNode {
         ShvNode::<K>::process_dir_ls(self, rq)
     }
 }
+
+ */

@@ -11,16 +11,16 @@ use crate::client::LoginParams;
 use crate::rpcframe::RpcFrame;
 use crate::shvnode::{DOT_LOCAL_DIR, DOT_LOCAL_GRANT, DOT_LOCAL_HACK, METH_PING};
 use crate::util::{join_path, login_from_url, sha1_hash};
-use crate::broker::{PeerToBrokerMessage, LoginResult, BrokerToPeerMessage, PeerKind};
+use crate::broker::{BrokerCommand, LoginResult, BrokerToPeerMessage, PeerKind};
 use crate::broker::config::ParentBrokerConfig;
 use crate::broker::Sender;
 
-pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<PeerToBrokerMessage>, stream: TcpStream) -> crate::Result<()> {
+pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<BrokerCommand>, stream: TcpStream) -> crate::Result<()> {
     debug!("Entreing peer loop client ID: {client_id}.");
     let (socket_reader, mut writer) = (&stream, &stream);
     let (peer_writer, peer_reader) = channel::unbounded::<BrokerToPeerMessage>();
 
-    broker_writer.send(PeerToBrokerMessage::NewPeer { client_id, sender: peer_writer, peer_kind: PeerKind::Client }).await?;
+    broker_writer.send(BrokerCommand::NewPeer { client_id, sender: peer_writer, peer_kind: PeerKind::Client }).await?;
 
     //let stream_wr = stream.clone();
     let mut brd = BufReader::new(socket_reader);
@@ -66,7 +66,7 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<PeerToBroker
             let password = login.get("password").ok_or("Password login param is missing")?.as_str();
             let login_type = login.get("type").map(|v| v.as_str()).unwrap_or("");
 
-            broker_writer.send(PeerToBrokerMessage::GetPassword { client_id, user: user.to_string() }).await.unwrap();
+            broker_writer.send(BrokerCommand::GetPassword { client_id, user: user.to_string() }).await.unwrap();
             match peer_reader.recv().await? {
                 BrokerToPeerMessage::PasswordSha1(broker_shapass) => {
                     let chkpwd = || {
@@ -113,10 +113,11 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<PeerToBroker
     };
     if let LoginResult::Ok = login_result {
         debug!("Client ID: {client_id} login sucess.");
-        let register_device = PeerToBrokerMessage::RegisterDevice {
+        let register_device = BrokerCommand::RegisterDevice {
             client_id,
             device_id: device_options.as_map().get("deviceId").map(|v| v.as_str().to_string()),
             mount_point: device_options.as_map().get("mountPoint").map(|v| v.as_str().to_string()),
+            subscribe_path: None,
         };
         broker_writer.send(register_device).await.unwrap();
         loop {
@@ -130,7 +131,7 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<PeerToBroker
                             }
                             Some(frame) => {
                                 // log!(target: "RpcMsg", Level::Debug, "----> Recv frame, client id: {}", client_id);
-                                broker_writer.send(PeerToBrokerMessage::FrameReceived { client_id, frame }).await?;
+                                broker_writer.send(BrokerCommand::FrameReceived { client_id, frame }).await?;
                             }
                         }
                     }
@@ -167,11 +168,11 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<PeerToBroker
             }
         }
     }
-    broker_writer.send(PeerToBrokerMessage::PeerGone { peer_id: client_id }).await?;
+    broker_writer.send(BrokerCommand::PeerGone { peer_id: client_id }).await?;
     info!("Client loop exit, client id: {}", client_id);
     Ok(())
 }
-pub(crate) async fn parent_broker_peer_loop_with_reconnect(client_id: i32, config: ParentBrokerConfig, broker_writer: Sender<PeerToBrokerMessage>) -> crate::Result<()> {
+pub(crate) async fn parent_broker_peer_loop_with_reconnect(client_id: i32, config: ParentBrokerConfig, broker_writer: Sender<BrokerCommand>) -> crate::Result<()> {
     let url = Url::parse(&config.client.url)?;
     if url.scheme() != "tcp" {
         return Err(format!("Scheme {} is not supported yet.", url.scheme()).into());
@@ -213,7 +214,7 @@ fn cut_prefix(shv_path: &str, prefix: &str) -> Option<String> {
         None
     }
 }
-async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, broker_writer: Sender<PeerToBrokerMessage>) -> crate::Result<()> {
+async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, broker_writer: Sender<BrokerCommand>) -> crate::Result<()> {
     let url = Url::parse(&config.client.url)?;
     let (scheme, host, port) = (url.scheme(), url.host_str().unwrap_or_default(), url.port().unwrap_or(3755));
     if scheme != "tcp" {
@@ -246,7 +247,7 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
     client::login(&mut frame_reader, &mut frame_writer, &login_params).await?;
 
     let (broker_to_peer_sender, broker_to_peer_receiver) = channel::unbounded::<BrokerToPeerMessage>();
-    broker_writer.send(PeerToBrokerMessage::NewPeer { client_id, sender: broker_to_peer_sender, peer_kind: PeerKind::ParentBroker }).await?;
+    broker_writer.send(BrokerCommand::NewPeer { client_id, sender: broker_to_peer_sender, peer_kind: PeerKind::ParentBroker }).await?;
     loop {
         let fut_timeout = future::timeout(heartbeat_interval, future::pending::<()>());
         select! {
@@ -291,7 +292,7 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
                             join_path(&config.exported_root, &shv_path)
                         };
                         frame.set_shvpath(&shv_path);
-                        broker_writer.send(PeerToBrokerMessage::FrameReceived { client_id, frame }).await.unwrap();
+                        broker_writer.send(BrokerCommand::FrameReceived { client_id, frame }).await.unwrap();
                     }
                 }
                 Err(e) => {

@@ -1,30 +1,25 @@
-use async_std::{channel, task};
+use async_std::{task};
 use async_std::net::TcpListener;
 use crate::broker::config::{AccessControl, BrokerConfig};
-use std::collections::{BTreeMap};
-use async_std::channel::unbounded;
+use async_std::channel::{Sender};
 use glob::{Pattern};
 use log::{debug, info, warn};
-use crate::{RpcMessage};
+use crate::{MetaMap, RpcMessage, RpcValue};
 use crate::rpc::{SubscriptionPattern};
 use crate::rpcframe::RpcFrame;
-use crate::rpcmessage::{CliId, RqId};
-use crate::shvnode::{find_longest_prefix, ShvNode};
+use crate::rpcmessage::{CliId, RpcError, RqId};
+use crate::shvnode::{ShvNode};
 use async_std::stream::StreamExt;
 use futures::select;
 use futures::FutureExt;
-use crate::broker::state::State;
+use crate::broker::broker::Broker;
 
 pub mod config;
 pub mod peer;
 pub mod node;
-mod call;
 #[cfg(test)]
 mod test;
-mod state;
-
-type Sender<T> = async_std::channel::Sender<T>;
-type Receiver<T> = async_std::channel::Receiver<T>;
+mod broker;
 
 pub(crate) enum LoginResult {
     Ok,
@@ -32,7 +27,7 @@ pub(crate) enum LoginResult {
 }
 
 #[derive(Debug)]
-pub(crate) enum PeerToBrokerMessage {
+pub(crate) enum BrokerCommand {
     GetPassword {
         client_id: CliId,
         user: String,
@@ -46,12 +41,7 @@ pub(crate) enum PeerToBrokerMessage {
         client_id: CliId,
         device_id: Option<String>,
         mount_point: Option<String>,
-    },
-    #[allow(dead_code)]
-    SetSubscribePath {
-        // used for testing, to bypass device discovery RPC Calls
-        client_id: CliId,
-        subscribe_path: SubscribePath,
+        subscribe_path: Option<SubscribePath>,
     },
     FrameReceived {
         client_id: CliId,
@@ -59,6 +49,20 @@ pub(crate) enum PeerToBrokerMessage {
     },
     PeerGone {
         peer_id: CliId,
+    },
+    //SendFrame { peer_id: CliId, frame: RpcFrame },
+    SendResponse {peer_id: CliId, meta: MetaMap, result: Result<RpcValue, RpcError>},
+    RpcCall{
+        client_id: CliId,
+        request: RpcMessage,
+        response_sender: Sender<RpcFrame>,
+    },
+    SetSubscribeMethodPath {
+        peer_id: CliId,
+        subscribe_path: SubscribePath,
+    },
+    PropagateSubscriptions{
+        client_id: CliId,
     },
 }
 
@@ -136,17 +140,16 @@ pub(crate) enum SubscribePath {
 }
 
 struct Device {
-    client_id: CliId,
+    peer_id: CliId,
 }
 
 impl Device {
 }
 
-type Node<K> = Box<dyn ShvNode<K> + Send + Sync>;
 
-enum Mount<K> {
+enum Mount {
     Peer(Device),
-    Node(Node<K>),
+    Node(ShvNode),
 }
 
 struct ParsedAccessRule {
@@ -175,29 +178,23 @@ impl ParsedAccessRule {
     }
 }
 
-fn find_mount_mut<'a, 'b, K>(mounts: &'a mut BTreeMap<String, Mount<K>>, shv_path: &'b str) -> Option<(&'a mut Mount<K>, &'b str)> {
-    if let Some((mount_dir, node_dir)) = find_longest_prefix(mounts, shv_path) {
-        Some((mounts.get_mut(mount_dir).unwrap(), node_dir))
-    } else {
-        None
-    }
-}
+//fn find_mount_mut<'a, 'b>(mounts: &'a mut BTreeMap<String, Mount>, shv_path: &'b str) -> Option<(&'a mut Mount, &'b str)> {
+//    if let Some((mount_dir, node_dir)) = find_longest_prefix(mounts, shv_path) {
+//        Some((mounts.get_mut(mount_dir).unwrap(), node_dir))
+//    } else {
+//        None
+//    }
+//}
 struct PendingRpcCall {
     client_id: CliId,
     request_id: RqId,
     response_sender: Sender<RpcFrame>,
 }
 
-pub(crate) async fn broker_loop(peers_messages: Receiver<PeerToBrokerMessage>, access: AccessControl) {
-    let (broker_command_sender, broker_command_receiver) = unbounded();
-    let mut broker = State::new(access, broker_command_sender);
-
-    broker.mounts.insert(".app".into(), Mount::Node(Box::new(crate::shvnode::AppNode { app_name: "shvbroker", ..Default::default() })));
-    broker.mounts.insert(".app/broker".into(), Mount::Node(Box::new(node::AppBrokerNode {})));
-    broker.mounts.insert(".app/broker/currentClient".into(), Mount::Node(Box::new(node::AppBrokerCurrentClientNode {})));
+pub(crate) async fn broker_loop(mut broker: Broker) {
     loop {
         select! {
-            command = broker_command_receiver.recv().fuse() => match command {
+            command = broker.command_receiver.recv().fuse() => match command {
                 Ok(command) => {
                     if let Err(err) = broker.process_broker_command(command).await {
                         warn!("Process broker command error: {}", err);
@@ -207,61 +204,16 @@ pub(crate) async fn broker_loop(peers_messages: Receiver<PeerToBrokerMessage>, a
                     warn!("Reseive broker command error: {}", err);
                 }
             },
-            event = peers_messages.recv().fuse() => match event {
-                Err(e) => {
-                    info!("Peers channel closed, accept loop exited: {}", &e);
-                    break;
-                }
-                Ok(message) => {
-                    match message {
-                        PeerToBrokerMessage::FrameReceived { client_id, frame} => {
-                            if let Err(err) = broker.process_rpc_frame(client_id, frame).await {
-                                warn!("Process RPC frame error: {err}");
-                            }
-                        }
-                        PeerToBrokerMessage::NewPeer { client_id, sender, peer_kind } => {
-                            if broker.peers.insert(client_id, Peer::new(peer_kind, sender)).is_some() {
-                                // this might happen when connection to parent broker is restored
-                                // after parent broker reset
-                                // note that parent broker connection has always ID == 1
-                                debug!("Client ID: {client_id} exists already!");
-                            }
-                        },
-                        PeerToBrokerMessage::RegisterDevice { client_id, device_id, mount_point } => {
-                            let _ = broker.mount_device(client_id, device_id, mount_point).await;
-                        },
-                        PeerToBrokerMessage::SetSubscribePath {client_id, subscribe_path} => {
-                            let _ = broker.set_subscribe_path(client_id, subscribe_path);
-                        }
-                        PeerToBrokerMessage::PeerGone { peer_id } => {
-                            broker.peers.remove(&peer_id);
-                            info!("Client id: {} disconnected.", peer_id);
-                            if let Some(path) = broker.client_id_to_mount_point(peer_id) {
-                                info!("Unmounting path: '{}'", path);
-                                broker.mounts.remove(&path);
-                            }
-                            let client_path = format!(".app/broker/client/{}", peer_id);
-                            broker.mounts.remove(&client_path);
-                            broker.pending_rpc_calls.retain(|c| c.client_id != peer_id);
-                        }
-                        PeerToBrokerMessage::GetPassword { client_id, user } => {
-                            let shapwd = broker.sha_password(&user);
-                            let peer = broker.peers.get_mut(&client_id).unwrap();
-                            peer.user = user.clone();
-                            peer.sender.send(BrokerToPeerMessage::PasswordSha1(shapwd)).await.unwrap();
-                        }
-                    }
-                }
-            }
         }
     }
 }
 
 pub async fn accept_loop(config: BrokerConfig, access: AccessControl) -> crate::Result<()> {
     if let Some(address) = config.listen.tcp.clone() {
-        let (broker_sender, broker_receiver) = channel::unbounded();
+        let broker = Broker::new(access);
+        let broker_sender = broker.command_sender.clone();
         let parent_broker_peer_config = config.parent_broker.clone();
-        let broker_task = task::spawn(crate::broker::broker_loop(broker_receiver, access));
+        let broker_task = task::spawn(crate::broker::broker_loop(broker));
         if parent_broker_peer_config.enabled {
             crate::spawn_and_log_error(peer::parent_broker_peer_loop_with_reconnect(1, parent_broker_peer_config, broker_sender.clone()));
         }

@@ -10,7 +10,7 @@ use shv::client::{ClientConfig, LoginParams};
 use shv::metamethod::{MetaMethod};
 use shv::rpcframe::RpcFrame;
 use shv::rpcmessage::{RpcError, RpcErrorCode};
-use shv::shvnode::{AppDeviceNode, find_longest_prefix, ShvNode, RequestCommand, AppNode, DIR_LS_METHODS, process_local_dir_ls, METH_GET, METH_SET, SIG_CHNG, PROPERTY_METHODS, METH_PING};
+use shv::shvnode::{find_longest_prefix, ShvNode, AppNode, DIR_LS_METHODS, process_local_dir_ls, METH_GET, METH_SET, SIG_CHNG, PROPERTY_METHODS, METH_PING};
 use shv::util::{login_from_url, parse_log_verbosity};
 use duration_str::{parse};
 use clap::{Parser};
@@ -75,13 +75,13 @@ pub(crate) fn main() -> shv::Result<()> {
     task::block_on(try_main_reconnect(&config))
 }
 struct DeviceState {
-    mounts: BTreeMap<String, Box<dyn ShvNode<()>>>,
+    mounts: BTreeMap<String, ShvNode>,
 }
 async fn try_main_reconnect(config: &ClientConfig) -> shv::Result<()> {
     let mut device_state = DeviceState { mounts: Default::default() };
     device_state.mounts.insert(".app".into(), Box::new(AppNode { app_name: "device", ..Default::default() }));
-    device_state.mounts.insert(".app/device".into(), Box::new(AppDeviceNode { device_name: "example", ..Default::default() }));
-    device_state.mounts.insert("number".into(), Box::new(IntPropertyNode{ value: 0 }));
+    //device_state.mounts.insert(".app/device".into(), Box::new(AppDeviceNode { device_name: "example", ..Default::default() }));
+    //device_state.mounts.insert("number".into(), Box::new(IntPropertyNode{ value: 0 }));
     if let Some(time_str) = &config.reconnect_interval {
         match parse(time_str) {
             Ok(interval) => {
