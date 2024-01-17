@@ -245,10 +245,10 @@ impl ShvNode {
         }
         None
     }
-    pub fn process_dir(&self, rq: &RpcMessage) -> Result<RpcValue, RpcError> {
+    pub fn process_dir(methods: &[&'static MetaMethod], rq: &RpcMessage) -> Result<RpcValue, RpcError> {
         let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
-            let resp = dir(self.methods.clone().into_iter(), rq.param().into());
+            let resp = dir(methods.iter().map(|m| *m), rq.param().into());
             Ok(resp)
         } else {
             let errmsg = format!("Unknown method '{}:{}()', invalid path.", rq.shv_path().unwrap_or_default(), rq.method().unwrap_or_default());
@@ -256,7 +256,7 @@ impl ShvNode {
             Err(RpcError::new(RpcErrorCode::MethodNotFound, errmsg))
         }
     }
-    pub fn process_ls(&self, rq: &RpcMessage) -> Result<RpcValue, RpcError> {
+    pub fn process_ls(rq: &RpcMessage) -> Result<RpcValue, RpcError> {
         let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
             match LsParam::from(rq.param()) {

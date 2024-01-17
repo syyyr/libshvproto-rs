@@ -8,7 +8,7 @@ use crate::rpcframe::RpcFrame;
 use crate::rpcmessage::{CliId, RpcError, RpcErrorCode};
 use crate::{List, RpcMessage, RpcMessageMetaTags, RpcValue, rpcvalue, shvnode, util};
 use crate::rpc::{Subscription, SubscriptionPattern};
-use crate::shvnode::{DIR_APP, AppNode, find_longest_prefix, METH_DIR, METH_LS, process_local_dir_ls};
+use crate::shvnode::{DIR_APP, AppNode, find_longest_prefix, METH_DIR, METH_LS, process_local_dir_ls, ShvNode};
 use crate::util::{sha1_hash, split_glob_on_match};
 use log::Level;
 use crate::broker::node::{DIR_APP_BROKER_CURRENTCLIENT, DIR_APP_BROKER, AppBrokerCurrentClientNode, AppBrokerNode, METH_SUBSCRIBE};
@@ -108,6 +108,7 @@ impl Broker {
                                 peer_id,
                                 command_sender: self.command_sender.clone(),
                                 mount_point: mount_point.to_string(),
+                                methods: node.methods.clone(),
                                 method,
                             };
                             self.process_node_request(frame, ctx).await?;
@@ -539,25 +540,15 @@ impl Broker {
             }
         };
         if ctx.method.name == METH_DIR {
-            if let Mount::Node(node) = self.mounts.get(&ctx.mount_point).expect("Shv node") {
-                let result = node.process_dir(&frame.to_rpcmesage()?);
-                ctx.command_sender.send(send_result_cmd(result)).await?;
-                return Ok(())
-            }
-            else {
-                panic!("Shv node shoul be mounted here");
-            }
+            let result = ShvNode::process_dir(&ctx.methods, &frame.to_rpcmesage()?);
+            ctx.command_sender.send(send_result_cmd(result)).await?;
+            return Ok(())
         }
         let rq = frame.to_rpcmesage()?;
         if ctx.method.name == METH_LS {
-            if let Mount::Node(node) = self.mounts.get(&ctx.mount_point).expect("Shv node") {
-                let result = node.process_ls(&frame.to_rpcmesage()?);
-                ctx.command_sender.send(send_result_cmd(result)).await?;
-                return Ok(())
-            }
-            else {
-                panic!("Shv node should be mounted here");
-            }
+            let result = ShvNode::process_ls(&frame.to_rpcmesage()?);
+            ctx.command_sender.send(send_result_cmd(result)).await?;
+            return Ok(())
         }
         match ctx.mount_point.as_str() {
             DIR_APP => {
@@ -666,5 +657,6 @@ struct NodeRequestContext {
     peer_id: CliId,
     command_sender: Sender<BrokerCommand>,
     mount_point: String,
+    methods: Vec<&'static MetaMethod>,
     method: &'static MetaMethod,
 }

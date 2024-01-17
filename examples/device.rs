@@ -345,6 +345,7 @@ impl Device {
                     let ctx = NodeRequestContext {
                         command_sender: self.command_sender.clone(),
                         mount_point: mount_point.to_string(),
+                        methods: node.methods.clone(),
                         method,
                     };
                     self.process_node_request(frame, ctx).await?;
@@ -385,14 +386,12 @@ impl Device {
         };
         let rq = frame.to_rpcmesage()?;
         if ctx.method.name == METH_DIR {
-            let node = self.mounts.get(&ctx.mount_point).expect("Shv node");
-            let result = node.process_dir(&rq);
+            let result = ShvNode::process_dir(&ctx.methods, &rq);
             ctx.command_sender.send(send_result_cmd(result)).await?;
             return Ok(())
         }
         if ctx.method.name == METH_LS {
-            let node = self.mounts.get(&ctx.mount_point).expect("Shv node");
-            let result = node.process_ls(&rq);
+            let result = ShvNode::process_ls(&rq);
             ctx.command_sender.send(send_result_cmd(result)).await?;
             return Ok(())
         }
@@ -486,6 +485,7 @@ struct PendingRpcCall {
 struct NodeRequestContext {
     command_sender: Sender<DeviceCommand>,
     mount_point: String,
+    methods: Vec<&'static MetaMethod>,
     method: &'static MetaMethod,
 }
 pub const DIR_NUMBER: &str = "number";
