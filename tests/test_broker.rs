@@ -141,7 +141,7 @@ fn test_broker() -> shv::Result<()> {
 
     println!("====== child broker =====");
     assert_eq!(shv_call_parent("shv/test", "ls", r#""child-broker""#)?, RpcValue::from(true));
-    assert_eq!(shv_call_parent("shv/test/child-broker/device/.app", "name", "")?, RpcValue::from("device"));
+    assert_eq!(shv_call_parent("shv/test/child-broker/device/.app", "name", "")?, RpcValue::from("testdeviceapp"));
     assert_eq!(shv_call_parent("shv/test/child-broker/device/number", "get", "")?, RpcValue::from(123));
     check_subscription("shv/test/child-broker/device/number", "shv/test/**", 3755)?;
 

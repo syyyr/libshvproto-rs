@@ -223,12 +223,12 @@ pub trait RpcMessageMetaTags {
             Some(rv) => Some(rv.as_i64()),
         }
     }
-    // fn try_request_id(&self) -> Result<RqId, &'static str> {
-    //     match self.request_id() {
-    //         None => Err("Request id not exists."),
-    //         Some(id) => Ok(id),
-    //     }
-    // }
+    fn try_request_id(&self) -> crate::Result<RqId> {
+        match self.request_id() {
+            None => Err("Request id not exists.".into()),
+            Some(id) => Ok(id),
+        }
+    }
     fn set_request_id(&mut self, id: RqId) -> &mut Self::Target {
         self.set_tag(Tag::RequestId as i32, Some(RpcValue::from(id)))
     }

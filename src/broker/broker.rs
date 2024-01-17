@@ -123,51 +123,6 @@ impl Broker {
                 self.command_sender.send(BrokerCommand::SendResponse { peer_id, meta: response_meta, result: Err(err) }).await?;
                 return Ok(());
             }
-            //=================================================
-            /*
-            let command = if let Command::Custom(cc) = command {
-                let result = match cc {
-                    BrokerNodeCommand::ClientInfo(client_id) => {
-                        match self.client_info(client_id) {
-                            None => { Ok(RpcValue::null()) }
-                            Some(info) => { Ok(RpcValue::from(info)) }
-                        }
-                    }
-                    BrokerNodeCommand::MountedClientInfo(mount_point) => {
-//                        match self.mounted_client_info(&mount_point) {
-                            None => { Ok(RpcValue::from(())) }
-                            Some(info) => { Ok(RpcValue::from(info)) }
-                        }
-                    }
-                    BrokerNodeCommand::Clients => {
-                        Ok(RpcValue::from(self.clients()))
-                    }
-                    BrokerNodeCommand::Mounts => {
-                        Ok(RpcValue::from(self.mounts()))
-                    }
-                    BrokerNodeCommand::DisconnectClient(client_id) => {
-                        self.disconnect_client(client_id).await.map(|_| RpcValue::null())
-                    }
-                    BrokerNodeCommand::CurrentClientInfo => {
-                        match self.client_info(client_id) {
-                            None => { Ok(RpcValue::from(())) }
-                            Some(info) => { Ok(RpcValue::from(info)) }
-                        }
-                    }
-                    BrokerNodeCommand::Subscribe(subscr) => {
-                        let result = self.subscribe(client_id, &subscr).await.map(|_| RpcValue::null());
-                        result
-                    }
-                    BrokerNodeCommand::Unsubscribe(subscr) => {
-                        self.unsubscribe(client_id, &subscr).map(|r| RpcValue::from(r))
-                    }
-                    BrokerNodeCommand::Subscriptions => {
-                        let result = self.subscriptions(client_id);
-                        result.map(|r| RpcValue::from(r))
-                    }
-                };
-            };
-             */
         } else if frame.is_response() {
             let mut frame = frame;
             if let Some(client_id) = frame.pop_caller_id() {

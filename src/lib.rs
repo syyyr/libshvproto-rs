@@ -19,6 +19,7 @@ pub mod broker;
 
 use std::future::Future;
 use async_std::task;
+use log::error;
 pub use datetime::DateTime;
 pub use decimal::Decimal;
 pub use metamap::MetaMap;
@@ -40,7 +41,7 @@ pub fn spawn_and_log_error<F>(fut: F) -> task::JoinHandle<()>
 {
     task::spawn(async move {
         if let Err(e) = fut.await {
-            eprintln!("{}", e)
+            error!("{}", e)
         }
     })
 }

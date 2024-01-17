@@ -11,6 +11,7 @@ pub const DOT_LOCAL_GRANT: &str = "dot-local";
 pub const DOT_LOCAL_DIR: &str = ".local";
 pub const DOT_LOCAL_HACK: &str = "dot-local-hack";
 pub const DIR_APP: &str = ".app";
+pub const DIR_APP_DEVICE: &str = ".app/device";
 
 pub enum DirParam {
     Brief,
@@ -223,18 +224,11 @@ pub fn find_longest_prefix<'a, 'b, V>(map: &'a BTreeMap<String, V>, shv_path: &'
     None
 }
 
-//pub enum RequestCommand<K> {
-//    Noop,
-//    Result(RpcValue),
-//    PropertyChanged(RpcValue),
-//    Error(RpcError),
-//    Custom(K),
-//}
 pub struct ShvNode {
-    pub(crate) methods: Vec<&'static MetaMethod>,
+    pub methods: Vec<&'static MetaMethod>,
 }
 impl ShvNode {
-    pub(crate) fn is_request_granted(&self, rq: &RpcFrame) -> Option<&'static MetaMethod> {
+    pub fn is_request_granted(&self, rq: &RpcFrame) -> Option<&'static MetaMethod> {
         let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
             let level_str = rq.access().unwrap_or_default();
@@ -251,21 +245,6 @@ impl ShvNode {
         }
         None
     }
-    //fn process_dir_ls(&mut self, rq: &RpcMessage) -> RequestCommand<K> {
-    //    match rq.method() {
-    //        Some(METH_DIR) => {
-    //            self.process_dir(rq)
-    //        }
-    //        Some(METH_LS) => {
-    //            self.process_ls(rq)
-    //        }
-    //        _ => {
-    //            let errmsg = format!("Unknown method '{}:{}()', path.", rq.shv_path().unwrap_or_default(), rq.method().unwrap_or_default());
-    //            warn!("{}", &errmsg);
-    //            RequestCommand::Error(RpcError::new(RpcErrorCode::MethodNotFound, &errmsg))
-    //        }
-    //    }
-    //}
     pub fn process_dir(&self, rq: &RpcMessage) -> Result<RpcValue, RpcError> {
         let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
@@ -358,61 +337,26 @@ impl AppNode {
             &META_METH_APP_PING,
         ] }
     }
-
-    //fn process_request(&mut self, rq: &RpcMessage) -> RequestCommand<K> {
-    //    if rq.shv_path().unwrap_or_default().is_empty() {
-    //        match rq.method() {
-    //            Some(METH_SHV_VERSION_MAJOR) => { return RequestCommand::Result(self.shv_version_major.into())  }
-    //            Some(METH_SHV_VERSION_MINOR) => { return RequestCommand::Result(self.shv_version_minor.into())  }
-    //            Some(METH_NAME) => { return RequestCommand::Result(RpcValue::from(self.app_name))  }
-    //            Some(METH_PING) => { return RequestCommand::Result(().into())  }
-    //            _ => {}
-    //        }
-    //    }
-    //    <AppNode as ShvNode<K>>::process_dir_ls(self, rq)
-    //}
 }
-/*
+
+const META_METH_VERSION: MetaMethod = MetaMethod { name: METH_VERSION, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" };
+const META_METH_NAME: MetaMethod = MetaMethod { name: METH_NAME, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" };
+const META_METH_SERIAL_NUMBER: MetaMethod = MetaMethod { name: "serialNumber", flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" };
+
 pub struct AppDeviceNode {
     pub device_name: &'static str,
     pub version: &'static str,
     pub serial_number: Option<String>,
 }
-impl Default for AppDeviceNode {
-    fn default() -> Self {
-        AppDeviceNode {
-            device_name: "",
-            version: "",
-            serial_number: None,
-        }
+
+impl AppDeviceNode {
+    pub fn new_shvnode(&self) -> ShvNode {
+        ShvNode { methods: vec![
+            &META_METHOD_DIR,
+            &META_METHOD_LS,
+            &META_METH_NAME,
+            &META_METH_VERSION,
+            &META_METH_SERIAL_NUMBER,
+        ] }
     }
 }
-impl<K> ShvNode<K> for AppDeviceNode {
-    fn defined_methods(&self) -> Vec<&MetaMethod> {
-        DEVICE_METHODS.iter().collect()
-    }
-
-    fn process_request(&mut self, rq: &RpcMessage) -> RequestCommand<K> {
-        if rq.shv_path().unwrap_or_default().is_empty() {
-            match rq.method() {
-                Some(METH_NAME) => {
-                    return RequestCommand::Result(RpcValue::from(self.device_name))
-                }
-                Some(METH_VERSION) => {
-                    return RequestCommand::Result(RpcValue::from(self.version))
-                }
-                Some(METH_SERIAL_NUMBER) => {
-                    match &self.serial_number {
-                        None => {return RequestCommand::Result(RpcValue::null())}
-                        Some(sn) => {return RequestCommand::Result(RpcValue::from(sn))}
-                    }
-                }
-                _ => {
-                }
-            }
-        }
-        ShvNode::<K>::process_dir_ls(self, rq)
-    }
-}
-
- */

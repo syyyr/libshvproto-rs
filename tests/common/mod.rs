@@ -94,6 +94,7 @@ impl ShvCallOutputFormat {
 }
 pub fn shv_call(path: &str, method: &str, param: &str, port: Option<i32>) -> shv::Result<RpcValue> {
     let port = port.unwrap_or(3755);
+    println!("shvcall port: {port} {path}:{method} param: {}", param);
     let output = Command::new("target/debug/shvcall")
         .arg("-v").arg(".:T")
         .arg("--url").arg(format!("tcp://admin@localhost:{port}?password=admin"))
