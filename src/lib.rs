@@ -16,6 +16,7 @@ pub mod client;
 pub mod shvnode;
 pub mod rpc;
 pub mod broker;
+pub mod device;
 
 use std::future::Future;
 use async_std::task;
