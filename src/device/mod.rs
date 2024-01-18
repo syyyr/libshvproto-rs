@@ -38,8 +38,7 @@ pub enum DeviceToPeerCommand {
 pub async fn main_async<S: State + Send + 'static>(config: ClientConfig, state: S) -> crate::Result<()> {
     let device = Device::new(state);
     crate::spawn_and_log_error(peer_loop_reconnect(config, device.command_sender.clone()));
-    crate::spawn_and_log_error(device_loop(device)).await;
-    Ok(())
+    device_loop(device).await
 }
 async fn peer_loop_reconnect(config: ClientConfig, device_sender: Sender<DeviceCommand>) -> crate::Result<()> {
     if let Some(time_str) = &config.reconnect_interval {
