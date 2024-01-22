@@ -1,8 +1,8 @@
-use async_std::{io, prelude::*};
 use async_std::io::{BufReader};
 use async_std::net::TcpStream;
+use async_std::os::unix::net::UnixStream;
 use shv::{client, RpcMessage, RpcMessageMetaTags, RpcValue};
-use async_std::task;
+use async_std::{io, task};
 use log::*;
 use simple_logger::SimpleLogger;
 use url::Url;
@@ -10,7 +10,11 @@ use shv::client::LoginParams;
 use shv::rpcmessage::{RqId};
 use shv::util::{login_from_url, parse_log_verbosity};
 use clap::{Parser};
-use shv::connection::FrameWriter;
+use shv::framerw::{FrameReader, FrameWriter};
+use futures::AsyncReadExt;
+use futures::AsyncWriteExt;
+use futures::io::{BufWriter};
+use shv::socketrw::{SocketFrameReader, SocketFrameWriter};
 
 type Result = shv::Result<()>;
 
@@ -48,6 +52,8 @@ impl From<&str> for OutputFormat {
         Self::Cpon
     }
 }
+type BoxedFrameReader = Box<dyn FrameReader + Unpin + Send>;
+type BoxedFrameWriter = Box<dyn FrameWriter + Unpin + Send>;
 // const DEFAULT_RPC_TIMEOUT_MSEC: u64 = 5000;
 pub(crate) fn main() -> Result {
     let opts = Opts::parse();
@@ -73,13 +79,30 @@ pub(crate) fn main() -> Result {
 
 async fn make_call(url: &Url, opts: &Opts) -> Result {
     // Establish a connection
-    let address = format!("{}:{}", url.host_str().unwrap_or_default(), url.port().unwrap_or(3755));
-    let stream = TcpStream::connect(&address).await?;
-    let (reader, mut writer) = (&stream, &stream);
-
-    let mut brd = BufReader::new(reader);
-    let mut frame_reader = shv::connection::FrameReader::new(&mut brd);
-    let mut frame_writer = shv::connection::FrameWriter::new(&mut writer);
+    let (mut frame_reader, mut frame_writer) = match url.scheme() {
+        "tcp" => {
+            let address = format!("{}:{}", url.host_str().unwrap_or("localhost"), url.port().unwrap_or(3755));
+            let stream = TcpStream::connect(&address).await?;
+            let (reader, writer) = stream.split();
+            let brd = BufReader::new(reader);
+            let bwr = BufWriter::new(writer);
+            let frame_reader: BoxedFrameReader = Box::new(SocketFrameReader::new(brd));
+            let frame_writer: BoxedFrameWriter = Box::new(SocketFrameWriter::new(bwr));
+            (frame_reader, frame_writer)
+        }
+        "unixs" => {
+            let stream = UnixStream::connect(url.host_str().expect("socket name")).await?;
+            let (reader, writer) = stream.split();
+            let brd = BufReader::new(reader);
+            let bwr = BufWriter::new(writer);
+            let frame_reader: BoxedFrameReader = Box::new(SocketFrameReader::new(brd));
+            let frame_writer: BoxedFrameWriter = Box::new(SocketFrameWriter::new(bwr));
+            (frame_reader, frame_writer)
+        }
+        s => {
+            panic!("Scheme {s} is not supported")
+        }
+    };
 
     // login
     let (user, password) = login_from_url(url);
@@ -88,8 +111,9 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
         password,
         ..Default::default()
     };
-
-    client::login(&mut frame_reader, &mut frame_writer, &login_params).await?;
+    //let frame = frame_reader.receive_frame().await?;
+    //frame_writer.send_frame(frame.expect("frame")).await?;
+    client::login(&mut *frame_reader, &mut *frame_writer, &login_params).await?;
     info!("Connected to broker.");
     async fn print_resp(stdout: &mut io::Stdout, resp: &RpcMessage, output_format: OutputFormat) -> Result {
         let bytes = match output_format {
@@ -141,7 +165,7 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
         Ok(stdout.flush().await?)
     }
 
-    async fn send_request<'a, W: async_std::io::Write + std::marker::Unpin>(frame_writer: &mut FrameWriter<'a, W>, path: &str, method: &str, param: &str) -> shv::Result<RqId> {
+    async fn send_request(frame_writer: &mut (dyn FrameWriter + Send), path: &str, method: &str, param: &str) -> shv::Result<RqId> {
         let param = if param.is_empty() {
             None
         } else {
@@ -179,7 +203,7 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
                             None => { (line[method_ix + 1 .. ].trim(), "") }
                             Some(ix) => { (line[method_ix + 1 .. ix].trim(), line[ix + 1 ..].trim()) }
                         };
-                        let rqid = send_request(&mut frame_writer, &path, &method, &param).await?;
+                        let rqid = send_request(&mut *frame_writer, &path, &method, &param).await?;
                         loop {
                             let resp = frame_reader.receive_message().await?.ok_or("Receive error")?;
                             print_resp(&mut stdout, &resp, (&*opts.output_format).into()).await?;
@@ -196,7 +220,7 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
         let path = opts.path.clone().unwrap_or_default();
         let method = opts.method.clone().unwrap_or_default();
         let param = opts.param.clone().unwrap_or_default();
-        send_request(&mut frame_writer, &path, &method, &param).await?;
+        send_request(&mut *frame_writer, &path, &method, &param).await?;
         let resp = frame_reader.receive_message().await?.ok_or("Receive error")?;
         print_resp(&mut stdout, &resp, (&*opts.output_format).into()).await?;
     }

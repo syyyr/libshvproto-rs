@@ -57,7 +57,7 @@ impl RpcFrame {
     }
 
     /// The message has already been validated with `check`.
-    pub fn parse(buff: &[u8]) -> crate::Result<Option<(usize, RpcFrame)>> {
+    pub fn try_parse_socket_data(buff: &[u8]) -> crate::Result<Option<(usize, RpcFrame)>> {
         // min RpcMessage must have at least 6 bytes
         const MIN_LEN: usize = 6;
         let buff_len = buff.len();

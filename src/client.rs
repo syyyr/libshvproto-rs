@@ -1,12 +1,11 @@
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
-use async_std::io;
 use duration_str::parse;
 use log::{info};
 use serde::{Deserialize, Serialize};
 use crate::{RpcMessage, RpcValue};
-use crate::connection::{FrameReader, FrameWriter};
+use crate::framerw::{FrameReader, FrameWriter};
 use crate::util::sha1_password_hash;
 
 #[derive(Copy, Clone, Debug)]
@@ -76,9 +75,7 @@ impl LoginParams {
     }
 }
 
-pub async fn login<'r, 'w, R, W>(frame_reader: &mut FrameReader<'r, R>, frame_writer: &mut FrameWriter<'w, W>, login_params: &LoginParams) -> crate::Result<i32>
-where R: io::Read + std::marker::Unpin,
-      W: io::Write + std::marker::Unpin
+pub async fn login(frame_reader: &mut (dyn FrameReader + Send), frame_writer: &mut (dyn FrameWriter + Send), login_params: &LoginParams) -> crate::Result<i32>
 {
     let rq = RpcMessage::new_request("", "hello", None);
     frame_writer.send_message(rq).await?;

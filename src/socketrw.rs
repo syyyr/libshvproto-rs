@@ -1,30 +1,31 @@
+use async_trait::async_trait;
 use crate::writer::Writer;
-use async_std::io;
 use crate::rpcframe::{RpcFrame};
-use futures::{AsyncReadExt, AsyncWriteExt};
+use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use log::*;
-use crate::{ChainPackWriter, MetaMap, RpcMessage, RpcMessageMetaTags, RpcValue};
-use crate::rpcmessage::{RpcError, RpcErrorCode, RqId};
+use crate::{ChainPackWriter};
+use crate::framerw::{FrameReader, FrameWriter};
 
-pub struct FrameReader<'a, R: async_std::io::Read + std::marker::Unpin> {
+pub struct SocketFrameReader<R: AsyncRead + Unpin + Send> {
     buffer: Vec<u8>,
-    reader: &'a mut R,
+    reader: R,
 }
-
-impl<'a, R: io::Read + std::marker::Unpin> FrameReader<'a, R> {
-    pub fn new(reader: &'a mut R) -> Self {
+impl<R: AsyncRead + Unpin + Send> SocketFrameReader<R> {
+    pub fn new(reader: R) -> Self {
         Self {
             buffer: vec![],
             reader
         }
     }
-
-    pub async fn receive_frame(&mut self) -> crate::Result<Option<RpcFrame>> {
+}
+#[async_trait]
+impl<R: AsyncRead + Unpin + Send> FrameReader for SocketFrameReader<R> {
+    async fn receive_frame(&mut self) -> crate::Result<Option<RpcFrame>> {
         loop {
             while !&self.buffer.is_empty() {
                 let buff = &self.buffer[..];
                 // trace!("parsing: {:?}", buff);
-                match RpcFrame::parse(buff) {
+                match RpcFrame::try_parse_socket_data(buff) {
                     Ok(maybe_frame) => {
                         match maybe_frame {
                             None => { break; }
@@ -56,32 +57,21 @@ impl<'a, R: io::Read + std::marker::Unpin> FrameReader<'a, R> {
             };
         }
     }
-
-    pub async fn receive_message(&mut self) -> crate::Result<Option<RpcMessage>> {
-        match self.receive_frame().await? {
-            None => { return Ok(None); }
-            Some(frame) => {
-                let msg = frame.to_rpcmesage()?;
-                return Ok(Some(msg));
-            }
-        }
-    }
 }
 
-
-
-
-pub struct FrameWriter<'a, W: async_std::io::Write + std::marker::Unpin> {
-    writer: &'a mut W,
+pub struct SocketFrameWriter<W: AsyncWrite + Unpin + Send> {
+    writer: W,
 }
-impl<'a, W: io::Write + std::marker::Unpin> FrameWriter<'a, W> {
-    pub fn new(writer: &'a mut W) -> Self {
+impl<W: AsyncWrite + Unpin + Send> SocketFrameWriter<W> {
+    pub fn new(writer: W) -> Self {
         Self {
             writer,
         }
     }
-
-    pub async fn send_frame(&mut self, frame: RpcFrame) -> crate::Result<()> {
+}
+#[async_trait]
+impl<W: AsyncWrite + Unpin + Send> FrameWriter for SocketFrameWriter<W> {
+    async fn send_frame(&mut self, frame: RpcFrame) -> crate::Result<()> {
         log!(target: "RpcMsg", Level::Debug, "S<== {}", &frame.to_rpcmesage().unwrap_or_default());
         let mut meta_data = Vec::new();
         {
@@ -102,29 +92,6 @@ impl<'a, W: io::Write + std::marker::Unpin> FrameWriter<'a, W> {
         self.writer.flush().await?;
         Ok(())
     }
-
-    pub async fn send_message(&mut self, msg: RpcMessage) -> crate::Result<()> {
-        let frame = RpcFrame::from_rpcmessage(msg)?;
-        self.send_frame(frame).await?;
-        Ok(())
-    }
-    pub async fn send_error(&mut self, meta: MetaMap, errmsg: &str) -> crate::Result<()> {
-        let mut msg = RpcMessage::from_meta(meta);
-        msg.set_error(RpcError{ code: RpcErrorCode::MethodCallException, message: errmsg.into()});
-        self.send_message(msg).await
-    }
-    pub async fn send_result(&mut self, meta: MetaMap, result: RpcValue) -> crate::Result<()> {
-        let mut msg = RpcMessage::from_meta(meta);
-        msg.set_result(result);
-        self.send_message(msg).await
-    }
-    pub async fn send_request(&mut self, shv_path: &str, method: &str, param: Option<RpcValue>) -> crate::Result<RqId> {
-        let rpcmsg = RpcMessage::new_request(shv_path, method, param);
-        let rqid = rpcmsg.request_id().expect("Request ID should exist here.");
-        self.send_message(rpcmsg).await?;
-        Ok(rqid)
-    }
-
 }
 
 

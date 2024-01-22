@@ -11,12 +11,13 @@ pub mod reader;
 pub mod writer;
 pub mod cpon;
 pub mod chainpack;
-pub mod connection;
+pub mod framerw;
 pub mod client;
 pub mod shvnode;
 pub mod rpc;
 pub mod broker;
 pub mod device;
+pub mod socketrw;
 
 use std::future::Future;
 use async_std::task;

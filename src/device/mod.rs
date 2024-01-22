@@ -17,6 +17,9 @@ use crate::util::{login_from_url};
 use duration_str::{parse};
 use futures::select;
 use futures::FutureExt;
+use futures::io::BufWriter;
+use crate::framerw::{FrameReader, FrameWriter};
+use crate::socketrw::{SocketFrameReader, SocketFrameWriter};
 
 #[derive(Debug)]
 pub enum DeviceCommand {
@@ -77,11 +80,12 @@ async fn peer_loop(config: &ClientConfig, device_sender: Sender<DeviceCommand>) 
     // Establish a connection
     info!("Connecting to: {address}");
     let stream = TcpStream::connect(&address).await?;
-    let (reader, mut writer) = (&stream, &stream);
+    let (reader, writer) = (&stream, &stream);
 
-    let mut brd = BufReader::new(reader);
-    let mut frame_reader = crate::connection::FrameReader::new(&mut brd);
-    let mut frame_writer = crate::connection::FrameWriter::new(&mut writer);
+    let brd = BufReader::new(reader);
+    let bwr = BufWriter::new(writer);
+    let mut frame_reader = SocketFrameReader::new(brd);
+    let mut frame_writer = SocketFrameWriter::new(bwr);
 
     // login
     let (user, password) = login_from_url(&url);

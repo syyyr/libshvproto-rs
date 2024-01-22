@@ -3,6 +3,7 @@ use async_std::io::BufReader;
 use async_std::net::TcpStream;
 use futures::select;
 use futures::FutureExt;
+use futures::io::BufWriter;
 use log::{debug, error, info};
 use rand::distributions::{Alphanumeric, DistString};
 use url::Url;
@@ -14,19 +15,21 @@ use crate::util::{join_path, login_from_url, sha1_hash};
 use crate::broker::{BrokerCommand, LoginResult, BrokerToPeerMessage, PeerKind};
 use crate::broker::config::ParentBrokerConfig;
 use crate::broker::Sender;
+use crate::framerw::{FrameReader, FrameWriter};
+use crate::socketrw::{SocketFrameReader, SocketFrameWriter};
 
 pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<BrokerCommand>, stream: TcpStream) -> crate::Result<()> {
     debug!("Entreing peer loop client ID: {client_id}.");
-    let (socket_reader, mut writer) = (&stream, &stream);
+    let (socket_reader, socket_writer) = (&stream, &stream);
     let (peer_writer, peer_reader) = channel::unbounded::<BrokerToPeerMessage>();
 
     broker_writer.send(BrokerCommand::NewPeer { client_id, sender: peer_writer, peer_kind: PeerKind::Client }).await?;
 
-    //let stream_wr = stream.clone();
-    let mut brd = BufReader::new(socket_reader);
+    let brd = BufReader::new(socket_reader);
+    let bwr = BufWriter::new(socket_writer);
 
-    let mut frame_reader = crate::connection::FrameReader::new(&mut brd);
-    let mut frame_writer = crate::connection::FrameWriter::new(&mut writer);
+    let mut frame_reader = SocketFrameReader::new(brd);
+    let mut frame_writer = SocketFrameWriter::new(bwr);
 
     let mut device_options = RpcValue::null();
     let login_result = loop {
@@ -224,11 +227,12 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
     // Establish a connection
     info!("Connecting to parent broker: tcp://{address}");
     let stream = TcpStream::connect(&address).await?;
-    let (reader, mut writer) = (&stream, &stream);
+    let (reader, writer) = (&stream, &stream);
 
-    let mut brd = BufReader::new(reader);
-    let mut frame_reader = crate::connection::FrameReader::new(&mut brd);
-    let mut frame_writer = crate::connection::FrameWriter::new(&mut writer);
+    let brd = BufReader::new(reader);
+    let bwr = BufWriter::new(writer);
+    let mut frame_reader = SocketFrameReader::new(brd);
+    let mut frame_writer = SocketFrameWriter::new(bwr);
 
     // login
     let (user, password) = login_from_url(&url);
