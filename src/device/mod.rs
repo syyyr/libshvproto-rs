@@ -19,7 +19,7 @@ use futures::select;
 use futures::FutureExt;
 use futures::io::BufWriter;
 use crate::framerw::{FrameReader, FrameWriter};
-use crate::socketrw::{SocketFrameReader, SocketFrameWriter};
+use crate::streamrw::{StreamFrameReader, StreamFrameWriter};
 
 #[derive(Debug)]
 pub enum DeviceCommand {
@@ -84,8 +84,8 @@ async fn peer_loop(config: &ClientConfig, device_sender: Sender<DeviceCommand>) 
 
     let brd = BufReader::new(reader);
     let bwr = BufWriter::new(writer);
-    let mut frame_reader = SocketFrameReader::new(brd);
-    let mut frame_writer = SocketFrameWriter::new(bwr);
+    let mut frame_reader = StreamFrameReader::new(brd);
+    let mut frame_writer = StreamFrameWriter::new(bwr);
 
     // login
     let (user, password) = login_from_url(&url);
@@ -121,17 +121,10 @@ async fn peer_loop(config: &ClientConfig, device_sender: Sender<DeviceCommand>) 
             },
             frame = frame_reader.receive_frame().fuse() => match frame {
                 Ok(frame) => {
-                    match frame {
-                        None => {
-                            return Err("Broker socket closed".into());
-                        }
-                        Some(frame) => {
-                            if frame.request_id().unwrap_or_default() == ping_rq_id {
-                                debug!("ping response received: {:?}", frame);
-                            } else {
-                                device_sender.send(DeviceCommand::FrameReceived(frame)).await?;
-                            }
-                        }
+                    if frame.request_id().unwrap_or_default() == ping_rq_id {
+                        debug!("ping response received: {:?}", frame);
+                    } else {
+                        device_sender.send(DeviceCommand::FrameReceived(frame)).await?;
                     }
                 }
                 Err(err) => {

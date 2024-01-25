@@ -4,16 +4,12 @@ use crate::{MetaMap, RpcMessage, RpcMessageMetaTags, RpcValue};
 use crate::rpcmessage::{RpcError, RpcErrorCode, RqId};
 #[async_trait]
 pub trait FrameReader {
-    async fn receive_frame(&mut self) -> crate::Result<Option<RpcFrame>>;
+    async fn receive_frame(&mut self) -> crate::Result<RpcFrame>;
 
-    async fn receive_message(&mut self) -> crate::Result<Option<RpcMessage>> {
-        match self.receive_frame().await? {
-            None => { return Ok(None); }
-            Some(frame) => {
-                let msg = frame.to_rpcmesage()?;
-                return Ok(Some(msg));
-            }
-        }
+    async fn receive_message(&mut self) -> crate::Result<RpcMessage> {
+        let frame = self.receive_frame().await?;
+        let msg = frame.to_rpcmesage()?;
+        Ok(msg)
     }
 }
 

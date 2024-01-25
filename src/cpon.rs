@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use crate::datetime::{IncludeMilliseconds, ToISOStringOptions};
 use crate::writer::{WriteResult, Writer, ByteWriter};
 use crate::metamap::MetaKey;
-use crate::reader::{Reader, ByteReader, ReadError};
+use crate::reader::{Reader, ByteReader, ReadError, ReadErrorReason};
 use crate::rpcvalue::{Map};
 
 pub struct CponWriter<'a, W>
@@ -391,8 +391,8 @@ impl<'a, R> CponReader<'a, R>
     fn get_byte(&mut self) -> Result<u8, ReadError> {
         self.byte_reader.get_byte()
     }
-    fn make_error(&self, msg: &str) -> ReadError {
-        self.byte_reader.make_error(&format!("Cpon read error - {}", msg))
+    fn make_error(&self, msg: &str, reason: ReadErrorReason) -> ReadError {
+        self.byte_reader.make_error(&format!("Cpon read error - {}", msg), reason)
     }
 
     fn skip_white_insignificant(&mut self) -> Result<(), ReadError> {
@@ -429,7 +429,7 @@ impl<'a, R> CponReader<'a, R>
                                 }
                             }
                             _ => {
-                                return Err(self.make_error("Malformed comment"))
+                                return Err(self.make_error("Malformed comment", ReadErrorReason::InvalidCharacter))
                             }
                         }
                     }
@@ -480,7 +480,7 @@ impl<'a, R> CponReader<'a, R>
         let s = std::str::from_utf8(&buff);
         match s {
             Ok(s) => return Ok(Value::from(s)),
-            Err(e) => return Err(self.make_error(&format!("Invalid String, Utf8 error: {}", e))),
+            Err(e) => return Err(self.make_error(&format!("Invalid String, Utf8 error: {}", e), ReadErrorReason::InvalidCharacter)),
         }
     }
     fn decode_byte(&self, b: u8) -> Result<u8, ReadError> {
@@ -488,7 +488,7 @@ impl<'a, R> CponReader<'a, R>
             b'A' ..= b'F' => Ok(b - b'A' + 10),
             b'a' ..= b'f' => Ok(b - b'a' + 10),
             b'0' ..= b'9' => Ok(b - b'0'),
-            c => Err(self.make_error(&format!("Illegal hex encoding character: {}", c))),
+            c => Err(self.make_error(&format!("Illegal hex encoding character: {}", c), ReadErrorReason::InvalidCharacter)),
         }
     }
     fn read_blob_esc(&mut self) -> Result<Value, ReadError> {
@@ -563,7 +563,7 @@ impl<'a, R> CponReader<'a, R>
                         break;
                     }
                     if no_signum {
-                        return Err(self.make_error("Unexpected signum"))
+                        return Err(self.make_error("Unexpected signum", ReadErrorReason::InvalidCharacter))
                     }
                     let b = self.get_byte()?;
                     if b == b'-' {
@@ -633,7 +633,7 @@ impl<'a, R> CponReader<'a, R>
 
         let (n, _, digit_cnt) = self.read_int(false)?;
         if digit_cnt == 0 {
-            return Err(self.make_error("Number should contain at least one digit."))
+            return Err(self.make_error("Number should contain at least one digit.", ReadErrorReason::InvalidCharacter))
         }
         mantisa = n;
         #[derive(PartialEq)]
@@ -649,7 +649,7 @@ impl<'a, R> CponReader<'a, R>
                 }
                 b'.' => {
                     if state != State::Mantisa {
-                        return Err(self.make_error("Unexpected decimal point."))
+                        return Err(self.make_error("Unexpected decimal point.", ReadErrorReason::InvalidCharacter))
                     }
                     state = State::Decimals;
                     is_decimal = true;
@@ -660,7 +660,7 @@ impl<'a, R> CponReader<'a, R>
                 }
                 b'e' | b'E' => {
                     if state != State::Mantisa && state != State::Decimals {
-                        return Err(self.make_error("Unexpected exponet mark."))
+                        return Err(self.make_error("Unexpected exponet mark.", ReadErrorReason::InvalidCharacter))
                     }
                     //state = State::Exponent;
                     is_decimal = true;
@@ -669,7 +669,7 @@ impl<'a, R> CponReader<'a, R>
                     exponent = n as i64;
                     if neg == true { exponent = -exponent; }
                     if digit_cnt == 0 {
-                        return Err(self.make_error("Malformed number exponetional part."))
+                        return Err(self.make_error("Malformed number exponetional part.", ReadErrorReason::InvalidCharacter))
                     }
                     break;
                 }
@@ -726,10 +726,10 @@ impl<'a, R> CponReader<'a, R>
                         Value::String(s) => {
                             s
                         },
-                        _ => return Err(self.make_error("Read MetaMap key internal error")),
+                        _ => return Err(self.make_error("Read MetaMap key internal error", ReadErrorReason::InvalidCharacter)),
                     }
                 },
-                _ => return Err(self.make_error(&format!("Invalid Map key '{}'", b))),
+                _ => return Err(self.make_error(&format!("Invalid Map key '{}'", b), ReadErrorReason::InvalidCharacter)),
             };
             self.skip_white_insignificant()?;
             let val = self.read()?;
@@ -741,7 +741,7 @@ impl<'a, R> CponReader<'a, R>
         self.get_byte()?; // eat 'i'
         let b = self.get_byte()?; // eat '{'
         if b != b'{' {
-            return Err(self.make_error("Wrong IMap prefix, '{' expected."))
+            return Err(self.make_error("Wrong IMap prefix, '{' expected.", ReadErrorReason::InvalidCharacter))
         }
         let mut map: BTreeMap<i32, RpcValue> = BTreeMap::new();
         loop {
@@ -768,11 +768,11 @@ impl<'a, R> CponReader<'a, R>
                     return Ok(Value::from(dt));
                 }
                 Err(err) => {
-                    return Err(self.make_error(&err))
+                    return Err(self.make_error(&err, ReadErrorReason::InvalidCharacter))
                 }
             }
         }
-        return Err(self.make_error("Invalid DateTime"))
+        return Err(self.make_error("Invalid DateTime", ReadErrorReason::InvalidCharacter))
     }
     fn read_true(&mut self) -> Result<Value, ReadError> {
         self.read_token("true")?;
@@ -790,7 +790,7 @@ impl<'a, R> CponReader<'a, R>
         for c in token.as_bytes() {
             let b = self.get_byte()?;
             if b != *c {
-                return Err(self.make_error(&format!("Incomplete '{}' literal.", token)))
+                return Err(self.make_error(&format!("Incomplete '{}' literal.", token), ReadErrorReason::InvalidCharacter))
             }
         }
         return Ok(())
@@ -843,7 +843,7 @@ impl<'a, R> Reader for CponReader<'a, R>
             b't' => self.read_true(),
             b'f' => self.read_false(),
             b'n' => self.read_null(),
-            _ => Err(self.make_error(&format!("Invalid char {}, code: {}", char::from(b), b))),
+            _ => Err(self.make_error(&format!("Invalid char {}, code: {}", char::from(b), b), ReadErrorReason::InvalidCharacter)),
         }?;
         Ok(v)
     }

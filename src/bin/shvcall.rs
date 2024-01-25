@@ -14,7 +14,7 @@ use shv::framerw::{FrameReader, FrameWriter};
 use futures::AsyncReadExt;
 use futures::AsyncWriteExt;
 use futures::io::{BufWriter};
-use shv::socketrw::{SocketFrameReader, SocketFrameWriter};
+use shv::streamrw::{StreamFrameReader, StreamFrameWriter};
 
 type Result = shv::Result<()>;
 
@@ -86,8 +86,8 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
             let (reader, writer) = stream.split();
             let brd = BufReader::new(reader);
             let bwr = BufWriter::new(writer);
-            let frame_reader: BoxedFrameReader = Box::new(SocketFrameReader::new(brd));
-            let frame_writer: BoxedFrameWriter = Box::new(SocketFrameWriter::new(bwr));
+            let frame_reader: BoxedFrameReader = Box::new(StreamFrameReader::new(brd));
+            let frame_writer: BoxedFrameWriter = Box::new(StreamFrameWriter::new(bwr));
             (frame_reader, frame_writer)
         }
         "unixs" => {
@@ -95,8 +95,8 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
             let (reader, writer) = stream.split();
             let brd = BufReader::new(reader);
             let bwr = BufWriter::new(writer);
-            let frame_reader: BoxedFrameReader = Box::new(SocketFrameReader::new(brd));
-            let frame_writer: BoxedFrameWriter = Box::new(SocketFrameWriter::new(bwr));
+            let frame_reader: BoxedFrameReader = Box::new(StreamFrameReader::new(brd));
+            let frame_writer: BoxedFrameWriter = Box::new(StreamFrameWriter::new(bwr));
             (frame_reader, frame_writer)
         }
         s => {
@@ -205,7 +205,7 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
                         };
                         let rqid = send_request(&mut *frame_writer, &path, &method, &param).await?;
                         loop {
-                            let resp = frame_reader.receive_message().await?.ok_or("Receive error")?;
+                            let resp = frame_reader.receive_message().await?;
                             print_resp(&mut stdout, &resp, (&*opts.output_format).into()).await?;
                             if resp.is_response() && resp.request_id().unwrap_or_default() == rqid {
                                 break;
@@ -221,7 +221,7 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
         let method = opts.method.clone().unwrap_or_default();
         let param = opts.param.clone().unwrap_or_default();
         send_request(&mut *frame_writer, &path, &method, &param).await?;
-        let resp = frame_reader.receive_message().await?.ok_or("Receive error")?;
+        let resp = frame_reader.receive_message().await?;
         print_resp(&mut stdout, &resp, (&*opts.output_format).into()).await?;
     }
 

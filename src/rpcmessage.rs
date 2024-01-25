@@ -30,8 +30,6 @@ pub enum Tag {
 #[allow(dead_code)]
 pub enum Key {Params = 1, Result, Error, ErrorCode, ErrorMessage, MAX }
 
-//pub type RpcMessageResult = Result<RpcMessage, &str>;
-
 #[derive(Clone, Debug)]
 pub struct RpcMessage (RpcValue);
 impl RpcMessage {

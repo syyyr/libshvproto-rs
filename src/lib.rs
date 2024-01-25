@@ -17,7 +17,8 @@ pub mod shvnode;
 pub mod rpc;
 pub mod broker;
 pub mod device;
-pub mod socketrw;
+pub mod streamrw;
+pub mod serialrw;
 
 use std::future::Future;
 use async_std::task;

@@ -12,11 +12,11 @@ use crate::client::LoginParams;
 use crate::rpcframe::RpcFrame;
 use crate::shvnode::{DOT_LOCAL_DIR, DOT_LOCAL_GRANT, DOT_LOCAL_HACK, METH_PING};
 use crate::util::{join_path, login_from_url, sha1_hash};
-use crate::broker::{BrokerCommand, LoginResult, BrokerToPeerMessage, PeerKind};
+use crate::broker::{BrokerCommand, BrokerToPeerMessage, PeerKind};
 use crate::broker::config::ParentBrokerConfig;
 use crate::broker::Sender;
 use crate::framerw::{FrameReader, FrameWriter};
-use crate::socketrw::{SocketFrameReader, SocketFrameWriter};
+use crate::streamrw::{StreamFrameReader, StreamFrameWriter};
 
 pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<BrokerCommand>, stream: TcpStream) -> crate::Result<()> {
     debug!("Entreing peer loop client ID: {client_id}.");
@@ -28,16 +28,13 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<BrokerComman
     let brd = BufReader::new(socket_reader);
     let bwr = BufWriter::new(socket_writer);
 
-    let mut frame_reader = SocketFrameReader::new(brd);
-    let mut frame_writer = SocketFrameWriter::new(bwr);
+    let mut frame_reader = StreamFrameReader::new(brd);
+    let mut frame_writer = StreamFrameWriter::new(bwr);
 
     let mut device_options = RpcValue::null();
-    let login_result = loop {
+    loop {
         let nonce = {
-            let frame = match frame_reader.receive_frame().await? {
-                None => break LoginResult::ClientSocketClosed,
-                Some(frame) => { frame }
-            };
+            let frame = frame_reader.receive_frame().await?;
             let rpcmsg = frame.to_rpcmesage()?;
             let resp_meta = RpcFrame::prepare_response_meta(&frame.meta)?;
             if rpcmsg.method().unwrap_or("") != "hello" {
@@ -52,10 +49,7 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<BrokerComman
             nonce
         };
         {
-            let frame = match frame_reader.receive_frame().await? {
-                None => break LoginResult::ClientSocketClosed,
-                Some(frame) => { frame }
-            };
+            let frame = frame_reader.receive_frame().await?;
             let rpcmsg = frame.to_rpcmesage()?;
             let resp_meta = RpcFrame::prepare_response_meta(&frame.meta)?;
             if rpcmsg.method().unwrap_or("") != "login" {
@@ -101,7 +95,7 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<BrokerComman
                                 device_options = device.clone();
                             }
                         }
-                        break LoginResult::Ok;
+                        break;
                     } else {
                         debug!("Client ID: {client_id}, login credentials.");
                         frame_writer.send_error(resp_meta, &format!("Invalid login credentials.")).await?;
@@ -114,58 +108,48 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<BrokerComman
             }
         }
     };
-    if let LoginResult::Ok = login_result {
-        debug!("Client ID: {client_id} login sucess.");
-        let register_device = BrokerCommand::RegisterDevice {
-            client_id,
-            device_id: device_options.as_map().get("deviceId").map(|v| v.as_str().to_string()),
-            mount_point: device_options.as_map().get("mountPoint").map(|v| v.as_str().to_string()),
-            subscribe_path: None,
-        };
-        broker_writer.send(register_device).await.unwrap();
-        loop {
-            select! {
-                frame = frame_reader.receive_frame().fuse() => match frame {
-                    Ok(frame) => {
-                        match frame {
-                            None => {
-                                debug!("Client socket closed");
-                                break;
-                            }
-                            Some(frame) => {
-                                // log!(target: "RpcMsg", Level::Debug, "----> Recv frame, client id: {}", client_id);
-                                broker_writer.send(BrokerCommand::FrameReceived { client_id, frame }).await?;
-                            }
+    debug!("Client ID: {client_id} login sucess.");
+    let register_device = BrokerCommand::RegisterDevice {
+        client_id,
+        device_id: device_options.as_map().get("deviceId").map(|v| v.as_str().to_string()),
+        mount_point: device_options.as_map().get("mountPoint").map(|v| v.as_str().to_string()),
+        subscribe_path: None,
+    };
+    broker_writer.send(register_device).await.unwrap();
+    loop {
+        select! {
+            frame = frame_reader.receive_frame().fuse() => match frame {
+                Ok(frame) => {
+                    // log!(target: "RpcMsg", Level::Debug, "----> Recv frame, client id: {}", client_id);
+                    broker_writer.send(BrokerCommand::FrameReceived { client_id, frame }).await?;
+                }
+                Err(e) => {
+                    error!("Read socket error: {}", &e);
+                    break;
+                }
+            },
+            event = peer_reader.recv().fuse() => match event {
+                Err(e) => {
+                    debug!("Peer channel closed: {}", &e);
+                    break;
+                }
+                Ok(event) => {
+                    match event {
+                        BrokerToPeerMessage::PasswordSha1(_) => {
+                            panic!("PasswordSha1 cannot be received here")
                         }
-                    }
-                    Err(e) => {
-                        error!("Read socket error: {}", &e);
-                        break;
-                    }
-                },
-                event = peer_reader.recv().fuse() => match event {
-                    Err(e) => {
-                        debug!("Peer channel closed: {}", &e);
-                        break;
-                    }
-                    Ok(event) => {
-                        match event {
-                            BrokerToPeerMessage::PasswordSha1(_) => {
-                                panic!("PasswordSha1 cannot be received here")
-                            }
-                            BrokerToPeerMessage::DisconnectByBroker => {
-                                info!("Disconnected by broker, client ID: {client_id}");
-                                break;
-                            }
-                            BrokerToPeerMessage::SendFrame(frame) => {
-                                // log!(target: "RpcMsg", Level::Debug, "<---- Send frame, client id: {}", client_id);
-                                frame_writer.send_frame(frame).await?;
-                            }
-                            BrokerToPeerMessage::SendMessage(rpcmsg) => {
-                                // log!(target: "RpcMsg", Level::Debug, "<---- Send message, client id: {}", client_id);
-                                frame_writer.send_message(rpcmsg).await?;
-                            },
+                        BrokerToPeerMessage::DisconnectByBroker => {
+                            info!("Disconnected by broker, client ID: {client_id}");
+                            break;
                         }
+                        BrokerToPeerMessage::SendFrame(frame) => {
+                            // log!(target: "RpcMsg", Level::Debug, "<---- Send frame, client id: {}", client_id);
+                            frame_writer.send_frame(frame).await?;
+                        }
+                        BrokerToPeerMessage::SendMessage(rpcmsg) => {
+                            // log!(target: "RpcMsg", Level::Debug, "<---- Send message, client id: {}", client_id);
+                            frame_writer.send_message(rpcmsg).await?;
+                        },
                     }
                 }
             }
@@ -231,8 +215,8 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
 
     let brd = BufReader::new(reader);
     let bwr = BufWriter::new(writer);
-    let mut frame_reader = SocketFrameReader::new(brd);
-    let mut frame_writer = SocketFrameWriter::new(bwr);
+    let mut frame_reader = StreamFrameReader::new(brd);
+    let mut frame_writer = StreamFrameWriter::new(bwr);
 
     // login
     let (user, password) = login_from_url(&url);
@@ -263,11 +247,7 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
                 frame_writer.send_message(msg).await?;
             },
             res_frame = frame_reader.receive_frame().fuse() => match res_frame {
-                Ok(None) => {
-                    info!("Parent broker socket closed");
-                    return Err("Parent broker socket closed".into());
-                }
-                Ok(Some(mut frame)) => {
+                Ok(mut frame) => {
                     if frame.is_request() {
                         fn is_dot_local_granted(frame: &RpcFrame) -> bool {
                                 let access = frame.access().unwrap_or_default();
@@ -300,7 +280,7 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
                     }
                 }
                 Err(e) => {
-                    error!("Parent broker receive frame error - {e}");
+                    return Err(format!("Read frame error: {e}").into());
                 }
             },
             event = broker_to_peer_receiver.recv().fuse() => match event {

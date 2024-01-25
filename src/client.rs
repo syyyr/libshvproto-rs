@@ -79,7 +79,7 @@ pub async fn login(frame_reader: &mut (dyn FrameReader + Send), frame_writer: &m
 {
     let rq = RpcMessage::new_request("", "hello", None);
     frame_writer.send_message(rq).await?;
-    let resp = frame_reader.receive_message().await?.unwrap_or_default();
+    let resp = frame_reader.receive_message().await?;
     if !resp.is_success() {
         return Err(resp.error().unwrap().to_rpcvalue().to_cpon().into());
     }
@@ -90,7 +90,7 @@ pub async fn login(frame_reader: &mut (dyn FrameReader + Send), frame_writer: &m
     login_params.password = std::str::from_utf8(&hash)?.into();
     let rq = RpcMessage::new_request("", "login", Some(login_params.to_rpcvalue()));
     frame_writer.send_message(rq).await?;
-    let resp = frame_reader.receive_message().await?.ok_or("Socked closed")?;
+    let resp = frame_reader.receive_message().await?;
     match resp.result()?.as_map().get("clientId") {
         None => { Ok(0) }
         Some(client_id) => { Ok(client_id.as_i32()) }

@@ -21,11 +21,6 @@ pub mod node;
 mod test;
 mod broker;
 
-pub(crate) enum LoginResult {
-    Ok,
-    ClientSocketClosed,
-}
-
 #[derive(Debug)]
 pub(crate) enum BrokerCommand {
     GetPassword {

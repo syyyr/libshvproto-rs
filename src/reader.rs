@@ -2,13 +2,18 @@ use std::fmt::{Display, Formatter};
 use std::io::Read;
 use crate::{MetaMap, RpcValue};
 use crate::rpcvalue::Value;
-
+#[derive(Debug)]
+pub enum ReadErrorReason {
+    UnexpectedEndOfStream,
+    InvalidCharacter,
+}
 #[derive(Debug)]
 pub struct ReadError {
     pub msg: String,
     pub pos: usize,
     pub line: usize,
     pub col: usize,
+    pub reason: ReadErrorReason,
 }
 
 impl Display for ReadError {
@@ -71,11 +76,11 @@ where R: Read
             match r {
                 Ok(n) => {
                     if n == 0 {
-                        return Err(self.make_error("Unexpected end of stream."))
+                        return Err(self.make_error("Unexpected end of stream.", ReadErrorReason::UnexpectedEndOfStream))
                     }
                     ret_b = arr[0];
                 }
-                Err(e) => return Err(self.make_error(&e.to_string()))
+                Err(e) => return Err(self.make_error(&e.to_string(), ReadErrorReason::InvalidCharacter))
             }
         }
         self.pos += 1;
@@ -92,8 +97,8 @@ where R: Read
         Ok(ret_b)
     }
 
-    pub(crate) fn make_error(&self, msg: &str) -> ReadError {
-        ReadError { msg: msg.to_string(), pos: self.pos, line: self.line, col: self.col }
+    pub(crate) fn make_error(&self, msg: &str, reason: ReadErrorReason) -> ReadError {
+        ReadError { msg: msg.to_string(), pos: self.pos, line: self.line, col: self.col, reason }
     }
 }
 

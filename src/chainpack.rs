@@ -3,7 +3,7 @@ use std::io;
 use crate::writer::{ByteWriter, Writer};
 use std::io::{Write, Read};
 use std::collections::BTreeMap;
-use crate::reader::{Reader, ByteReader, ReadError};
+use crate::reader::{Reader, ByteReader, ReadError, ReadErrorReason};
 use crate::rpcvalue::{Map, IMap};
 
 #[warn(non_camel_case_types)]
@@ -321,15 +321,17 @@ impl<'a, R> ChainPackReader<'a, R>
     pub fn new(read: &'a mut R) -> Self {
         ChainPackReader { byte_reader: ByteReader::new(read) }
     }
-
+    pub fn position(&self) -> usize {
+        self.byte_reader.pos
+    }
     fn peek_byte(&mut self) -> u8 {
         self.byte_reader.peek_byte()
     }
     fn get_byte(&mut self) -> Result<u8, ReadError> {
         self.byte_reader.get_byte()
     }
-    fn make_error(&self, msg: &str) -> ReadError {
-        self.byte_reader.make_error(&format!("ChainPack read error - {}", msg))
+    fn make_error(&self, msg: &str, reason: ReadErrorReason) -> ReadError {
+        self.byte_reader.make_error(&format!("ChainPack read error - {}", msg), reason)
     }
 
     /// return (n, bitlen)
@@ -394,7 +396,7 @@ impl<'a, R> ChainPackReader<'a, R>
         let s = std::str::from_utf8(&buff);
         match s {
             Ok(s) => return Ok(Value::from(s)),
-            Err(e) => return Err(self.make_error(&format!("Invalid string, Utf8 error: {}", e))),
+            Err(e) => return Err(self.make_error(&format!("Invalid string, Utf8 error: {}", e), ReadErrorReason::InvalidCharacter)),
         }
     }
     fn read_string_data(&mut self) -> Result<Value, ReadError> {
@@ -407,7 +409,7 @@ impl<'a, R> ChainPackReader<'a, R>
         let s = std::str::from_utf8(&buff);
         match s {
             Ok(s) => return Ok(Value::from(s)),
-            Err(e) => return Err(self.make_error(&format!("Invalid string, Utf8 error: {}", e))),
+            Err(e) => return Err(self.make_error(&format!("Invalid string, Utf8 error: {}", e), ReadErrorReason::InvalidCharacter)),
         }
     }
     fn read_blob_data(&mut self) -> Result<Value, ReadError> {
@@ -446,7 +448,7 @@ impl<'a, R> ChainPackReader<'a, R>
                 key = k.as_str();
             }
             else {
-                return Err(self.make_error(&format!("Invalid Map key '{}'", k)))
+                return Err(self.make_error(&format!("Invalid Map key '{}'", k), ReadErrorReason::InvalidCharacter))
             }
             let val = self.read()?;
             map.insert(key.to_string(), val);
@@ -467,7 +469,7 @@ impl<'a, R> ChainPackReader<'a, R>
                 key = k.as_i32();
             }
             else {
-                return Err(self.make_error(&format!("Invalid IMap key '{}'", k)))
+                return Err(self.make_error(&format!("Invalid IMap key '{}'", k), ReadErrorReason::InvalidCharacter))
             }
             let val = self.read()?;
             map.insert(key, val);
@@ -497,7 +499,7 @@ impl<'a, R> ChainPackReader<'a, R>
     fn read_double_data(&mut self) -> Result<Value, ReadError> {
         let mut buff: [u8;8] = [0;8];
         if let Err(e) = self.byte_reader.read.read(&mut buff) {
-            return Err(self.make_error(&format!("{}", e)))
+            return Err(self.make_error(&format!("{}", e), ReadErrorReason::InvalidCharacter))
         }
         let d = f64::from_le_bytes(buff);
         return Ok(Value::from(d))
@@ -536,7 +538,7 @@ impl<'a, R> Reader for ChainPackReader<'a, R>
                     map.insert(&**s.clone(), val);
                 }
                 _ => {
-                    return Err(self.make_error(&format!("MetaMap key must be int or string, got: {}", key.type_name())))
+                    return Err(self.make_error(&format!("MetaMap key must be int or string, got: {}", key.type_name()), ReadErrorReason::InvalidCharacter))
                 }
             }
         }
@@ -594,7 +596,7 @@ impl<'a, R> Reader for ChainPackReader<'a, R>
             } else if b == PackingSchema::Null as u8 {
                 Value::from(())
             } else {
-                return Err(self.make_error(&format!("Invalid Packing schema: {}", b)))
+                return Err(self.make_error(&format!("Invalid Packing schema: {}", b), ReadErrorReason::InvalidCharacter))
             };
 
         Ok(v)
