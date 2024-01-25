@@ -61,7 +61,9 @@ impl RpcMessage {
         let old_id = G_RPC_REQUEST_COUNT.fetch_add(1, Ordering::SeqCst);
         old_id + 1
     }
-
+    pub fn to_frame(&self) -> crate::Result<RpcFrame> {
+        RpcFrame::from_rpcmessage(self)
+    }
     pub fn param(&self) -> Option<&RpcValue> { self.key(Key::Params as i32) }
     pub fn set_param(&mut self, rv: RpcValue) -> &mut Self  { self.set_key(Key::Params, Some(rv)); self }
     pub fn set_param_opt(&mut self, rv: Option<RpcValue>) -> &mut Self  { self.set_key(Key::Params, rv); self }

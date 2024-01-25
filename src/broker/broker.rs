@@ -219,7 +219,7 @@ impl Broker {
                 let peer = self.peers.get_mut(&peer_id).expect("valid peer ID");
                 let mut msg = RpcMessage::from_meta(meta);
                 msg.set_result_or_error(result);
-                peer.sender.send(BrokerToPeerMessage::SendFrame(RpcFrame::from_rpcmessage(msg)?)).await?;
+                peer.sender.send(BrokerToPeerMessage::SendFrame(RpcFrame::from_rpcmessage(&msg)?)).await?;
             }
             BrokerCommand::RpcCall { client_id, request, response_sender } => {
                 let rq_id = request.request_id().unwrap_or_default();

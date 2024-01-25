@@ -1,11 +1,12 @@
-use std::io::BufReader;
+use std::io::{BufReader};
+use async_std::io::BufWriter;
 use async_trait::async_trait;
 use crc::CRC_32_ISO_HDLC;
 use crate::writer::Writer;
 use crate::rpcframe::{Protocol, RpcFrame};
 use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use log::*;
-use crate::{ChainPackReader, ChainPackWriter, Reader};
+use crate::{ChainPackReader, ChainPackWriter, Reader, RpcMessage};
 use crate::framerw::{FrameReader, FrameWriter};
 
 const STX: u8 = 0xA2;
@@ -29,17 +30,24 @@ pub struct SerialFrameReader<R: AsyncRead + Unpin + Send> {
     with_crc: bool,
 }
 impl<R: AsyncRead + Unpin + Send> SerialFrameReader<R> {
-    pub fn new(reader: R, with_crc: bool) -> Self {
+    pub fn new(reader: R) -> Self {
         Self {
             reader,
-            with_crc,
+            with_crc: false,
         }
+    }
+    pub fn with_crc_check(mut self, on: bool) -> Self {
+        self.with_crc = on;
+        self
     }
     async fn get_byte(&mut self) -> crate::Result<u8> {
         let mut buff = [0u8; 1];
         let n = self.reader.read(&mut buff[..]).await?;
-        assert!(n == 1);
-        Ok(buff[0])
+        if n == 0 {
+            Err("End of stream".into())
+        } else {
+            Ok(buff[0])
+        }
     }
     async fn get_escaped_byte(&mut self) -> crate::Result<crate::serialrw::Byte> {
         match self.get_byte().await? {
@@ -67,6 +75,25 @@ impl<R: AsyncRead + Unpin + Send> SerialFrameReader<R> {
             b => { return Ok(crate::serialrw::Byte::Data(b)) }
         }
     }
+    async fn read_escaped(&mut self) -> crate::Result<Vec<u8>> {
+        let mut data: Vec<u8> = Default::default();
+        loop {
+            match self.get_escaped_byte().await {
+                Ok(b) => {
+                    match b {
+                        Byte::Data(b) => { data.push(b) }
+                        Byte::Stx => { data.push( STX) }
+                        Byte::Etx => { data.push( ETX ) }
+                        Byte::Atx => { data.push( ATX ) }
+                        Byte::FramingError(e) => { return Err(format!("Framing error, invalid character {e}").into()) }
+                    }
+                }
+                Err(_) => { break }
+            }
+        }
+        Ok(data)
+    }
+
 }
 #[async_trait]
 impl<R: AsyncRead + Unpin + Send> FrameReader for SerialFrameReader<R> {
@@ -144,20 +171,31 @@ pub struct SerialFrameWriter<W: AsyncWrite + Unpin + Send> {
     with_crc: bool,
 }
 impl<W: AsyncWrite + Unpin + Send> SerialFrameWriter<W> {
-    pub fn new(writer: W, with_crc: bool) -> Self {
+    pub fn new(writer: W) -> Self {
         Self {
             writer,
-            with_crc,
+            with_crc: false,
         }
     }
-    async fn write_escaped(&mut self, digest: &mut crc::Digest<'_, u32>, data: &[u8]) -> crate::Result<()> {
+    pub fn with_crc_check(mut self, on: bool) -> Self {
+        self.with_crc = on;
+        self
+    }
+    async fn write_bytes(&mut self, digest: &mut Option<crc::Digest<'_, u32>>, data: &[u8]) -> crate::Result<()> {
+        if let Some(ref mut digest) = digest {
+            digest.update(data);
+        }
+        self.writer.write(data).await?;
+        Ok(())
+    }
+    async fn write_escaped(&mut self, digest: &mut Option<crc::Digest<'_, u32>>, data: &[u8]) -> crate::Result<()> {
         for b in data {
             match *b {
-                STX => { let data = [ESC, ESTX]; digest.update(&data);  self.writer.write(&data).await? }
-                ETX => { let data = [ESC, EETX]; digest.update(&data);  self.writer.write(&data).await? }
-                ATX => { let data = [ESC, EATX]; digest.update(&data);  self.writer.write(&data).await? }
-                ESC => { let data = [ESC, EESC]; digest.update(&data);  self.writer.write(&data).await? }
-                b => { let data = [b]; digest.update(&data);  self.writer.write(&data).await? }
+                STX => { self.write_bytes(digest, &[ESC, ESTX]).await? }
+                ETX => { self.write_bytes(digest, &[ESC, EETX]).await? }
+                ATX => { self.write_bytes(digest, &[ESC, EATX]).await? }
+                ESC => { self.write_bytes(digest, &[ESC, EESC]).await? }
+                b => { self.write_bytes(digest, &[b]).await? }
             };
         }
         Ok(())
@@ -168,7 +206,11 @@ impl<W: AsyncWrite + Unpin + Send> FrameWriter for SerialFrameWriter<W> {
     async fn send_frame(&mut self, frame: RpcFrame) -> crate::Result<()> {
         log!(target: "RpcMsg", Level::Debug, "S<== {}", &frame.to_rpcmesage().unwrap_or_default());
         let gen = crc::Crc::<u32>::new(&CRC_32_ISO_HDLC);
-        let mut digest = gen.digest();
+        let mut digest = if self.with_crc {
+            Some(gen.digest())
+        } else {
+            None
+        };
         let mut meta_data = Vec::new();
         {
             let mut wr = ChainPackWriter::new(&mut meta_data);
@@ -176,8 +218,7 @@ impl<W: AsyncWrite + Unpin + Send> FrameWriter for SerialFrameWriter<W> {
         }
         self.writer.write(&[STX]).await?;
         let protocol = [Protocol::ChainPack as u8];
-        self.writer.write(&protocol).await?;
-        digest.update(&protocol);
+        self.write_escaped(&mut digest, &protocol).await?;
         self.write_escaped(&mut digest, &meta_data).await?;
         self.write_escaped(&mut digest, &frame.data).await?;
         self.writer.write(&[ETX]).await?;
@@ -189,9 +230,8 @@ impl<W: AsyncWrite + Unpin + Send> FrameWriter for SerialFrameWriter<W> {
                 let b4 : u8 = (x & 0xff) as u8;
                 return [b4, b3, b2, b1]
             }
-            let crc_bytes = u32_to_bytes(digest.finalize());
-            let mut digest = gen.digest();
-            self.write_escaped(&mut digest, &crc_bytes).await?;
+            let crc_bytes = u32_to_bytes(digest.unwrap().finalize());
+            self.write_escaped(&mut None, &crc_bytes).await?;
         }
         // Ensure the encoded frame is written to the socket. The calls above
         // are to the buffered stream and writes. Calling `flush` writes the
@@ -201,4 +241,50 @@ impl<W: AsyncWrite + Unpin + Send> FrameWriter for SerialFrameWriter<W> {
     }
 }
 
-
+#[async_std::test]
+async fn test_write_bytes() {
+    for (data, esc_data) in [
+        (&b"hello"[..], &b"hello"[..]),
+        (&[STX], &[ESC, ESTX]),
+        (&[ETX], &[ESC, EETX]),
+        (&[ATX], &[ESC, EATX]),
+        (&[ESC], &[ESC, EESC]),
+        (&[STX, ESC], &[ESC, ESTX, ESC, EESC]),
+    ] {
+        let mut buff: Vec<u8> = vec![];
+        {
+            let buffwr = BufWriter::new(&mut buff);
+            let mut wr = SerialFrameWriter::new(buffwr);
+            wr.write_escaped(&mut None, data).await.unwrap();
+            //drop(wr);
+            wr.writer.flush().await.unwrap();
+            assert_eq!(&buff, esc_data);
+        }
+        {
+            let buffrd = async_std::io::BufReader::new(&*buff);
+            let mut rd = SerialFrameReader::new(buffrd);
+            let read_data = rd.read_escaped().await.unwrap();
+            assert_eq!(&read_data, data);
+        }
+    }
+}
+#[async_std::test]
+async fn test_write_frame() {
+    let msg = RpcMessage::new_request(".app", "ping", None);
+    for with_crc in [false, true] {
+        let frame = msg.to_frame().unwrap();
+        let mut buff: Vec<u8> = vec![];
+        let buffwr = BufWriter::new(&mut buff);
+        {
+            let mut wr = SerialFrameWriter::new(buffwr).with_crc_check(with_crc);
+            wr.send_frame(frame.clone()).await.unwrap();
+        }
+        {
+            let buffrd = async_std::io::BufReader::new(&*buff);
+            let mut rd = SerialFrameReader::new(buffrd).with_crc_check(with_crc);
+            let rd_frame = rd.receive_frame().await.unwrap();
+            assert_eq!(&rd_frame, &frame);
+        }
+        println!("{:?}", buff);
+    }
+}

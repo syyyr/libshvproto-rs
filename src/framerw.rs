@@ -17,8 +17,7 @@ pub trait FrameReader {
 pub trait FrameWriter {
     async fn send_frame(&mut self, frame: RpcFrame) -> crate::Result<()>;
     async fn send_message(&mut self, msg: RpcMessage) -> crate::Result<()> {
-        let frame = RpcFrame::from_rpcmessage(msg)?;
-        self.send_frame(frame).await?;
+        self.send_frame(msg.to_frame()?).await?;
         Ok(())
     }
     async fn send_error(&mut self, meta: MetaMap, errmsg: &str) -> crate::Result<()> {

@@ -4,14 +4,14 @@ use crate::{ChainPackReader, ChainPackWriter, CponReader, MetaMap, RpcMessage, R
 use crate::writer::Writer;
 use crate::reader::Reader;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RpcFrame {
     pub protocol: Protocol,
     pub meta: MetaMap,
     pub data: Vec<u8>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Protocol {
     ChainPack = 1,
     Cpon,
@@ -28,7 +28,7 @@ impl RpcFrame {
     pub fn new(protocol: Protocol, meta: MetaMap, data: Vec<u8>) -> RpcFrame {
         RpcFrame { protocol, meta, data }
     }
-    pub fn from_rpcmessage(msg: RpcMessage) -> crate::Result<RpcFrame> {
+    pub fn from_rpcmessage(msg: &RpcMessage) -> crate::Result<RpcFrame> {
         let mut data = Vec::new();
         {
             let mut wr = ChainPackWriter::new(&mut data);

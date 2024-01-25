@@ -17,7 +17,7 @@ struct CallCtx<'a> {
 
 async fn call(path: &str, method: &str, param: Option<RpcValue>, ctx: &CallCtx<'_>) -> RpcValue {
     let msg = RpcMessage::new_request(path, method, param);
-    let frame = RpcFrame::from_rpcmessage(msg).expect("valid message");
+    let frame = RpcFrame::from_rpcmessage(&msg).expect("valid message");
     println!("request: {}", frame.to_rpcmesage().unwrap());
     ctx.writer.send(BrokerCommand::FrameReceived { client_id: ctx.client_id, frame }).await.unwrap();
     let retval = loop {

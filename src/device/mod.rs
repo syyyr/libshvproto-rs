@@ -114,7 +114,7 @@ async fn peer_loop(config: &ClientConfig, device_sender: Sender<DeviceCommand>) 
             _ = future::timeout(time_to_ping, future::pending::<()>()).fuse() => {
                 let msg = RpcMessage::new_request(DIR_APP, METH_PING, None);
                 debug!("sending ping: {:?}", msg);
-                let frame = RpcFrame::from_rpcmessage(msg)?;
+                let frame = RpcFrame::from_rpcmessage(&msg)?;
                 ping_rq_id = frame.try_request_id()?;
                 frame_writer.send_frame(frame).await?;
                 recent_ping_ts = Instant::now();
@@ -212,19 +212,18 @@ impl<S: State> Device<S> {
                 if let Some(sender) = &self.peer_sender {
                     let mut msg = RpcMessage::from_meta(meta);
                     msg.set_result_or_error(result);
-                    sender.send(DeviceToPeerCommand::SendFrame(RpcFrame::from_rpcmessage(msg)?)).await?;
+                    sender.send(DeviceToPeerCommand::SendFrame(RpcFrame::from_rpcmessage(&msg)?)).await?;
                 }
             }
             DeviceCommand::SendSignal { shv_path, method, value } => {
                 if let Some(sender) = &self.peer_sender {
                     let msg = RpcMessage::new_signal(&shv_path, &method, value);
-                    sender.send(DeviceToPeerCommand::SendFrame(RpcFrame::from_rpcmessage(msg)?)).await?;
+                    sender.send(DeviceToPeerCommand::SendFrame(RpcFrame::from_rpcmessage(&msg)?)).await?;
                 }
             }
             DeviceCommand::RpcCall { request, response_sender } => {
                 let rq_id = request.try_request_id()?;
-                let frame = RpcFrame::from_rpcmessage(request)?;
-                match self.command_sender.send(DeviceCommand::SendFrame(frame)).await {
+                match self.command_sender.send(DeviceCommand::SendFrame(request.to_frame()?)).await {
                     Ok(_) => {
                         self.pending_rpc_calls.push(PendingRpcCall{ request_id: rq_id, response_sender });
                     }
