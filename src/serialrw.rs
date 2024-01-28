@@ -10,7 +10,7 @@ use crate::{ChainPackReader, ChainPackWriter, Reader, RpcMessage};
 use crate::framerw::{FrameReader, FrameWriter};
 
 const STX: u8 = 0xA2;
-const ETX: u8 = 0xA;
+const ETX: u8 = 0xA3;
 const ATX: u8 = 0xA4;
 const ESC: u8 = 0xAA;
 
@@ -121,18 +121,18 @@ impl<R: AsyncRead + Unpin + Send> FrameReader for SerialFrameReader<R> {
                     _ => { continue 'read_frame }
                 }
             }
-            let mut crc_data = [0u8; 4];
-            for i in 0..4 {
-                match self.get_escaped_byte().await? {
-                    Byte::Stx => {
-                        has_stx = true;
-                        continue 'read_frame
-                    }
-                    Byte::Data(b) => { crc_data[i] = b }
-                    _ => { continue 'read_frame }
-                }
-            }
             if self.with_crc {
+                let mut crc_data = [0u8; 4];
+                for i in 0..4 {
+                    match self.get_escaped_byte().await? {
+                        Byte::Stx => {
+                            has_stx = true;
+                            continue 'read_frame
+                        }
+                        Byte::Data(b) => { crc_data[i] = b }
+                        _ => { continue 'read_frame }
+                    }
+                }
                 fn as_u32_be(array: &[u8; 4]) -> u32 {
                     ((array[0] as u32) << 24) +
                         ((array[1] as u32) << 16) +
@@ -142,6 +142,7 @@ impl<R: AsyncRead + Unpin + Send> FrameReader for SerialFrameReader<R> {
                 let crc1 = as_u32_be(&crc_data);
                 let gen = crc::Crc::<u32>::new(&CRC_32_ISO_HDLC);
                 let crc2 = gen.checksum(&data);
+                //println!("CRC2 {crc2}");
                 if crc1 != crc2 {
                     log!(target: "Serial", Level::Debug, "CRC error");
                     continue 'read_frame
@@ -224,13 +225,15 @@ impl<W: AsyncWrite + Unpin + Send> FrameWriter for SerialFrameWriter<W> {
         self.writer.write(&[ETX]).await?;
         if self.with_crc {
             fn u32_to_bytes(x:u32) -> [u8;4] {
-                let b1 : u8 = ((x >> 24) & 0xff) as u8;
-                let b2 : u8 = ((x >> 16) & 0xff) as u8;
-                let b3 : u8 = ((x >> 8) & 0xff) as u8;
-                let b4 : u8 = (x & 0xff) as u8;
-                return [b4, b3, b2, b1]
+                let b0 : u8 = ((x >> 24) & 0xff) as u8;
+                let b1 : u8 = ((x >> 16) & 0xff) as u8;
+                let b2 : u8 = ((x >> 8) & 0xff) as u8;
+                let b3 : u8 = (x & 0xff) as u8;
+                return [b0, b1, b2, b3]
             }
-            let crc_bytes = u32_to_bytes(digest.unwrap().finalize());
+            let crc = digest.expect("digest should be some here").finalize();
+            //println!("CRC1 {crc}");
+            let crc_bytes = u32_to_bytes(crc);
             self.write_escaped(&mut None, &crc_bytes).await?;
         }
         // Ensure the encoded frame is written to the socket. The calls above
@@ -268,6 +271,7 @@ async fn test_write_bytes() {
         }
     }
 }
+
 #[async_std::test]
 async fn test_write_frame() {
     let msg = RpcMessage::new_request(".app", "ping", None);
@@ -279,12 +283,21 @@ async fn test_write_frame() {
             let mut wr = SerialFrameWriter::new(buffwr).with_crc_check(with_crc);
             wr.send_frame(frame.clone()).await.unwrap();
         }
-        {
-            let buffrd = async_std::io::BufReader::new(&*buff);
+        for prefix in [
+            b"".to_vec(),
+            b"1234".to_vec(),
+            [STX].to_vec(),
+            [STX, ESC, 1u8].to_vec(),
+            [ATX].to_vec(),
+        ] {
+            let mut buff2: Vec<u8> = prefix;
+            buff2.append(&mut buff.clone());
+            //println!("bytes:\n{}\n-------------", hex_dump(&buff2));
+            let buffrd = async_std::io::BufReader::new(&*buff2);
             let mut rd = SerialFrameReader::new(buffrd).with_crc_check(with_crc);
             let rd_frame = rd.receive_frame().await.unwrap();
             assert_eq!(&rd_frame, &frame);
+
         }
-        println!("{:?}", buff);
     }
 }
