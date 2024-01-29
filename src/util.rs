@@ -139,6 +139,17 @@ pub fn split_glob_on_match<'a, 'b>(glob_pattern: &'a str, shv_path: &'b str) -> 
         Ok(None)
     }
 }
+pub fn hex_array(data: &[u8]) -> String {
+    let mut ret = "[".to_string();
+    for b in data {
+        if ret.len() > 1 {
+            ret += ",";
+        }
+        ret += &format!("0x{:02x}", b);
+    }
+    ret += "]";
+    ret
+}
 pub fn hex_dump(data: &[u8]) -> String {
     let mut ret: String = Default::default();
     let mut hex_line: String = Default::default();

@@ -8,6 +8,7 @@ use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use log::*;
 use crate::{ChainPackReader, ChainPackWriter, Reader, RpcMessage};
 use crate::framerw::{FrameReader, FrameWriter};
+use crate::util::{hex_array, hex_dump};
 
 const STX: u8 = 0xA2;
 const ETX: u8 = 0xA3;
@@ -274,7 +275,7 @@ async fn test_write_bytes() {
 
 #[async_std::test]
 async fn test_write_frame() {
-    let msg = RpcMessage::new_request(".app", "ping", None);
+    let msg = RpcMessage::new_request("foo/bar", "baz", Some("hello".into()));
     for with_crc in [false, true] {
         let frame = msg.to_frame().unwrap();
         let mut buff: Vec<u8> = vec![];
@@ -283,6 +284,9 @@ async fn test_write_frame() {
             let mut wr = SerialFrameWriter::new(buffwr).with_crc_check(with_crc);
             wr.send_frame(frame.clone()).await.unwrap();
         }
+        debug!("msg: {}", msg);
+        debug!("array: {}", hex_array(&buff));
+        debug!("bytes:\n{}\n-------------", hex_dump(&buff));
         for prefix in [
             b"".to_vec(),
             b"1234".to_vec(),
@@ -292,7 +296,6 @@ async fn test_write_frame() {
         ] {
             let mut buff2: Vec<u8> = prefix;
             buff2.append(&mut buff.clone());
-            //println!("bytes:\n{}\n-------------", hex_dump(&buff2));
             let buffrd = async_std::io::BufReader::new(&*buff2);
             let mut rd = SerialFrameReader::new(buffrd).with_crc_check(with_crc);
             let rd_frame = rd.receive_frame().await.unwrap();

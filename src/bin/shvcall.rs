@@ -105,8 +105,8 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
             let (reader, writer) = stream.split();
             let brd = BufReader::new(reader);
             let bwr = BufWriter::new(writer);
-            let frame_reader: BoxedFrameReader = Box::new(SerialFrameReader::new(brd));
-            let frame_writer: BoxedFrameWriter = Box::new(SerialFrameWriter::new(bwr));
+            let frame_reader: BoxedFrameReader = Box::new(SerialFrameReader::new(brd).with_crc_check(false));
+            let frame_writer: BoxedFrameWriter = Box::new(SerialFrameWriter::new(bwr).with_crc_check(false));
             (frame_reader, frame_writer)
         }
         s => {
