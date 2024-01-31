@@ -1,14 +1,11 @@
 use std::io::{BufReader};
-use async_std::io::BufWriter;
 use async_trait::async_trait;
 use crc::CRC_32_ISO_HDLC;
-use crate::writer::Writer;
 use crate::rpcframe::{Protocol, RpcFrame};
 use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use log::*;
-use crate::{ChainPackReader, ChainPackWriter, Reader, RpcMessage};
-use crate::framerw::{FrameReader, FrameWriter};
-use crate::util::{hex_array, hex_dump};
+use crate::{ChainPackReader, Reader};
+use crate::framerw::{FrameReader, FrameWriter, serialize_meta};
 
 const STX: u8 = 0xA2;
 const ETX: u8 = 0xA3;
@@ -76,6 +73,7 @@ impl<R: AsyncRead + Unpin + Send> SerialFrameReader<R> {
             b => { return Ok(crate::serialrw::Byte::Data(b)) }
         }
     }
+    #[cfg(test)]
     async fn read_escaped(&mut self) -> crate::Result<Vec<u8>> {
         let mut data: Vec<u8> = Default::default();
         loop {
@@ -159,7 +157,9 @@ impl<R: AsyncRead + Unpin + Send> FrameReader for SerialFrameReader<R> {
             if let Ok(Some(meta)) = rd.try_read_meta() {
                 let pos = rd.position() + 1;
                 let data: Vec<_> = data.drain(pos .. ).collect();
-                return Ok(RpcFrame { protocol: Protocol::ChainPack, meta, data })
+                let frame  = RpcFrame { protocol: Protocol::ChainPack, meta, data };
+                log!(target: "RpcMsg", Level::Debug, "R==> {}", &frame);
+                return Ok(frame)
             } else {
                 log!(target: "Serial", Level::Debug, "Meta data read error");
                 continue 'read_frame
@@ -206,18 +206,14 @@ impl<W: AsyncWrite + Unpin + Send> SerialFrameWriter<W> {
 #[async_trait]
 impl<W: AsyncWrite + Unpin + Send> FrameWriter for SerialFrameWriter<W> {
     async fn send_frame(&mut self, frame: RpcFrame) -> crate::Result<()> {
-        log!(target: "RpcMsg", Level::Debug, "S<== {}", &frame.to_rpcmesage().unwrap_or_default());
+        log!(target: "RpcMsg", Level::Debug, "S<== {}", &frame);
         let gen = crc::Crc::<u32>::new(&CRC_32_ISO_HDLC);
         let mut digest = if self.with_crc {
             Some(gen.digest())
         } else {
             None
         };
-        let mut meta_data = Vec::new();
-        {
-            let mut wr = ChainPackWriter::new(&mut meta_data);
-            wr.write_meta(&frame.meta)?;
-        }
+        let meta_data = serialize_meta(&frame)?;
         self.writer.write(&[STX]).await?;
         let protocol = [Protocol::ChainPack as u8];
         self.write_escaped(&mut digest, &protocol).await?;
@@ -245,62 +241,68 @@ impl<W: AsyncWrite + Unpin + Send> FrameWriter for SerialFrameWriter<W> {
     }
 }
 
-#[async_std::test]
-async fn test_write_bytes() {
-    for (data, esc_data) in [
-        (&b"hello"[..], &b"hello"[..]),
-        (&[STX], &[ESC, ESTX]),
-        (&[ETX], &[ESC, EETX]),
-        (&[ATX], &[ESC, EATX]),
-        (&[ESC], &[ESC, EESC]),
-        (&[STX, ESC], &[ESC, ESTX, ESC, EESC]),
-    ] {
-        let mut buff: Vec<u8> = vec![];
-        {
-            let buffwr = BufWriter::new(&mut buff);
-            let mut wr = SerialFrameWriter::new(buffwr);
-            wr.write_escaped(&mut None, data).await.unwrap();
-            //drop(wr);
-            wr.writer.flush().await.unwrap();
-            assert_eq!(&buff, esc_data);
-        }
-        {
-            let buffrd = async_std::io::BufReader::new(&*buff);
-            let mut rd = SerialFrameReader::new(buffrd);
-            let read_data = rd.read_escaped().await.unwrap();
-            assert_eq!(&read_data, data);
+#[cfg(test)]
+mod test {
+    use async_std::io::BufWriter;
+    use crate::RpcMessage;
+    use crate::util::{hex_array, hex_dump};
+    use super::*;
+    #[async_std::test]
+    async fn test_write_bytes() {
+        for (data, esc_data) in [
+            (&b"hello"[..], &b"hello"[..]),
+            (&[STX], &[ESC, ESTX]),
+            (&[ETX], &[ESC, EETX]),
+            (&[ATX], &[ESC, EATX]),
+            (&[ESC], &[ESC, EESC]),
+            (&[STX, ESC], &[ESC, ESTX, ESC, EESC]),
+        ] {
+            let mut buff: Vec<u8> = vec![];
+            {
+                let buffwr = BufWriter::new(&mut buff);
+                let mut wr = SerialFrameWriter::new(buffwr);
+                wr.write_escaped(&mut None, data).await.unwrap();
+                //drop(wr);
+                wr.writer.flush().await.unwrap();
+                assert_eq!(&buff, esc_data);
+            }
+            {
+                let buffrd = async_std::io::BufReader::new(&*buff);
+                let mut rd = SerialFrameReader::new(buffrd);
+                let read_data = rd.read_escaped().await.unwrap();
+                assert_eq!(&read_data, data);
+            }
         }
     }
-}
 
-#[async_std::test]
-async fn test_write_frame() {
-    let msg = RpcMessage::new_request("foo/bar", "baz", Some("hello".into()));
-    for with_crc in [false, true] {
-        let frame = msg.to_frame().unwrap();
-        let mut buff: Vec<u8> = vec![];
-        let buffwr = BufWriter::new(&mut buff);
-        {
-            let mut wr = SerialFrameWriter::new(buffwr).with_crc_check(with_crc);
-            wr.send_frame(frame.clone()).await.unwrap();
-        }
-        debug!("msg: {}", msg);
-        debug!("array: {}", hex_array(&buff));
-        debug!("bytes:\n{}\n-------------", hex_dump(&buff));
-        for prefix in [
-            b"".to_vec(),
-            b"1234".to_vec(),
-            [STX].to_vec(),
-            [STX, ESC, 1u8].to_vec(),
-            [ATX].to_vec(),
-        ] {
-            let mut buff2: Vec<u8> = prefix;
-            buff2.append(&mut buff.clone());
-            let buffrd = async_std::io::BufReader::new(&*buff2);
-            let mut rd = SerialFrameReader::new(buffrd).with_crc_check(with_crc);
-            let rd_frame = rd.receive_frame().await.unwrap();
-            assert_eq!(&rd_frame, &frame);
-
+    #[async_std::test]
+    async fn test_write_frame() {
+        let msg = RpcMessage::new_request("foo/bar", "baz", Some("hello".into()));
+        for with_crc in [false, true] {
+            let frame = msg.to_frame().unwrap();
+            let mut buff: Vec<u8> = vec![];
+            let buffwr = BufWriter::new(&mut buff);
+            {
+                let mut wr = SerialFrameWriter::new(buffwr).with_crc_check(with_crc);
+                wr.send_frame(frame.clone()).await.unwrap();
+            }
+            debug!("msg: {}", msg);
+            debug!("array: {}", hex_array(&buff));
+            debug!("bytes:\n{}\n-------------", hex_dump(&buff));
+            for prefix in [
+                b"".to_vec(),
+                b"1234".to_vec(),
+                [STX].to_vec(),
+                [STX, ESC, 1u8].to_vec(),
+                [ATX].to_vec(),
+            ] {
+                let mut buff2: Vec<u8> = prefix;
+                buff2.append(&mut buff.clone());
+                let buffrd = async_std::io::BufReader::new(&*buff2);
+                let mut rd = SerialFrameReader::new(buffrd).with_crc_check(with_crc);
+                let rd_frame = rd.receive_frame().await.unwrap();
+                assert_eq!(&rd_frame, &frame);
+            }
         }
     }
 }

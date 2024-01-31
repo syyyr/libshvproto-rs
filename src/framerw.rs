@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use crate::rpcframe::{RpcFrame};
-use crate::{MetaMap, RpcMessage, RpcMessageMetaTags, RpcValue};
+use crate::rpcframe::{Protocol, RpcFrame};
+use crate::{ChainPackWriter, MetaMap, RpcMessage, RpcMessageMetaTags, RpcValue, Writer};
 use crate::rpcmessage::{RpcError, RpcErrorCode, RqId};
 #[async_trait]
 pub trait FrameReader {
@@ -15,6 +15,13 @@ pub trait FrameReader {
 
 #[async_trait]
 pub trait FrameWriter {
+    async fn send_reset_session(&mut self) -> crate::Result<()> {
+        self.send_frame(RpcFrame{
+            protocol: Protocol::ResetSession,
+            meta: MetaMap(vec![]),
+            data: vec![],
+        }).await
+    }
     async fn send_frame(&mut self, frame: RpcFrame) -> crate::Result<()>;
     async fn send_message(&mut self, msg: RpcMessage) -> crate::Result<()> {
         self.send_frame(msg.to_frame()?).await?;
@@ -38,4 +45,18 @@ pub trait FrameWriter {
     }
 }
 
+pub fn serialize_meta(frame: &RpcFrame) -> crate::Result<Vec<u8>> {
+    let data = match frame.protocol {
+        Protocol::ResetSession => {
+            Vec::new()
+        }
+        Protocol::ChainPack => {
+            let mut data: Vec<u8> = Vec::new();
+            let mut wr = ChainPackWriter::new(&mut data);
+            wr.write_meta(&frame.meta)?;
+            data
+        }
+    };
+    Ok(data)
+}
 

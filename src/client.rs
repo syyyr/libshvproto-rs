@@ -35,7 +35,7 @@ pub struct LoginParams {
     pub device_id: String,
     pub mount_point: String,
     pub heartbeat_interval: Duration,
-    //pub protocol: Protocol,
+    pub reset_session: bool,
 }
 
 impl Default for LoginParams {
@@ -47,6 +47,7 @@ impl Default for LoginParams {
             device_id: "".to_string(),
             mount_point: "".to_string(),
             heartbeat_interval: Duration::from_secs(60),
+            reset_session: false,
         }
     }
 }
@@ -77,6 +78,9 @@ impl LoginParams {
 
 pub async fn login(frame_reader: &mut (dyn FrameReader + Send), frame_writer: &mut (dyn FrameWriter + Send), login_params: &LoginParams) -> crate::Result<i32>
 {
+    if login_params.reset_session {
+        frame_writer.send_reset_session().await?;
+    }
     let rq = RpcMessage::new_request("", "hello", None);
     frame_writer.send_message(rq).await?;
     let resp = frame_reader.receive_message().await?;

@@ -49,19 +49,21 @@ pub fn parse_log_verbosity<'a>(verbosity: &'a str, module_path: &'a str) -> Vec<
 }
 
 pub fn login_from_url(url: &Url) -> (String, String) {
-    let password = if let Some(password) = url.password() {
-        password.to_owned()
-    } else {
-        let mut password = None;
-        for (key,val) in url.query_pairs() {
-            if key == "password" {
-                password = Some(val.to_string());
-                break;
-            }
+    let mut user = "".to_string();
+    let mut password = "".to_string();
+    for (key,val) in url.query_pairs() {
+        if key == "user" {
+            user = val.to_string();
+        } else if key == "password" {
+            password = val.to_string();
         }
-        password.unwrap_or_default()
-    };
-    let user = url.username().to_string();
+    }
+    if user.is_empty() {
+        user = url.username().to_string();
+    }
+    if password.is_empty() {
+        password = url.password().unwrap_or_default().to_string();
+    }
     (user, password)
 }
 

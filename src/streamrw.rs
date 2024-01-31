@@ -1,11 +1,10 @@
 use std::io::{BufReader};
 use async_trait::async_trait;
-use crate::writer::Writer;
 use crate::rpcframe::{Protocol, RpcFrame};
 use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use log::*;
 use crate::{ChainPackReader, ChainPackWriter, Reader, ReadError};
-use crate::framerw::{FrameReader, FrameWriter};
+use crate::framerw::{FrameReader, FrameWriter, serialize_meta};
 use crate::reader::ReadErrorReason;
 
 pub struct StreamFrameReader<R: AsyncRead + Unpin + Send> {
@@ -67,7 +66,9 @@ impl<R: AsyncRead + Unpin + Send> FrameReader for StreamFrameReader<R> {
         if let Ok(Some(meta)) = rd.try_read_meta() {
             let pos = rd.position() + 1;
             let data: Vec<_> = data.drain(pos .. ).collect();
-            return Ok(RpcFrame { protocol: Protocol::ChainPack, meta, data })
+            let frame = RpcFrame { protocol: Protocol::ChainPack, meta, data };
+            log!(target: "RpcMsg", Level::Debug, "R==> {}", &frame);
+            return Ok(frame);
         }
         return Err("Meta data read error".into());
         }
@@ -87,11 +88,7 @@ impl<W: AsyncWrite + Unpin + Send> StreamFrameWriter<W> {
 impl<W: AsyncWrite + Unpin + Send> FrameWriter for StreamFrameWriter<W> {
     async fn send_frame(&mut self, frame: RpcFrame) -> crate::Result<()> {
         log!(target: "RpcMsg", Level::Debug, "S<== {}", &frame.to_rpcmesage().unwrap_or_default());
-        let mut meta_data = Vec::new();
-        {
-            let mut wr = ChainPackWriter::new(&mut meta_data);
-            wr.write_meta(&frame.meta)?;
-        }
+        let meta_data = serialize_meta(&frame)?;
         let mut header = Vec::new();
         let mut wr = ChainPackWriter::new(&mut header);
         let msg_len = 1 + meta_data.len() + frame.data.len();

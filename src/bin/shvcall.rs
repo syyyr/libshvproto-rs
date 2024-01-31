@@ -80,6 +80,7 @@ pub(crate) fn main() -> Result {
 
 async fn make_call(url: &Url, opts: &Opts) -> Result {
     // Establish a connection
+    let mut reset_session = false;
     let (mut frame_reader, mut frame_writer) = match url.scheme() {
         "tcp" => {
             let address = format!("{}:{}", url.host_str().unwrap_or("localhost"), url.port().unwrap_or(3755));
@@ -107,6 +108,7 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
             let bwr = BufWriter::new(writer);
             let frame_reader: BoxedFrameReader = Box::new(SerialFrameReader::new(brd).with_crc_check(false));
             let frame_writer: BoxedFrameWriter = Box::new(SerialFrameWriter::new(bwr).with_crc_check(false));
+            reset_session = true;
             (frame_reader, frame_writer)
         }
         s => {
@@ -119,6 +121,7 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
     let login_params = LoginParams {
         user,
         password,
+        reset_session,
         ..Default::default()
     };
     //let frame = frame_reader.receive_frame().await?;

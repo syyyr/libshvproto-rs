@@ -161,31 +161,6 @@ impl MetaMap {
     }
     */
 }
-/*
-impl Index<&str> for MetaMap {
-    type Output = RpcValue;
-
-    fn index(&self, key: &str) -> &'_ Self::Output {
-        let ix = self.find1(key);
-        match ix {
-            Some(ix) => &self.0[ix].value,
-            None => panic!("Invalid MetaMap key '{}'", key),
-        }
-    }
-}
-
-impl Index<i32> for MetaMap {
-    type Output = RpcValue;
-
-    fn index(&self, key: i32) -> &'_ Self::Output {
-        let ix = self.find1(key);
-        match ix {
-            Some(ix) => &self.0[ix].value,
-            None => panic!("Invalid MetaMap key '{}'", key),
-        }
-    }
-}
-*/
 impl fmt::Debug for MetaMap {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self.0)

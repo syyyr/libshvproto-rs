@@ -1,6 +1,6 @@
 use std::fmt;
 use std::io::{BufReader};
-use crate::{ChainPackReader, ChainPackWriter, CponReader, MetaMap, RpcMessage, RpcMessageMetaTags, rpctype, RpcValue};
+use crate::{ChainPackReader, ChainPackWriter, MetaMap, RpcMessage, RpcMessageMetaTags, rpctype, RpcValue};
 use crate::writer::Writer;
 use crate::reader::Reader;
 
@@ -13,14 +13,14 @@ pub struct RpcFrame {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Protocol {
+    ResetSession = 0,
     ChainPack = 1,
-    Cpon,
 }
 impl fmt::Display for Protocol {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Protocol::ChainPack => write!(fmt, "{}", "ChainPack"),
-            Protocol::Cpon => write!(fmt, "{}", "Cpon"),
+            Protocol::ResetSession => write!(fmt, "{}", "ResetSession"),
         }
     }
 }
@@ -45,14 +45,12 @@ impl RpcFrame {
                 let mut rd = ChainPackReader::new(&mut buff);
                 value = rd.read_value()?;
             }
-            Protocol::Cpon => {
-                let mut rd = CponReader::new(&mut buff);
-                value = rd.read_value()?;
+            _ => {
+                return Err("Invalid protocol".into());
             }
         }
         Ok(RpcMessage::from_rpcvalue(RpcValue::new(value, Some(self.meta.clone())))?)
     }
-
     pub fn prepare_response_meta(src: &MetaMap) -> Result<MetaMap, &'static str> {
         if src.is_request() {
             if let Some(rqid) = src.request_id() {
@@ -69,7 +67,23 @@ impl RpcFrame {
 }
 impl fmt::Display for RpcFrame {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "{{proto:{}, meta:{}, data len: {}}}", self.protocol, self.meta, self.data.len())
+        if self.protocol == Protocol::ResetSession {
+            write!(fmt, "RESET_SESSION")
+        } else {
+            write!(fmt, "{}", self.meta)?;
+            if self.data.len() > 256 {
+                write!(fmt, "[ ... {} bytes of data ... ]", self.data.len())
+            } else {
+                match RpcValue::from_chainpack(&self.data) {
+                    Ok(rv) => {
+                        write!(fmt, "{}", rv.to_cpon())
+                    }
+                    Err(e) => {
+                        write!(fmt, "[ unpack error: {} ]", e)
+                    }
+                }
+            }
+        }
     }
 }
 

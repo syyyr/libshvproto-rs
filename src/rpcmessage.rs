@@ -37,16 +37,13 @@ impl RpcMessage {
         RpcMessage(RpcValue::from(IMap::new()).set_meta(Some(meta)))
     }
     pub fn from_rpcvalue(rv: RpcValue) -> Result<Self, &'static str> {
-        if let Some(id) = rv.meta().tag(rpctype::Tag::MetaTypeId as i32) {
-            if id.as_int() == rpctype::GlobalNS::MetaTypeID::ChainPackRpcMessage as i64 {
-                if rv.is_imap() {
-                    return Ok(Self(rv))
-                }
-                return Err("Value must be IMap!");
-            }
-            return Err("Tag MetaTypeId is wrong!");
+        if rv.meta().is_empty() {
+            return Err("Meta is empty.");
         }
-        return Err("Tag MetaTypeId is missing!");
+        if rv.is_imap() {
+            return Ok(Self(rv))
+        }
+        return Err("Value must be IMap!");
     }
     pub fn as_rpcvalue(&self) -> &RpcValue {
         return &self.0
