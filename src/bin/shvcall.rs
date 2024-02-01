@@ -14,8 +14,11 @@ use shv::framerw::{FrameReader, FrameWriter};
 use futures::AsyncReadExt;
 use futures::AsyncWriteExt;
 use futures::io::{BufWriter};
+use rustyline_async::ReadlineEvent;
 use shv::serialrw::{SerialFrameReader, SerialFrameWriter};
 use shv::streamrw::{StreamFrameReader, StreamFrameWriter};
+use std::io::Write;
+use crossterm::tty::IsTty;
 
 type Result = shv::Result<()>;
 
@@ -186,7 +189,22 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
         };
         frame_writer.send_request(path, method, param).await
     }
-
+    fn parse_line (line: &str) -> std::result::Result<(&str, &str, &str), String> {
+        let line = line.trim();
+        let method_ix = match line.find(':') {
+            None => {
+                return Err(format!("Invalid line format, method not found: {line}"));
+            }
+            Some(ix) => { ix }
+        };
+        let param_ix = line.find(' ');
+        let path = line[..method_ix].trim();
+        let (method, param) = match param_ix {
+            None => { (line[method_ix + 1 .. ].trim(), "") }
+            Some(ix) => { (line[method_ix + 1 .. ix].trim(), line[ix + 1 ..].trim()) }
+        };
+        Ok((path, method, param))
+    }
     if opts.path.is_none() && opts.method.is_some() {
         return Err("--path parameter missing".into())
     }
@@ -195,38 +213,76 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
     }
     let mut stdout = io::stdout();
     if opts.path.is_none() && opts.method.is_none() {
-        let stdin = io::stdin();
-        loop {
-            let mut line = String::new();
-            match stdin.read_line(&mut line).await {
-                Ok(nbytes) => {
-                    if nbytes == 0 {
+        if io::stdin().is_tty() {
+            let (mut rl, mut rl_stdout) = rustyline_async::Readline::new("> ".to_owned()).unwrap();
+            rl.set_max_history(1000);
+            loop {
+                match rl.readline().await {
+                    Ok(ReadlineEvent::Line(line)) => {
+                        let line = line.trim();
+                        rl.add_history_entry(line.to_owned());
+                        match parse_line(line) {
+                            Ok((path, method, param)) => {
+                                let rqid = send_request(&mut *frame_writer, &path, &method, &param).await?;
+                                loop {
+                                    let resp = frame_reader.receive_message().await?;
+                                    print_resp(&mut stdout, &resp, (&*opts.output_format).into()).await?;
+                                    if resp.is_response() && resp.request_id().unwrap_or_default() == rqid {
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                writeln!(rl_stdout, "{}", err)?;
+                            }
+                        }
+                    },
+                    Ok(ReadlineEvent::Eof) => {
                         // stream closed
                         break;
-                    } else {
-                        let method_ix = match line.find(':') {
-                            None => {
-                                return Err(format!("Invalid line format, method not found: {line}").into());
-                            }
-                            Some(ix) => { ix }
-                        };
-                        let param_ix = line.find(' ');
-                        let path = line[..method_ix].trim();
-                        let (method, param) = match param_ix {
-                            None => { (line[method_ix + 1 .. ].trim(), "") }
-                            Some(ix) => { (line[method_ix + 1 .. ix].trim(), line[ix + 1 ..].trim()) }
-                        };
-                        let rqid = send_request(&mut *frame_writer, &path, &method, &param).await?;
-                        loop {
-                            let resp = frame_reader.receive_message().await?;
-                            print_resp(&mut stdout, &resp, (&*opts.output_format).into()).await?;
-                            if resp.is_response() && resp.request_id().unwrap_or_default() == rqid {
-                                break;
+                    },
+                    Ok(ReadlineEvent::Interrupted) => {
+                        // Ctrl-C
+                        break;
+                    }
+                    // Err(ReadlineError::Closed) => break, // Readline was closed via one way or another, cleanup other futures here and break out of the loop
+                    Err(err) => {
+                        error!("readline error: {:?}", err);
+                        break;
+                    }
+                }
+                // Flush all writers to stdout
+                rl.flush()?;
+            }
+        } else {
+            let stdin = io::stdin();
+            loop {
+                let mut line = String::new();
+                match stdin.read_line(&mut line).await {
+                    Ok(nbytes) => {
+                        if nbytes == 0 {
+                            // stream closed
+                            break;
+                        } else {
+                            match parse_line(&line) {
+                                Ok((path, method, param)) => {
+                                    let rqid = send_request(&mut *frame_writer, &path, &method, &param).await?;
+                                    loop {
+                                        let resp = frame_reader.receive_message().await?;
+                                        print_resp(&mut stdout, &resp, (&*opts.output_format).into()).await?;
+                                        if resp.is_response() && resp.request_id().unwrap_or_default() == rqid {
+                                            break;
+                                        }
+                                    }
+                                }
+                                Err(err) => {
+                                    return Err(err.into());
+                                }
                             }
                         }
                     }
+                    Err(err) => { return Err(format!("Read line error: {err}").into()) }
                 }
-                Err(err) => { return Err(format!("Read line error: {err}").into()) }
             }
         }
     } else {
