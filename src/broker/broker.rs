@@ -446,9 +446,9 @@ impl Broker {
         let shv_path = frame.shv_path().unwrap_or_default();
         let method = frame.method().unwrap_or("");
         if method.is_empty() {
-            Err(RpcError::new(RpcErrorCode::PermissionDenied, "Method is empty".into()))
+            Err(RpcError::new(RpcErrorCode::PermissionDenied, "Method is empty"))
         } else {
-            let peer = self.peers.get(&client_id).ok_or_else(|| RpcError::new(RpcErrorCode::InternalError, "Peer not found".into()))?;
+            let peer = self.peers.get(&client_id).ok_or_else(|| RpcError::new(RpcErrorCode::InternalError, "Peer not found"))?;
             match peer.peer_kind {
                 PeerKind::Client => {
                     if let Some(flatten_roles) = self.flatten_roles(&peer.user) {
@@ -470,7 +470,7 @@ impl Broker {
                 }
                 PeerKind::ParentBroker => {
                     match frame.access() {
-                        None => { return Err(RpcError::new(RpcErrorCode::PermissionDenied, "".into())) }
+                        None => { return Err(RpcError::new(RpcErrorCode::PermissionDenied, "")) }
                         Some(access) => { return Ok(access.into()); }
                     };
                 }
@@ -608,7 +608,7 @@ impl Broker {
                         let peer_id = rq.param().unwrap_or_default().as_i32();
                         let result = self.disconnect_client(peer_id).await
                             .map(|_| RpcValue::null())
-                            .map_err(|err| RpcError::new(RpcErrorCode::MethodCallException, format!("Disconnect client error - {}", err).into()));
+                            .map_err(|err| RpcError::new(RpcErrorCode::MethodCallException, format!("Disconnect client error - {}", err)));
                         ctx.command_sender.send(send_result_cmd(result)).await?;
                         return Ok(())
                     }
@@ -647,7 +647,7 @@ impl Broker {
             }
             _ => {}
         }
-        let err = RpcError::new(RpcErrorCode::MethodNotFound, format!("Unknown method {}:{}", ctx.mount_point, frame.method().unwrap_or_default()).into());
+        let err = RpcError::new(RpcErrorCode::MethodNotFound, format!("Unknown method {}:{}", ctx.mount_point, frame.method().unwrap_or_default()));
         ctx.command_sender.send(send_result_cmd(Err(err))).await?;
         Ok(())
     }

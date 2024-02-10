@@ -402,10 +402,10 @@ pub struct RpcError {
 enum RpcErrorKey { Code = 1, Message }
 
 impl RpcError {
-    pub fn new(code: RpcErrorCode, msg: String) -> Self {
+    pub fn new(code: RpcErrorCode, msg: impl Into<String>) -> Self {
         RpcError {
             code,
-            message: msg,
+            message: msg.into(),
         }
     }
     pub fn from_rpcvalue(rv: &RpcValue) -> Option<Self> {

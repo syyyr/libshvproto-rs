@@ -182,7 +182,7 @@ impl shv::device::State for DeviceState {
             }
             _ => {}
         }
-        let err = RpcError::new(RpcErrorCode::MethodNotFound, format!("Unknown method {}:{}", ctx.mount_point, frame.method().unwrap_or_default()).into());
+        let err = RpcError::new(RpcErrorCode::MethodNotFound, format!("Unknown method {}:{}", ctx.mount_point, frame.method().unwrap_or_default()));
         ctx.command_sender.send(send_result_cmd(Err(err))).await?;
         Ok(())
     }

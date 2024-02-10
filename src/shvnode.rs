@@ -134,7 +134,7 @@ fn ls_children_to_result(children: Option<Vec<String>>, param: LsParam) -> Resul
         LsParam::List => {
             match children {
                 None => {
-                    Err(RpcError::new(RpcErrorCode::MethodCallException, "Invalid shv path".into()))
+                    Err(RpcError::new(RpcErrorCode::MethodCallException, "Invalid shv path"))
                 }
                 Some(dirs) => {
                     let res: rpcvalue::List = dirs.iter().map(|d| RpcValue::from(d)).collect();
