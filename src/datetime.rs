@@ -123,7 +123,7 @@ impl DateTime {
 
     pub fn to_chrono_naivedatetime(&self) -> chrono::NaiveDateTime {
         let msec = self.epoch_msec();
-        chrono::NaiveDateTime::from_timestamp_opt(msec / 1000, ((msec % 1000) * 1000) as u32).unwrap_or(NaiveDateTime::default())
+        chrono::NaiveDateTime::from_timestamp_opt(msec / 1000, ((msec % 1000) * 1000000) as u32).unwrap_or(NaiveDateTime::default())
     }
     pub fn to_chrono_datetime(&self) -> chrono::DateTime<chrono::offset::FixedOffset> {
         let offset = match FixedOffset::east_opt(self.utc_offset()) {
