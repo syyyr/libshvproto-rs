@@ -34,7 +34,7 @@ struct Opts {
     method: Option<String>,
     #[arg(short = 'a', long = "param")]
     param: Option<String>,
-    /// Output format: [ cpon | chainpack | simple | value ]
+    /// Output format: [ cpon | chainpack | simple | value | "Placeholders {PATH} {METHOD} {VALUE} in any number and combination in custom string." ]
     #[arg(short = 'o', long = "output-format", default_value = "cpon")]
     output_format: String,
     /// Verbose mode (module, .)
@@ -46,14 +46,19 @@ enum OutputFormat {
     ChainPack,
     Simple,
     Value,
+    Custom(String),
 }
 impl From<&str> for OutputFormat {
     fn from(value: &str) -> Self {
-        let s = value.to_ascii_lowercase();
-        if "chainpack".starts_with(&s) { return Self::ChainPack }
-        if "simple".starts_with(&s) { return Self::Simple }
-        if "value".starts_with(&s) { return Self::Value }
-        Self::Cpon
+        match value {
+            "chainpack" => { Self::ChainPack }
+            "simple" => { Self::Simple }
+            "value" => { Self::Value }
+            "cpon" => { Self::Cpon }
+            _ => {
+                Self::Custom(value.to_string())
+            }
+        }
     }
 }
 type BoxedFrameReader = Box<dyn FrameReader + Unpin + Send>;
@@ -175,6 +180,17 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
                 };
                 s.push('\n');
                 s.as_bytes().to_owned()
+            }
+            OutputFormat::Custom(fmtstr) => {
+                const PATH: &str = "{PATH}";
+                const METHOD: &str = "{METHOD}";
+                const VALUE: &str = "{VALUE}";
+                let fmtstr = fmtstr.replace(PATH, resp.shv_path().unwrap_or_default());
+                let fmtstr = fmtstr.replace(METHOD, resp.method().unwrap_or_default());
+                let fmtstr = fmtstr.replace(VALUE, &resp.result().unwrap_or_default().to_cpon());
+                let fmtstr = fmtstr.replace("\\n", "\n");
+                let fmtstr = fmtstr.replace("\\t", "\t");
+                fmtstr.as_bytes().to_owned()
             }
         };
         stdout.write_all(&bytes).await?;
