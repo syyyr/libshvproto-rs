@@ -18,6 +18,8 @@ use rustyline_async::ReadlineEvent;
 use shv::serialrw::{SerialFrameReader, SerialFrameWriter};
 use shv::streamrw::{StreamFrameReader, StreamFrameWriter};
 use std::io::Write;
+
+#[cfg(feature = "readline")]
 use crossterm::tty::IsTty;
 
 type Result = shv::Result<()>;
@@ -63,6 +65,17 @@ impl From<&str> for OutputFormat {
 }
 type BoxedFrameReader = Box<dyn FrameReader + Unpin + Send>;
 type BoxedFrameWriter = Box<dyn FrameWriter + Unpin + Send>;
+
+#[cfg(feature = "readline")]
+fn is_tty() -> bool {
+    io::stdin().is_tty()
+}
+
+#[cfg(not(feature = "readline"))]
+fn is_tty() -> bool {
+    false
+}
+
 // const DEFAULT_RPC_TIMEOUT_MSEC: u64 = 5000;
 pub(crate) fn main() -> Result {
     let opts = Opts::parse();
@@ -229,7 +242,7 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
     }
     let mut stdout = io::stdout();
     if opts.path.is_none() && opts.method.is_none() {
-        if io::stdin().is_tty() {
+        if is_tty() {
             let (mut rl, mut rl_stdout) = rustyline_async::Readline::new("> ".to_owned()).unwrap();
             rl.set_max_history(1000);
             loop {

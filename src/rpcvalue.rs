@@ -10,7 +10,6 @@ use crate::writer::Writer;
 use crate::CponWriter;
 use crate::chainpack::ChainPackWriter;
 use crate::chainpack::ChainPackReader;
-use std::convert::From;
 use std::sync::OnceLock;
 
 // see https://github.com/rhysd/tinyjson/blob/master/src/json_value.rs
