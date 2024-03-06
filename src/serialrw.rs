@@ -186,7 +186,7 @@ impl<W: AsyncWrite + Unpin + Send> SerialFrameWriter<W> {
         if let Some(ref mut digest) = digest {
             digest.update(data);
         }
-        self.writer.write(data).await?;
+        self.writer.write_all(data).await?;
         Ok(())
     }
     async fn write_escaped(&mut self, digest: &mut Option<crc::Digest<'_, u32>>, data: &[u8]) -> crate::Result<()> {
@@ -213,12 +213,12 @@ impl<W: AsyncWrite + Unpin + Send> FrameWriter for SerialFrameWriter<W> {
             None
         };
         let meta_data = serialize_meta(&frame)?;
-        self.writer.write(&[STX]).await?;
+        self.writer.write_all(&[STX]).await?;
         let protocol = [Protocol::ChainPack as u8];
         self.write_escaped(&mut digest, &protocol).await?;
         self.write_escaped(&mut digest, &meta_data).await?;
         self.write_escaped(&mut digest, &frame.data).await?;
-        self.writer.write(&[ETX]).await?;
+        self.writer.write_all(&[ETX]).await?;
         if self.with_crc {
             fn u32_to_bytes(x:u32) -> [u8;4] {
                 let b0 : u8 = ((x >> 24) & 0xff) as u8;
