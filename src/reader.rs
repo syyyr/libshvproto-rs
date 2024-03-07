@@ -110,7 +110,7 @@ pub trait Reader {
         let m = self.try_read_meta()?;
         let v = self.read_value()?;
         let rv = RpcValue::new(v, m);
-        return Ok(rv)
+        Ok(rv)
     }
     fn try_read_meta(&mut self) -> Result<Option<MetaMap>, ReadError>;
     fn read_value(&mut self) -> Result<Value, ReadError>;
