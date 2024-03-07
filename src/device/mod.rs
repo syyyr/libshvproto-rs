@@ -63,7 +63,7 @@ async fn peer_loop_reconnect(config: ClientConfig, device_sender: Sender<DeviceC
                 }
             }
             Err(err) => {
-                return Err(err.into());
+                Err(err.into())
             }
         }
     } else {
@@ -93,8 +93,8 @@ async fn peer_loop(config: &ClientConfig, device_sender: Sender<DeviceCommand>) 
     let login_params = LoginParams{
         user,
         password,
-        mount_point: (&config.mount.clone().unwrap_or_default()).to_owned(),
-        device_id: (&config.device_id.clone().unwrap_or_default()).to_owned(),
+        mount_point: config.mount.clone().unwrap_or_default().to_owned(),
+        device_id: config.device_id.clone().unwrap_or_default().to_owned(),
         heartbeat_interval,
         ..Default::default()
     };
@@ -300,7 +300,7 @@ impl<S: State> Device<S> {
     }
      */
     async fn process_pending_rpc_call(&mut self, response_frame: RpcFrame) -> crate::Result<()> {
-        let rqid = response_frame.request_id().ok_or_else(|| "Request ID must be set.")?;
+        let rqid = response_frame.request_id().ok_or("Request ID must be set.")?;
         let mut pending_call_ix = None;
         for (ix, pc) in self.pending_rpc_calls.iter().enumerate() {
             if pc.request_id == rqid {
