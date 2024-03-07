@@ -41,7 +41,7 @@ fn test_call_ping_stdin() -> shv::Result<()> {
         ".app:name".into(),
     ];
     let values = shv_call_many(calls, ShvCallOutputFormat::Value, None)?;
-    let expected = vec!["null", r#""shvbroker""#];
+    let expected = ["null", r#""shvbroker""#];
     for (no, val) in values.iter().enumerate() {
         assert_eq!(&expected[no], val);
     }
