@@ -51,8 +51,7 @@ impl<R: AsyncRead + Unpin + Send> FrameReader for StreamFrameReader<R> {
         let mut data: Vec<u8> = Vec::with_capacity(frame_len);
         let mut to_read = frame_len;
         while to_read > 0 {
-            let mut buff: Vec<u8> = Vec::with_capacity(to_read);
-            buff.resize(to_read, 0);
+            let mut buff = vec![0u8; to_read];
             let n = self.reader.read(&mut buff[..]).await?;
             data.append(&mut buff);
             to_read -= n;

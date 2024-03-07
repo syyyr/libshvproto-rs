@@ -49,28 +49,22 @@ impl<R: AsyncRead + Unpin + Send> SerialFrameReader<R> {
     }
     async fn get_escaped_byte(&mut self) -> crate::Result<crate::serialrw::Byte> {
         match self.get_byte().await? {
-            STX => {
-                return Ok(crate::serialrw::Byte::Stx);
-            }
-            ETX => {
-                return Ok(crate::serialrw::Byte::Etx);
-            }
-            ATX => {
-                return Ok(crate::serialrw::Byte::Atx);
-            }
+            STX => Ok(crate::serialrw::Byte::Stx),
+            ETX => Ok(crate::serialrw::Byte::Etx),
+            ATX => Ok(crate::serialrw::Byte::Atx),
             ESC => {
                 match self.get_byte().await? {
-                    ESTX => { return Ok(crate::serialrw::Byte::Data(STX)) }
-                    EETX => { return Ok(crate::serialrw::Byte::Data(ETX)) }
-                    EATX => { return Ok(crate::serialrw::Byte::Data(ATX)) }
-                    EESC => { return Ok(crate::serialrw::Byte::Data(ESC)) }
+                    ESTX => Ok(crate::serialrw::Byte::Data(STX)),
+                    EETX => Ok(crate::serialrw::Byte::Data(ETX)),
+                    EATX => Ok(crate::serialrw::Byte::Data(ATX)),
+                    EESC => Ok(crate::serialrw::Byte::Data(ESC)),
                     b => {
                         warn!("Framing error, invalid escape byte {}", b);
-                        return Ok(crate::serialrw::Byte::FramingError(b));
+                        Ok(crate::serialrw::Byte::FramingError(b))
                     }
                 }
             }
-            b => { return Ok(crate::serialrw::Byte::Data(b)) }
+            b => Ok(crate::serialrw::Byte::Data(b))
         }
     }
     #[cfg(all(test, feature = "async-std"))]
@@ -121,13 +115,13 @@ impl<R: AsyncRead + Unpin + Send> FrameReader for SerialFrameReader<R> {
             }
             if self.with_crc {
                 let mut crc_data = [0u8; 4];
-                for i in 0..4 {
+                for crc_b in &mut crc_data {
                     match self.get_escaped_byte().await? {
                         Byte::Stx => {
                             has_stx = true;
                             continue 'read_frame
                         }
-                        Byte::Data(b) => { crc_data[i] = b }
+                        Byte::Data(b) => { *crc_b = b }
                         _ => { continue 'read_frame }
                     }
                 }
@@ -135,7 +129,7 @@ impl<R: AsyncRead + Unpin + Send> FrameReader for SerialFrameReader<R> {
                     ((array[0] as u32) << 24) +
                         ((array[1] as u32) << 16) +
                         ((array[2] as u32) <<  8) +
-                        ((array[3] as u32) <<  0)
+                        (array[3] as u32)
                 }
                 let crc1 = as_u32_be(&crc_data);
                 let gen = crc::Crc::<u32>::new(&CRC_32_ISO_HDLC);
@@ -225,7 +219,7 @@ impl<W: AsyncWrite + Unpin + Send> FrameWriter for SerialFrameWriter<W> {
                 let b1 : u8 = ((x >> 16) & 0xff) as u8;
                 let b2 : u8 = ((x >> 8) & 0xff) as u8;
                 let b3 : u8 = (x & 0xff) as u8;
-                return [b0, b1, b2, b3]
+                [b0, b1, b2, b3]
             }
             let crc = digest.expect("digest should be some here").finalize();
             //println!("CRC1 {crc}");
