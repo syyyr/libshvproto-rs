@@ -24,12 +24,10 @@ impl From<Option<&RpcValue>> for DirParam {
             Some(rpcval) => {
                 if rpcval.is_string() {
                     DirParam::BriefMethod(rpcval.as_str().into())
+                } else if rpcval.as_bool() {
+                    DirParam::Full
                 } else {
-                    if rpcval.as_bool() {
-                        DirParam::Full
-                    } else {
-                        DirParam::Brief
-                    }
+                    DirParam::Brief
                 }
             }
             None => {

@@ -188,28 +188,13 @@ pub trait RpcMessageMetaTags {
     fn set_tag(&mut self, id: i32, val: Option<RpcValue>) -> &mut Self::Target;
 
     fn is_request(&self) -> bool {
-        if self.request_id().is_some() {
-            if self.method().is_some() {
-                return true;
-            }
-        }
-        false
+        self.request_id().is_some() && self.method().is_some()
     }
     fn is_response(&self) -> bool {
-        if self.request_id().is_some() {
-            if self.method().is_none() {
-                return true;
-            }
-        }
-        false
+        self.request_id().is_some() && self.method().is_none()
     }
     fn is_signal(&self) -> bool {
-        if self.request_id().is_none() {
-            if self.method().is_some() {
-                return true;
-            }
-        }
-        false
+        self.request_id().is_none() && self.method().is_some()
     }
 
     fn request_id(&self) -> Option<RqId> {
@@ -422,7 +407,7 @@ impl RpcError {
     }
     pub fn to_rpcvalue(&self) -> RpcValue {
         let mut m = IMap::new();
-        m.insert(RpcErrorKey::Code as i32, RpcValue::from(*&self.code as i32));
+        m.insert(RpcErrorKey::Code as i32, RpcValue::from(self.code as i32));
         m.insert(RpcErrorKey::Message as i32, RpcValue::from(&self.message));
         RpcValue::from(m)
     }

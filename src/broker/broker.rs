@@ -136,12 +136,10 @@ impl Broker {
             if let Some(mount_point) = self.client_id_to_mount_point(peer_id) {
                 let new_path = util::join_path(&mount_point, frame.shv_path().unwrap_or_default());
                 for (cli_id, peer) in self.peers.iter() {
-                    if &peer_id != cli_id {
-                        if peer.is_signal_subscribed(&new_path, frame.method().unwrap_or_default()) {
-                            let mut frame = frame.clone();
-                            frame.set_shvpath(&new_path);
-                            peer.sender.send(BrokerToPeerMessage::SendFrame(frame)).await?;
-                        }
+                    if &peer_id != cli_id && peer.is_signal_subscribed(&new_path, frame.method().unwrap_or_default()) {
+                        let mut frame = frame.clone();
+                        frame.set_shvpath(&new_path);
+                        peer.sender.send(BrokerToPeerMessage::SendFrame(frame)).await?;
                     }
                 }
             }
