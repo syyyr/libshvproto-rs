@@ -83,7 +83,7 @@ impl BrokerConfig {
         let file_path = Path::new(file_name);
         if file_path.exists() {
             info!("Loading config file {file_name}");
-            return match Self::from_file(&file_name) {
+            return match Self::from_file(file_name) {
                 Ok(cfg) => {
                     Ok(cfg)
                 }
@@ -124,7 +124,7 @@ impl Default for BrokerConfig {
                         roles: vec![],
                         access: vec![
                             AccessRule { paths: "**".to_string(), methods: "".to_string(), grant: "su,dot-local".to_string() },
-                        ].into(),
+                        ],
                     }),
                     ("client".to_string(), Role { roles: vec!["ping".to_string(), "subscribe".to_string(), "browse".to_string()], access: vec![] }),
                     ("device".to_string(), Role { roles: vec!["client".to_string()], access: vec![] }),
@@ -137,7 +137,7 @@ impl Default for BrokerConfig {
                     //}),
                     ("child-broker".to_string(), Role { roles: vec!["device".to_string()], access: vec![] }),
                     ("tester".to_string(), Role {
-                        roles: vec!["client".to_string()].into(),
+                        roles: vec!["client".to_string()],
                         access: vec![
                             AccessRule { paths: "test/**".to_string(), methods: "".to_string(), grant: "cfg".to_string() },
                         ],
