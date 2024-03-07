@@ -73,7 +73,7 @@ impl<R: AsyncRead + Unpin + Send> SerialFrameReader<R> {
             b => { return Ok(crate::serialrw::Byte::Data(b)) }
         }
     }
-    #[cfg(test)]
+    #[cfg(all(test, feature = "async-std"))]
     async fn read_escaped(&mut self) -> crate::Result<Vec<u8>> {
         let mut data: Vec<u8> = Default::default();
         loop {
@@ -92,7 +92,6 @@ impl<R: AsyncRead + Unpin + Send> SerialFrameReader<R> {
         }
         Ok(data)
     }
-
 }
 #[async_trait]
 impl<R: AsyncRead + Unpin + Send> FrameReader for SerialFrameReader<R> {

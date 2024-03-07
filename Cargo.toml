@@ -45,3 +45,13 @@ required-features = ["async-std"]
 name = "device"
 path = "examples/device.rs"
 required-features = ["async-std"]
+
+[[test]]
+name = "test_shvcall"
+path = "tests/test_shvcall.rs"
+required-features = ["async-std"]
+
+[[test]]
+name = "test_broker"
+path = "tests/test_broker.rs"
+required-features = ["async-std"]
