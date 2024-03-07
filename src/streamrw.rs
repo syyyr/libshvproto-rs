@@ -94,7 +94,7 @@ pub fn read_frame(buff: &[u8]) -> crate::Result<RpcFrame> {
         log!(target: "RpcMsg", Level::Debug, "R==> {}", &frame);
         return Ok(frame);
     }
-    return Err("Meta data read error".into());
+    Err("Meta data read error".into())
 }
 
 pub struct StreamFrameWriter<W: AsyncWrite + Unpin + Send> {
