@@ -116,19 +116,24 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<BrokerComman
         subscribe_path: None,
     };
     broker_writer.send(register_device).await.unwrap();
+
+    let mut fut_receive_frame = frame_reader.receive_frame().fuse();
+    let mut fut_receive_broker_event = peer_reader.recv().fuse();
     loop {
         select! {
-            frame = frame_reader.receive_frame().fuse() => match frame {
+            frame = fut_receive_frame => match frame {
                 Ok(frame) => {
                     // log!(target: "RpcMsg", Level::Debug, "----> Recv frame, client id: {}", client_id);
                     broker_writer.send(BrokerCommand::FrameReceived { client_id, frame }).await?;
+                    drop(fut_receive_frame);
+                    fut_receive_frame = frame_reader.receive_frame().fuse();
                 }
                 Err(e) => {
                     error!("Read socket error: {}", &e);
                     break;
                 }
             },
-            event = peer_reader.recv().fuse() => match event {
+            event = fut_receive_broker_event => match event {
                 Err(e) => {
                     debug!("Peer channel closed: {}", &e);
                     break;
@@ -151,6 +156,7 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<BrokerComman
                             frame_writer.send_message(rpcmsg).await?;
                         },
                     }
+                    fut_receive_broker_event = peer_reader.recv().fuse();
                 }
             }
         }
@@ -236,6 +242,9 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
 
     let (broker_to_peer_sender, broker_to_peer_receiver) = channel::unbounded::<BrokerToPeerMessage>();
     broker_writer.send(BrokerCommand::NewPeer { client_id, sender: broker_to_peer_sender, peer_kind: PeerKind::ParentBroker }).await?;
+
+    let mut fut_receive_frame = frame_reader.receive_frame().fuse();
+    let mut fut_receive_broker_event = broker_to_peer_receiver.recv().fuse();
     loop {
         let fut_timeout = future::timeout(heartbeat_interval, future::pending::<()>());
         select! {
@@ -246,7 +255,7 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
                 debug!("sending ping");
                 frame_writer.send_message(msg).await?;
             },
-            res_frame = frame_reader.receive_frame().fuse() => match res_frame {
+            res_frame = fut_receive_frame => match res_frame {
                 Ok(mut frame) => {
                     if frame.is_request() {
                         fn is_dot_local_granted(frame: &RpcFrame) -> bool {
@@ -279,12 +288,14 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
                         frame.set_shvpath(&shv_path);
                         broker_writer.send(BrokerCommand::FrameReceived { client_id, frame }).await.unwrap();
                     }
+                    drop(fut_receive_frame);
+                    fut_receive_frame = frame_reader.receive_frame().fuse();
                 }
                 Err(e) => {
                     return Err(format!("Read frame error: {e}").into());
                 }
             },
-            event = broker_to_peer_receiver.recv().fuse() => match event {
+            event = fut_receive_broker_event => match event {
                 Err(e) => {
                     debug!("broker loop has closed peer channel, client ID {client_id}");
                     return Err(e.into());
@@ -321,6 +332,7 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
                             frame_writer.send_message(rpcmsg).await?;
                         },
                     }
+                    fut_receive_broker_event = broker_to_peer_receiver.recv().fuse();
                 }
             }
         }

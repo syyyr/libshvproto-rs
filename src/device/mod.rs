@@ -109,6 +109,9 @@ async fn peer_loop(config: &ClientConfig, device_sender: Sender<DeviceCommand>) 
     let mut ping_rq_id = 0;
     let mut time_to_ping = heartbeat_interval;
     let mut recent_ping_ts = Instant::now();
+
+    let mut fut_receive_frame = frame_reader.receive_frame().fuse();
+    let mut fut_receive_command = receiver.recv().fuse();
     loop {
         select! {
             _ = future::timeout(time_to_ping, future::pending::<()>()).fuse() => {
@@ -119,30 +122,37 @@ async fn peer_loop(config: &ClientConfig, device_sender: Sender<DeviceCommand>) 
                 frame_writer.send_frame(frame).await?;
                 recent_ping_ts = Instant::now();
             },
-            frame = frame_reader.receive_frame().fuse() => match frame {
-                Ok(frame) => {
-                    if frame.request_id().unwrap_or_default() == ping_rq_id {
-                        debug!("ping response received: {:?}", frame);
-                    } else {
-                        device_sender.send(DeviceCommand::FrameReceived(frame)).await?;
-                    }
-                }
-                Err(err) => {
-                    error!("Receive frame error: {}", err);
-                }
-            },
-            command = receiver.recv().fuse() => match command {
-                Ok(command) => {
-                    match command {
-                        DeviceToPeerCommand::SendFrame(frame) => {
-                            recent_ping_ts = Instant::now();
-                            frame_writer.send_frame(frame).await?
+            frame = fut_receive_frame => {
+                match frame {
+                    Ok(frame) => {
+                        if frame.request_id().unwrap_or_default() == ping_rq_id {
+                            debug!("ping response received: {:?}", frame);
+                        } else {
+                            device_sender.send(DeviceCommand::FrameReceived(frame)).await?;
                         }
                     }
+                    Err(err) => {
+                        error!("Receive frame error: {}", err);
+                    }
                 }
-                Err(err) => {
-                    warn!("Receive command error: {}", err);
+                drop(fut_receive_frame);
+                fut_receive_frame = frame_reader.receive_frame().fuse();
+            },
+            command = fut_receive_command => {
+                match command {
+                    Ok(command) => {
+                        match command {
+                            DeviceToPeerCommand::SendFrame(frame) => {
+                                recent_ping_ts = Instant::now();
+                                frame_writer.send_frame(frame).await?
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        warn!("Receive command error: {}", err);
+                    }
                 }
+                fut_receive_command = receiver.recv().fuse();
             },
         }
         let elapsed = recent_ping_ts.elapsed();
