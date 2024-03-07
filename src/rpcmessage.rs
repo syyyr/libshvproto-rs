@@ -42,10 +42,10 @@ impl RpcMessage {
         if rv.is_imap() {
             return Ok(Self(rv))
         }
-        return Err("Value must be IMap!");
+        Err("Value must be IMap!")
     }
     pub fn as_rpcvalue(&self) -> &RpcValue {
-        return &self.0
+        &self.0
     }
     pub fn to_cpon(&self) -> String {
         self.0.to_cpon()
@@ -188,36 +188,32 @@ pub trait RpcMessageMetaTags {
     fn set_tag(&mut self, id: i32, val: Option<RpcValue>) -> &mut Self::Target;
 
     fn is_request(&self) -> bool {
-        if let Some(_) = self.request_id() {
-            if let Some(_) = self.method() {
+        if self.request_id().is_some() {
+            if self.method().is_some() {
                 return true;
             }
         }
-        return false;
+        false
     }
     fn is_response(&self) -> bool {
-        if let Some(_) = self.request_id() {
-            if let None = self.method() {
+        if self.request_id().is_some() {
+            if self.method().is_none() {
                 return true;
             }
         }
-        return false;
+        false
     }
     fn is_signal(&self) -> bool {
-        if let None = self.request_id() {
-            if let Some(_) = self.method() {
+        if self.request_id().is_none() {
+            if self.method().is_some() {
                 return true;
             }
         }
-        return false;
+        false
     }
 
     fn request_id(&self) -> Option<RqId> {
-        let t = self.tag(Tag::RequestId as i32);
-        match t {
-            None => None,
-            Some(rv) => Some(rv.as_i64()),
-        }
+        self.tag(Tag::RequestId as i32).map(|rv| rv.as_i64())
     }
     fn try_request_id(&self) -> crate::Result<RqId> {
         match self.request_id() {
@@ -271,21 +267,21 @@ pub trait RpcMessageMetaTags {
                     return vec![rv.as_int() as CliId];
                 }
                 if rv.is_list() {
-                    return rv.as_list().into_iter().map(|v| v.as_int() as CliId).collect();
+                    return rv.as_list().iter().map(|v| v.as_int() as CliId).collect();
                 }
-                return Vec::new()
+                Vec::new()
             },
         }
     }
 
-    fn set_caller_ids(&mut self, ids: &Vec<CliId>) -> &mut Self::Target {
-        if ids.len() == 0 {
+    fn set_caller_ids(&mut self, ids: &[CliId]) -> &mut Self::Target {
+        if ids.is_empty() {
             return self.set_tag(Tag::CallerIds as i32, None);
         }
         if ids.len() == 1 {
             return self.set_tag(Tag::CallerIds as i32, Some(RpcValue::from(ids[0] as CliId)));
         }
-        let lst: List = ids.into_iter().map(|v| RpcValue::from(*v)).collect();
+        let lst: List = ids.iter().map(|v| RpcValue::from(*v)).collect();
         return self.set_tag(Tag::CallerIds as i32, Some(RpcValue::from(lst)));
     }
 
