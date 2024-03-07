@@ -26,7 +26,7 @@ impl Subscription {
             }
         }
     }
-    pub fn from_str(subscription: &str) -> Self {
+    pub fn from_str_unchecked(subscription: &str) -> Self {
         let (paths, methods) = Self::split(subscription);
         Self::new(paths, methods)
     }
@@ -43,10 +43,6 @@ impl Subscription {
         m.insert("methods".into(), self.methods.into());
         RpcValue::from(m)
     }
-    pub fn to_string(&self) -> String {
-        format!("{}:{}", self.paths, self.methods)
-    }
-
 }
 impl Display for Subscription {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -109,11 +105,11 @@ impl Display for SubscriptionPattern {
         write!(f, "{}:{}", self.paths.as_str(), self.methods.as_str())
     }
 }
-impl Into<RpcValue> for SubscriptionPattern {
-    fn into(self) -> RpcValue {
-        let mut map = Map::new();
-        map.insert("paths".to_string(), self.paths.as_str().into());
-        map.insert("methods".to_string(), self.methods.as_str().into());
-        RpcValue::from(map)
-    }
-}
+ impl From<SubscriptionPattern> for RpcValue {
+     fn from(val: SubscriptionPattern) -> Self {
+         let mut map = Map::new();
+         map.insert("paths".to_string(), val.paths.as_str().into());
+         map.insert("methods".to_string(), val.methods.as_str().into());
+         RpcValue::from(map)
+     }
+ }

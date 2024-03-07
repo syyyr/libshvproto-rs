@@ -98,7 +98,7 @@ pub(crate) async fn peer_loop(client_id: i32, broker_writer: Sender<BrokerComman
                         break;
                     } else {
                         debug!("Client ID: {client_id}, login credentials.");
-                        frame_writer.send_error(resp_meta, &format!("Invalid login credentials.")).await?;
+                        frame_writer.send_error(resp_meta, "Invalid login credentials.").await?;
                         continue;
                     }
                 }
@@ -164,15 +164,15 @@ pub(crate) async fn parent_broker_peer_loop_with_reconnect(client_id: i32, confi
     if url.scheme() != "tcp" {
         return Err(format!("Scheme {} is not supported yet.", url.scheme()).into());
     }
-    let reconnect_interval: std::time::Duration = loop {
+    let reconnect_interval: std::time::Duration = 'interval: {
         if let Some(time_str) = &config.client.reconnect_interval {
             if let Ok(interval) = duration_str::parse(time_str) {
-                break interval
+                break 'interval interval;
             }
         }
         const DEFAULT_RECONNECT_INTERVAL_SEC: u64 = 10;
         info!("Parent broker connection reconnect interval is not set explicitly, default value {DEFAULT_RECONNECT_INTERVAL_SEC} will be used.");
-        break std::time::Duration::from_secs(DEFAULT_RECONNECT_INTERVAL_SEC)
+        std::time::Duration::from_secs(DEFAULT_RECONNECT_INTERVAL_SEC)
     };
     info!("Reconnect interval set to: {:?}", reconnect_interval);
     loop {
@@ -192,8 +192,8 @@ pub(crate) async fn parent_broker_peer_loop_with_reconnect(client_id: i32, confi
 fn cut_prefix(shv_path: &str, prefix: &str) -> Option<String> {
     if shv_path.starts_with(prefix) && (shv_path.len() == prefix.len() || shv_path[prefix.len() ..].starts_with('/')) {
         let shv_path = &shv_path[prefix.len() ..];
-        if shv_path.starts_with('/') {
-            Some(shv_path[1 ..].to_string())
+        if let Some(stripped_path) = shv_path.strip_prefix('/') {
+            Some(stripped_path.to_string())
         } else {
             Some(shv_path.to_string())
         }
@@ -224,8 +224,8 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
     let login_params = LoginParams{
         user,
         password,
-        mount_point: (&config.client.mount.clone().unwrap_or_default()).to_owned(),
-        device_id: (&config.client.device_id.clone().unwrap_or_default()).to_owned(),
+        mount_point: config.client.mount.clone().unwrap_or_default().to_owned(),
+        device_id: config.client.device_id.clone().unwrap_or_default().to_owned(),
         heartbeat_interval,
         ..Default::default()
     };
@@ -251,7 +251,7 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
                     if frame.is_request() {
                         fn is_dot_local_granted(frame: &RpcFrame) -> bool {
                                 let access = frame.access().unwrap_or_default();
-                                access.split(',').find(|s| *s == DOT_LOCAL_GRANT).is_some()
+                                access.split(',').any(|s| s == DOT_LOCAL_GRANT)
                         }
                         fn is_dot_local_request(frame: &RpcFrame) -> bool {
                             let shv_path = frame.shv_path().unwrap_or_default();
@@ -261,13 +261,14 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
                             false
                         }
                         let shv_path = frame.shv_path().unwrap_or_default().to_owned();
-                        let shv_path = if shv_path.starts_with("/") {
+                        let shv_path = if let Some(stripped_path) = shv_path.strip_prefix('/') {
                             // parent broker can send requests with absolute path
                             // to call subscribe(), rejectNotSubscribe() etc.
-                            shv_path[1 ..].to_string()
+                            stripped_path.to_string()
                         } else if is_dot_local_request(&frame) {
                             let shv_path = &shv_path[DOT_LOCAL_DIR.len() ..];
-                            let shv_path = if shv_path.starts_with('/') { &shv_path[1 ..] } else { shv_path };
+                            let shv_path = if let Some(stripped_path) = shv_path.strip_prefix('/') {
+                                stripped_path } else { shv_path };
                             shv_path.to_string()
                         } else {
                             if shv_path.is_empty() && is_dot_local_granted(&frame) {

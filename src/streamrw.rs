@@ -51,8 +51,7 @@ impl<R: AsyncRead + Unpin + Send> FrameReader for StreamFrameReader<R> {
         let mut data: Vec<u8> = Vec::with_capacity(frame_len);
         let mut to_read = frame_len;
         while to_read > 0 {
-            let mut buff: Vec<u8> = Vec::with_capacity(to_read);
-            buff.resize(to_read, 0);
+            let mut buff = vec![0u8; to_read];
             let n = self.reader.read(&mut buff[..]).await?;
             data.append(&mut buff);
             to_read -= n;
@@ -95,7 +94,7 @@ pub fn read_frame(buff: &[u8]) -> crate::Result<RpcFrame> {
         log!(target: "RpcMsg", Level::Debug, "R==> {}", &frame);
         return Ok(frame);
     }
-    return Err("Meta data read error".into());
+    Err("Meta data read error".into())
 }
 
 pub struct StreamFrameWriter<W: AsyncWrite + Unpin + Send> {
@@ -119,9 +118,9 @@ impl<W: AsyncWrite + Unpin + Send> FrameWriter for StreamFrameWriter<W> {
         let msg_len = 1 + meta_data.len() + frame.data.len();
         wr.write_uint_data(msg_len as u64)?;
         header.push(frame.protocol as u8);
-        self.writer.write(&header).await?;
-        self.writer.write(&meta_data).await?;
-        self.writer.write(&frame.data).await?;
+        self.writer.write_all(&header).await?;
+        self.writer.write_all(&meta_data).await?;
+        self.writer.write_all(&frame.data).await?;
         // Ensure the encoded frame is written to the socket. The calls above
         // are to the buffered stream and writes. Calling `flush` writes the
         // remaining contents of the buffer to the socket.

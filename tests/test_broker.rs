@@ -40,10 +40,10 @@ fn test_broker() -> shv::Result<()> {
     {
         println!("---broker---: .app:dir()");
         let expected_methods = vec![
-            MetaMethod { name: METH_DIR.into(), param: "DirParam".into(), result: "DirResult".into(), ..Default::default() },
-            MetaMethod { name: METH_LS.into(), param: "LsParam".into(), result: "LsResult".into(), ..Default::default() },
-            MetaMethod { name: METH_NAME.into(), flags: Flag::IsGetter as u32,  ..Default::default() },
-            MetaMethod { name: METH_PING.into(), ..Default::default() },
+            MetaMethod { name: METH_DIR, param: "DirParam", result: "DirResult", ..Default::default() },
+            MetaMethod { name: METH_LS, param: "LsParam", result: "LsResult", ..Default::default() },
+            MetaMethod { name: METH_NAME, flags: Flag::IsGetter as u32,  ..Default::default() },
+            MetaMethod { name: METH_PING, ..Default::default() },
         ];
         {
             let methods = shv_call_child(".app", "dir", "")?;
@@ -109,7 +109,7 @@ fn test_broker() -> shv::Result<()> {
     assert_eq!(shv_call_parent("shv/test/child-broker/device/number", "ls", "")?, rpcvalue::List::new().into());
 
     println!("---broker---: .app/broker:clients()");
-    assert!(shv_call_child(".app/broker", "clients", "")?.as_list().len() > 0);
+    assert!(!shv_call_child(".app/broker", "clients", "")?.as_list().is_empty());
 
     println!("---broker---: .app/broker:mounts()");
     assert_eq!(shv_call_child(".app/broker", "mounts", "")?, vec![RpcValue::from("test/device")].into());

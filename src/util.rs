@@ -9,13 +9,13 @@ pub fn sha1_hash(data: &[u8]) -> Vec<u8> {
     let mut hasher = Sha1::new();
     hasher.update(data);
     let result = hasher.finalize();
-    return hex::encode(&result[..]).as_bytes().to_vec();
+    hex::encode(&result[..]).as_bytes().to_vec()
 }
 pub fn sha1_password_hash(password: &[u8], nonce: &[u8]) -> Vec<u8> {
     let mut hash = sha1_hash(password);
     let mut nonce_pass= nonce.to_vec();
     nonce_pass.append(&mut hash);
-    return sha1_hash(&nonce_pass);
+    sha1_hash(&nonce_pass)
 }
 pub fn join_path(p1: &str, p2: &str) -> String {
     if p1.is_empty() && p2.is_empty() {
@@ -33,6 +33,8 @@ pub fn parse_log_verbosity<'a>(verbosity: &'a str, module_path: &'a str) -> Vec<
     let mut ret: Vec<(&str, LevelFilter)> = Vec::new();
     for module_level_str in verbosity.split(',') {
         let module_level: Vec<_> = module_level_str.split('%').collect();
+        // Using `get(0)` looks more consistent along with the following `get(1)`
+        #[allow(clippy::get_first)]
         let name = *module_level.get(0).unwrap_or(&".");
         let level = *module_level.get(1).unwrap_or(&"D");
         let module = if name == "." { module_path } else { name };
@@ -88,7 +90,7 @@ pub fn left_glob(glob: &str, glob_len: usize) -> Option<&str> {
         None
     }
 }
-pub fn split_glob_on_match<'a, 'b>(glob_pattern: &'a str, shv_path: &'b str) -> Result<Option<(&'a str, &'a str)>, String> {
+pub fn split_glob_on_match<'a>(glob_pattern: &'a str, shv_path: &str) -> Result<Option<(&'a str, &'a str)>, String> {
     if glob_pattern.is_empty() {
         return Ok(None);
     }
@@ -115,6 +117,9 @@ pub fn split_glob_on_match<'a, 'b>(glob_pattern: &'a str, shv_path: &'b str) -> 
     if pattern.matches(trimmed_path) {
         match globstar_pos {
             None => {
+                // We don't probably want to use `cmp()` and match, as it might be slower:
+                // https://rust-lang.github.io/rust-clippy/master/index.html#/comparison_chain
+                #[allow(clippy::comparison_chain)]
                 if shv_path_glen > pattern1_glen {
                     // a/b vs a/b/c
                     Ok(None)

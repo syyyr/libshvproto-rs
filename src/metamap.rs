@@ -54,8 +54,13 @@ impl GetIndex for usize {
 #[derive(PartialEq, Clone)]
 pub struct MetaMap(pub(crate) Vec<MetaKeyVal>);
 
-impl MetaMap {
+impl Default for MetaMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
+impl MetaMap {
     pub fn new() -> MetaMap {
         MetaMap(Vec::new())
     }
@@ -98,23 +103,21 @@ impl MetaMap {
         where I: GetIndex
     {
         let key_to_search = key.make_key();
-        let mut ix = 0;
-        for kv in &self.0 {
+        for (ix, kv) in self.0.iter().enumerate() {
             match key_to_search {
                 GetKey::Int(key_to_search) => {
                     match &kv.key {
                         MetaKey::Int(key) if *key == key_to_search => {return Some(ix)}
-                        _ => { () }
+                        _ => { }
                     }
                 }
                 GetKey::Str(key_to_search) => {
                     match &kv.key {
                         MetaKey::Str(key) if key == key_to_search => { return Some(ix) }
-                        _ => { () }
+                        _ => { }
                     }
                 }
             }
-            ix += 1;
         }
         None
     }

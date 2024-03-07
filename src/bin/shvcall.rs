@@ -80,7 +80,7 @@ pub(crate) fn main() -> Result {
     let mut logger = SimpleLogger::new();
     logger = logger.with_level(LevelFilter::Info);
     if let Some(module_names) = &opts.verbose {
-        for (module, level) in parse_log_verbosity(&module_names, module_path!()) {
+        for (module, level) in parse_log_verbosity(module_names, module_path!()) {
             logger = logger.with_module_level(module, level);
         }
     }
@@ -178,7 +178,7 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
                             format!("RES {}\n", res.to_cpon())
                         }
                         Err(err) => {
-                            format!("ERR {}\n", err.to_string())
+                            format!("ERR {}\n", err)
                         }
                     }
                 } else {
@@ -325,7 +325,7 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
                             match parse_line(&line) {
                                 Ok((path, method, param)) => {
                                     let rqid =
-                                        send_request(&mut *frame_writer, &path, &method, &param)
+                                        send_request(&mut *frame_writer, path, method, param)
                                             .await?;
                                     loop {
                                         let resp = frame_reader.receive_message().await?;

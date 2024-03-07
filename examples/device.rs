@@ -48,7 +48,7 @@ fn main() -> shv::Result<()> {
     let mut logger = SimpleLogger::new();
     logger = logger.with_level(LevelFilter::Info);
     if let Some(module_names) = &cli_opts.verbose {
-        for (module, level) in parse_log_verbosity(&module_names, module_path!()) {
+        for (module, level) in parse_log_verbosity(module_names, module_path!()) {
             logger = logger.with_module_level(module, level);
         }
     }
@@ -71,7 +71,7 @@ fn main() -> shv::Result<()> {
 
     let state = DeviceState {
         node_app: AppNode{
-            app_name: "testdeviceapp".into(),
+            app_name: "testdeviceapp",
             shv_version_major: 3,
             shv_version_minor: 0,
         },

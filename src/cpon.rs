@@ -29,7 +29,7 @@ impl<'a, W> CponWriter<'a, W>
         self.indent = indent.to_vec();
     }
 
-    fn is_oneliner_list(lst: &Vec<RpcValue>) -> bool {
+    fn is_oneliner_list(lst: &[RpcValue]) -> bool {
         if lst.len() > 10 {
             return false;
         }
@@ -41,7 +41,7 @@ impl<'a, W> CponWriter<'a, W>
                 _ => continue,
             }
         }
-        return true;
+        true
     }
     fn is_oneliner_map<K>(iter: &mut dyn Iterator<Item = (K, &RpcValue)>) -> bool {
         let mut n = 0;
@@ -62,7 +62,7 @@ impl<'a, W> CponWriter<'a, W>
             };
             n += 1;
         };
-        return true
+        true
     }
 
     fn is_oneliner_meta(map: &MetaMap) -> bool {
@@ -77,7 +77,7 @@ impl<'a, W> CponWriter<'a, W>
                 _ => continue,
             }
         }
-        return true;
+        true
     }
 
     fn start_block(&mut self) {
@@ -201,10 +201,10 @@ impl<'a, W> CponWriter<'a, W>
                         self.write_byte(b'\\')?;
                         fn to_hex(b: u8) -> u8 {
                             if b < 10 {
-                                return b'0' + b;
+                                b'0' + b
                             }
                             else {
-                                return b'a' + (b - 10);
+                                b'a' + (b - 10)
                             }
                         }
                         self.write_byte(to_hex(*b / 16))?;
@@ -229,7 +229,7 @@ impl<'a, W> CponWriter<'a, W>
     fn write_decimal(&mut self, decimal: &Decimal) -> WriteResult {
         let s = decimal.to_cpon_string();
         let cnt = self.write_bytes(s.as_bytes())?;
-        return Ok(self.byte_writer.count() - cnt)
+        Ok(self.byte_writer.count() - cnt)
     }
     fn write_datetime(&mut self, dt: &DateTime) -> WriteResult {
         let cnt = self.write_bytes("d\"".as_bytes())?;
@@ -239,22 +239,19 @@ impl<'a, W> CponWriter<'a, W>
         });
         self.write_bytes(s.as_bytes())?;
         self.write_byte(b'"')?;
-        return Ok(self.byte_writer.count() - cnt)
+        Ok(self.byte_writer.count() - cnt)
     }
-    fn write_list(&mut self, lst: &Vec<RpcValue>) -> WriteResult {
+    fn write_list(&mut self, lst: &[RpcValue]) -> WriteResult {
         let cnt = self.byte_writer.count();
         let is_oneliner = Self::is_oneliner_list(lst);
         self.write_byte(b'[')?;
         self.start_block();
-        let mut n = 0;
-        let it = lst.iter();
-        for v in it {
+        for (n, v) in lst.iter().enumerate() {
             if n > 0 {
                 self.write_byte(b',')?;
             }
             self.indent_element(is_oneliner, n == 0)?;
             self.write(v)?;
-            n += 1;
         }
         self.end_block(is_oneliner)?;
         self.write_byte(b']')?;
@@ -265,8 +262,7 @@ impl<'a, W> CponWriter<'a, W>
         let is_oneliner = Self::is_oneliner_map(&mut map.iter());
         self.write_byte(b'{')?;
         self.start_block();
-        let mut n = 0;
-        for (k, v) in map {
+        for (n, (k, v)) in map.iter().enumerate() {
             if n > 0 {
                 self.write_byte(b',')?;
             }
@@ -274,7 +270,6 @@ impl<'a, W> CponWriter<'a, W>
             self.write_string(k)?;
             self.write_byte(b':')?;
             self.write(v)?;
-            n += 1;
         }
         self.end_block(is_oneliner)?;
         self.write_byte(b'}')?;
@@ -286,8 +281,7 @@ impl<'a, W> CponWriter<'a, W>
         self.write_byte(b'i')?;
         self.write_byte(b'{')?;
         self.start_block();
-        let mut n = 0;
-        for (k, v) in map {
+        for (n, (k, v)) in map.iter().enumerate() {
             if n > 0 {
                 self.write_byte(b',')?;
             }
@@ -295,7 +289,6 @@ impl<'a, W> CponWriter<'a, W>
             self.write_int(*k as i64)?;
             self.write_byte(b':')?;
             self.write(v)?;
-            n += 1;
         }
         self.end_block(is_oneliner)?;
         self.write_byte(b'}')?;
@@ -322,8 +315,7 @@ impl<'a, W> Writer for CponWriter<'a, W>
         let is_oneliner = Self::is_oneliner_meta(map);
         self.write_byte(b'<')?;
         self.start_block();
-        let mut n = 0;
-        for k in map.0.iter() {
+        for (n, k) in map.0.iter().enumerate() {
             if n > 0 {
                 self.write_byte(b',')?;
             }
@@ -338,7 +330,6 @@ impl<'a, W> Writer for CponWriter<'a, W>
             }
             self.write_byte(b':')?;
             self.write(&k.value)?;
-            n += 1;
         }
         self.end_block(is_oneliner)?;
         self.write_byte(b'>')?;
@@ -448,7 +439,7 @@ impl<'a, R> CponReader<'a, R>
                 self.get_byte()?;
             }
         }
-        return Ok(())
+        Ok(())
     }
     fn read_string(&mut self) -> Result<Value, ReadError> {
         let mut buff: Vec<u8> = Vec::new();
@@ -479,8 +470,8 @@ impl<'a, R> CponReader<'a, R>
         }
         let s = std::str::from_utf8(&buff);
         match s {
-            Ok(s) => return Ok(Value::from(s)),
-            Err(e) => return Err(self.make_error(&format!("Invalid String, Utf8 error: {}", e), ReadErrorReason::InvalidCharacter)),
+            Ok(s) => Ok(Value::from(s)),
+            Err(e) => Err(self.make_error(&format!("Invalid String, Utf8 error: {}", e), ReadErrorReason::InvalidCharacter)),
         }
     }
     fn decode_byte(&self, b: u8) -> Result<u8, ReadError> {
@@ -667,7 +658,7 @@ impl<'a, R> CponReader<'a, R>
                     self.get_byte()?;
                     let (n, neg, digit_cnt) = self.read_int(false)?;
                     exponent = n as i64;
-                    if neg == true { exponent = -exponent; }
+                    if neg { exponent = -exponent; }
                     if digit_cnt == 0 {
                         return Err(self.make_error("Malformed number exponetional part.", ReadErrorReason::InvalidCharacter))
                     }
@@ -690,7 +681,7 @@ impl<'a, R> CponReader<'a, R>
         }
         let mut snum = mantisa as i64;
         if is_neg { snum = -snum }
-        return Ok(Value::from(snum))
+        Ok(Value::from(snum))
     }
     fn read_list(&mut self) -> Result<Value, ReadError>
     {
@@ -706,7 +697,7 @@ impl<'a, R> CponReader<'a, R>
             let val = self.read()?;
             lst.push(val);
         }
-        return Ok(Value::from(lst))
+        Ok(Value::from(lst))
     }
 
     fn read_map(&mut self) -> Result<Value, ReadError> {
@@ -735,7 +726,7 @@ impl<'a, R> CponReader<'a, R>
             let val = self.read()?;
             map.insert(skey.to_string(), val);
         }
-        return Ok(Value::from(map))
+        Ok(Value::from(map))
     }
     fn read_imap(&mut self) -> Result<Value, ReadError> {
         self.get_byte()?; // eat 'i'
@@ -752,12 +743,12 @@ impl<'a, R> CponReader<'a, R>
                 break;
             }
             let (k, neg, _) = self.read_int(false)?;
-            let key = if neg == true { k as i64 * -1 } else { k as i64 };
+            let key = if neg { -(k as i64) } else { k as i64 };
             self.skip_white_insignificant()?;
             let val = self.read()?;
             map.insert(key as i32, val);
         }
-        return Ok(Value::from(map))
+        Ok(Value::from(map))
     }
     fn read_datetime(&mut self) -> Result<Value, ReadError> {
         self.get_byte()?; // eat 'd'
@@ -772,19 +763,19 @@ impl<'a, R> CponReader<'a, R>
                 }
             }
         }
-        return Err(self.make_error("Invalid DateTime", ReadErrorReason::InvalidCharacter))
+        Err(self.make_error("Invalid DateTime", ReadErrorReason::InvalidCharacter))
     }
     fn read_true(&mut self) -> Result<Value, ReadError> {
         self.read_token("true")?;
-        return Ok(Value::from(true))
+        Ok(Value::from(true))
     }
     fn read_false(&mut self) -> Result<Value, ReadError> {
         self.read_token("false")?;
-        return Ok(Value::from(false))
+        Ok(Value::from(false))
     }
     fn read_null(&mut self) -> Result<Value, ReadError> {
         self.read_token("null")?;
-        return Ok(Value::from(()))
+        Ok(Value::from(()))
     }
     fn read_token(&mut self, token: &str) -> Result<(), ReadError> {
         for c in token.as_bytes() {
@@ -793,7 +784,7 @@ impl<'a, R> CponReader<'a, R>
                 return Err(self.make_error(&format!("Incomplete '{}' literal.", token), ReadErrorReason::InvalidCharacter))
             }
         }
-        return Ok(())
+        Ok(())
     }
 
 }

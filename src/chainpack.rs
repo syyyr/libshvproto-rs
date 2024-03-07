@@ -75,7 +75,7 @@ impl<'a, W> ChainPackWriter<'a, W>
         }
         const SIG_TABLE_4BIT: [u8; 16] =  [ 0, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4 ];
         len += SIG_TABLE_4BIT[n as usize];
-        return len as u32
+        len as u32
     }
     /// number of bytes needed to encode bit_len
     fn bytes_needed(bit_len: u32) -> u32 {
@@ -87,7 +87,7 @@ impl<'a, W> ChainPackWriter<'a, W>
         } else {
             cnt = (bit_len - 1) / 8 + 2;
         }
-        return cnt
+        cnt
     }
     /// return max bit length >= bit_len, which can be encoded by same number of bytes
     fn expand_bit_len(bit_len: u32) -> u32 {
@@ -118,11 +118,11 @@ impl<'a, W> ChainPackWriter<'a, W>
         for i in (0 .. byte_cnt).rev() {
             let r = (num & 255) as u8;
             bytes[i as usize] = r;
-            num = num >> 8;
+            num >>= 8;
         }
         if bit_len <= 28 {
-            let mut mask = 0xf0 << (4 - byte_cnt);
-            bytes[0] = bytes[0] & ((!mask) as u8);
+            let mut mask: u8 = 0xf0 << (4 - byte_cnt);
+            bytes[0] &= !mask;
             mask <<= 1;
             bytes[0] |= mask;
         }
@@ -134,7 +134,7 @@ impl<'a, W> ChainPackWriter<'a, W>
             let r = bytes[i as usize];
             self.write_byte(r)?;
         }
-        return Ok(self.byte_writer.count() - cnt)
+        Ok(self.byte_writer.count() - cnt)
     }
     pub fn write_uint_data(&mut self, number: u64) -> WriteResult {
         let bitlen = Self::significant_bits_part_length(number);
@@ -142,7 +142,7 @@ impl<'a, W> ChainPackWriter<'a, W>
         Ok(self.byte_writer.count() - cnt)
     }
     fn write_int_data(&mut self, number: i64) -> WriteResult {
-        let mut num;
+        let mut num: u64;
         let neg;
         if number < 0 {
             num = (-number) as u64;
@@ -152,19 +152,19 @@ impl<'a, W> ChainPackWriter<'a, W>
             neg = false;
         };
 
-        let bitlen = Self::significant_bits_part_length(num as u64) + 1; // add sign bit
+        let bitlen = Self::significant_bits_part_length(num) + 1; // add sign bit
         if neg {
             let sign_pos = Self::expand_bit_len(bitlen);
-            let sign_bit_mask = (1 as u64) << sign_pos;
+            let sign_bit_mask = (1_u64) << sign_pos;
             num |= sign_bit_mask;
         }
-        let cnt = self.write_uint_data_helper(num as u64, bitlen)?;
+        let cnt = self.write_uint_data_helper(num, bitlen)?;
         Ok(self.byte_writer.count() - cnt)
     }
 
     fn write_int(&mut self, n: i64) -> WriteResult {
         let cnt = self.byte_writer.count();
-        if n >= 0 && n < 64 {
+        if (0..64).contains(&n) {
             self.write_byte(((n % 64) + 64) as u8)?;
         }
         else {
@@ -357,18 +357,18 @@ impl<'a, R> ChainPackReader<'a, R>
     }
     pub fn read_uint_data(&mut self) -> Result<u64, ReadError> {
         let (num, _) = self.read_uint_data_helper()?;
-        return Ok(num);
+        Ok(num)
     }
     fn read_int_data(&mut self) -> Result<i64, ReadError> {
         let (num, bitlen) = self.read_uint_data_helper()?;
-        let sign_bit_mask = (1 as u64) << (bitlen - 1);
+        let sign_bit_mask = (1_u64) << (bitlen - 1);
         let neg = (num & sign_bit_mask) != 0;
         let mut snum = num as i64;
         if neg {
             snum &= !(sign_bit_mask as i64);
             snum = -snum;
         }
-        return Ok(snum);
+        Ok(snum)
     }
 
     fn read_cstring_data(&mut self) -> Result<Value, ReadError> {
@@ -395,8 +395,8 @@ impl<'a, R> ChainPackReader<'a, R>
         }
         let s = std::str::from_utf8(&buff);
         match s {
-            Ok(s) => return Ok(Value::from(s)),
-            Err(e) => return Err(self.make_error(&format!("Invalid string, Utf8 error: {}", e), ReadErrorReason::InvalidCharacter)),
+            Ok(s) => Ok(Value::from(s)),
+            Err(e) => Err(self.make_error(&format!("Invalid string, Utf8 error: {}", e), ReadErrorReason::InvalidCharacter)),
         }
     }
     fn read_string_data(&mut self) -> Result<Value, ReadError> {
@@ -408,8 +408,8 @@ impl<'a, R> ChainPackReader<'a, R>
         }
         let s = std::str::from_utf8(&buff);
         match s {
-            Ok(s) => return Ok(Value::from(s)),
-            Err(e) => return Err(self.make_error(&format!("Invalid string, Utf8 error: {}", e), ReadErrorReason::InvalidCharacter)),
+            Ok(s) => Ok(Value::from(s)),
+            Err(e) => Err(self.make_error(&format!("Invalid string, Utf8 error: {}", e), ReadErrorReason::InvalidCharacter)),
         }
     }
     fn read_blob_data(&mut self) -> Result<Value, ReadError> {
@@ -419,7 +419,7 @@ impl<'a, R> ChainPackReader<'a, R>
             let b = self.get_byte()?;
             buff.push(b);
         }
-        return Ok(Value::from(buff))
+        Ok(Value::from(buff))
     }
     fn read_list_data(&mut self) -> Result<Value, ReadError> {
         let mut lst = Vec::new();
@@ -432,7 +432,7 @@ impl<'a, R> ChainPackReader<'a, R>
             let val = self.read()?;
             lst.push(val);
         }
-        return Ok(Value::from(lst))
+        Ok(Value::from(lst))
     }
     fn read_map_data(&mut self) -> Result<Value, ReadError> {
         let mut map: Map = Map::new();
@@ -453,7 +453,7 @@ impl<'a, R> ChainPackReader<'a, R>
             let val = self.read()?;
             map.insert(key.to_string(), val);
         }
-        return Ok(Value::from(map))
+        Ok(Value::from(map))
     }
     fn read_imap_data(&mut self) -> Result<Value, ReadError> {
         let mut map: BTreeMap<i32, RpcValue> = BTreeMap::new();
@@ -474,7 +474,7 @@ impl<'a, R> ChainPackReader<'a, R>
             let val = self.read()?;
             map.insert(key, val);
         }
-        return Ok(Value::from(map))
+        Ok(Value::from(map))
     }
     fn read_datetime_data(&mut self) -> Result<Value, ReadError> {
         let mut d = self.read_int_data()?;
@@ -494,7 +494,7 @@ impl<'a, R> ChainPackReader<'a, R>
         }
         d += SHV_EPOCH_MSEC;
         let dt = DateTime::from_epoch_msec_tz(d, (offset as i32 * 15) * 60);
-        return Ok(Value::from(dt))
+        Ok(Value::from(dt))
     }
     fn read_double_data(&mut self) -> Result<Value, ReadError> {
         let mut buff: [u8;8] = [0;8];
@@ -502,13 +502,13 @@ impl<'a, R> ChainPackReader<'a, R>
             return Err(self.make_error(&format!("{}", e), ReadErrorReason::InvalidCharacter))
         }
         let d = f64::from_le_bytes(buff);
-        return Ok(Value::from(d))
+        Ok(Value::from(d))
     }
     fn read_decimal_data(&mut self) -> Result<Value, ReadError> {
         let mantisa = self.read_int_data()?;
         let exponent = self.read_int_data()?;
         let d = Decimal::new(mantisa, exponent as i8);
-        return Ok(Value::from(d))
+        Ok(Value::from(d))
     }
 }
 
@@ -563,32 +563,23 @@ impl<'a, R> Reader for ChainPackReader<'a, R>
                 let n = self.read_uint_data()?;
                 Value::from(n)
             } else if b == PackingSchema::Double as u8 {
-                let n = self.read_double_data()?;
-                Value::from(n)
+                self.read_double_data()?
             } else if b == PackingSchema::Decimal as u8 {
-                let n = self.read_decimal_data()?;
-                Value::from(n)
+                self.read_decimal_data()?
             } else if b == PackingSchema::DateTime as u8 {
-                let n = self.read_datetime_data()?;
-                Value::from(n)
+                self.read_datetime_data()?
             } else if b == PackingSchema::String as u8 {
-                let n = self.read_string_data()?;
-                Value::from(n)
+                self.read_string_data()?
             } else if b == PackingSchema::CString as u8 {
-                let n = self.read_cstring_data()?;
-                Value::from(n)
+                self.read_cstring_data()?
             } else if b == PackingSchema::Blob as u8 {
-                let n = self.read_blob_data()?;
-                Value::from(n)
+                self.read_blob_data()?
             } else if b == PackingSchema::List as u8 {
-                let n = self.read_list_data()?;
-                Value::from(n)
+                self.read_list_data()?
             } else if b == PackingSchema::Map as u8 {
-                let n = self.read_map_data()?;
-                Value::from(n)
+                self.read_map_data()?
             } else if b == PackingSchema::IMap as u8 {
-                let n = self.read_imap_data()?;
-                Value::from(n)
+                self.read_imap_data()?
             } else if b == PackingSchema::TRUE as u8 {
                 Value::from(true)
             } else if b == PackingSchema::FALSE as u8 {

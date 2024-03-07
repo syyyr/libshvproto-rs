@@ -75,7 +75,7 @@ impl Value {
 			Value::Int(i) => *i == 0,
 			Value::UInt(u) => *u == 0,
 			Value::Double(d) => *d == 0.0,
-			Value::Bool(b) => *b == false,
+			Value::Bool(b) => !(*b),
 			Value::DateTime(dt) => dt.epoch_msec() == 0,
 			Value::Decimal(d) => d.mantissa() == 0,
 			Value::String(s) => s.is_empty(),
@@ -100,7 +100,7 @@ impl From<isize> for Value { fn from(val: isize) -> Self { Value::Int(val as i64
 impl From<u32> for Value { fn from(val: u32) -> Self { Value::UInt(val.into()) }}
 impl From<u64> for Value { fn from(val: u64) -> Self { Value::UInt(val) }}
 impl From<usize> for Value { fn from(val: usize) -> Self { Value::UInt(val as u64) }}
-impl From<f64> for Value { fn from(val: f64) -> Self { Value::Double(val as f64) }}
+impl From<f64> for Value { fn from(val: f64) -> Self { Value::Double(val) }}
 impl From<Decimal> for Value { fn from(val: Decimal) -> Self { Value::Decimal(val) }}
 impl From<List> for Value { fn from(val: List) -> Self { Value::List(Box::new(val)) }}
 impl From<Map> for Value { fn from(val: Map) -> Self { Value::Map(Box::new(val)) }}
@@ -187,21 +187,18 @@ pub struct RpcValue {
 }
 
 impl RpcValue {
-	pub fn null() -> RpcValue {
-		RpcValue {
-			meta: None,
-			value: Value::Null,
-		}
-	}
-	pub fn new(v: Value, m: Option<MetaMap>) -> Self {
-		RpcValue {
-			meta: match m {
-				None => None,
-				Some(mm) => Some(Box::new(mm)),
-			},
-			value: v,
-		}
-	}
+    pub fn null() -> RpcValue {
+        RpcValue {
+            meta: None,
+            value: Value::Null,
+        }
+    }
+    pub fn new(v: Value, m: Option<MetaMap>) -> Self {
+        RpcValue {
+            meta:  m.map(Box::new),
+            value: v,
+        }
+    }
 	/*
 	pub fn new<I>(val: I) -> RpcValue
 		where I: FromValue
@@ -232,218 +229,211 @@ impl RpcValue {
 		}
 	}
 	*/
-	pub fn set_meta(mut self, meta: Option<MetaMap>) -> Self {
-		match meta {
-			None => { self.meta = None }
-			Some(mm) => { self.meta = Some(Box::new(mm)) }
-		}
-		self
-	}
-	pub fn has_meta(&self) -> bool {
-		match &self.meta {
-			Some(_) => true,
-			_ => false,
-		}
-	}
-	pub fn meta(&self) -> &MetaMap {
-		match &self.meta {
-			Some(mm) => {
-				return mm
-			}
-			None => {
-				let mm = EMPTY_METAMAP.get_or_init(|| MetaMap::new());
-				return mm
-			}
-		}
-	}
-	pub fn meta_mut(&mut self) -> Option<&mut MetaMap> {
-		match &mut self.meta {
-			Some(mm) => Some(mm.as_mut()),
-			_ => None,
-		}
-	}
-	pub fn clear_meta(&mut self) {
-		self.meta = None;
-	}
+    pub fn set_meta(mut self, meta: Option<MetaMap>) -> Self {
+        self.meta = meta.map(Box::new);
+        self
+    }
+    pub fn has_meta(&self) -> bool {
+        self.meta.is_some()
+    }
+    pub fn meta(&self) -> &MetaMap {
+        match &self.meta {
+            Some(mm) => {
+                mm
+            }
+            None => {
+                let mm = EMPTY_METAMAP.get_or_init(MetaMap::new);
+                mm
+            }
+        }
+    }
+    pub fn meta_mut(&mut self) -> Option<&mut MetaMap> {
+        match &mut self.meta {
+            Some(mm) => Some(mm.as_mut()),
+            _ => None,
+        }
+    }
+    pub fn clear_meta(&mut self) {
+        self.meta = None;
+    }
 
-	pub fn value(&self) -> &Value {
-		&self.value
-	}
-	pub fn value_mut(&mut self) -> &mut Value {
-		&mut self.value
-	}
+    pub fn value(&self) -> &Value {
+        &self.value
+    }
+    pub fn value_mut(&mut self) -> &mut Value {
+        &mut self.value
+    }
 
-	pub fn type_name(&self) -> &'static str {
-		&self.value.type_name()
-	}
+    pub fn type_name(&self) -> &'static str {
+        self.value.type_name()
+    }
 
-	is_xxx!(is_null, Value::Null);
-	is_xxx!(is_bool, Value::Bool(_));
-	is_xxx!(is_int, Value::Int(_));
-	is_xxx!(is_string, Value::String(_));
-	is_xxx!(is_blob, Value::Blob(_));
-	is_xxx!(is_list, Value::List(_));
-	is_xxx!(is_map, Value::Map(_));
-	is_xxx!(is_imap, Value::IMap(_));
+    is_xxx!(is_null, Value::Null);
+    is_xxx!(is_bool, Value::Bool(_));
+    is_xxx!(is_int, Value::Int(_));
+    is_xxx!(is_string, Value::String(_));
+    is_xxx!(is_blob, Value::Blob(_));
+    is_xxx!(is_list, Value::List(_));
+    is_xxx!(is_map, Value::Map(_));
+    is_xxx!(is_imap, Value::IMap(_));
 
-	pub fn is_default_value(&self) -> bool {
-		self.value.is_default_value()
-	}
-	pub fn as_bool(&self) -> bool {
-		match &self.value {
-			Value::Bool(d) => *d,
-			_ => false,
-		}
-	}
-	pub fn as_int(&self) -> i64 {
-		return self.as_i64()
-	}
-	pub fn as_i64(&self) -> i64 {
-		match &self.value {
-			Value::Int(d) => *d,
-			Value::UInt(d) => *d as i64,
-			_ => 0,
-		}
-	}
-	pub fn as_i32(&self) -> i32 { self.as_i64() as i32 }
-	pub fn as_u64(&self) -> u64 {
-		match &self.value {
-			Value::Int(d) => *d as u64,
-			Value::UInt(d) => *d,
-			_ => 0,
-		}
-	}
-	pub fn as_u32(&self) -> u32 { self.as_u64() as u32 }
-	pub fn as_f64(&self) -> f64 {
-		match &self.value {
-			Value::Double(d) => *d,
-			_ => 0.,
-		}
-	}
-	pub fn as_usize(&self) -> usize {
-		match &self.value {
-			Value::Int(d) => *d as usize,
-			Value::UInt(d) => *d as usize,
-			_ => 0 as usize,
-		}
-	}
-	pub fn as_datetime(&self) -> datetime::DateTime {
-		match &self.value {
-			Value::DateTime(d) => d.clone(),
-			_ => datetime::DateTime::from_epoch_msec(0),
-		}
-	}
-	pub fn to_datetime(&self) -> Option<datetime::DateTime> {
-		match &self.value {
-			Value::DateTime(d) => Some(d.clone()),
-			_ => None,
-		}
-	}
-	pub fn as_decimal(&self) -> decimal::Decimal {
-		match &self.value {
-			Value::Decimal(d) => d.clone(),
-			_ => decimal::Decimal::new(0, 0),
-		}
-	}
+    pub fn is_default_value(&self) -> bool {
+        self.value.is_default_value()
+    }
+    pub fn as_bool(&self) -> bool {
+        match &self.value {
+            Value::Bool(d) => *d,
+            _ => false,
+        }
+    }
+    pub fn as_int(&self) -> i64 {
+        self.as_i64()
+    }
+    pub fn as_i64(&self) -> i64 {
+        match &self.value {
+            Value::Int(d) => *d,
+            Value::UInt(d) => *d as i64,
+            _ => 0,
+        }
+    }
+    pub fn as_i32(&self) -> i32 { self.as_i64() as i32 }
+    pub fn as_u64(&self) -> u64 {
+        match &self.value {
+            Value::Int(d) => *d as u64,
+            Value::UInt(d) => *d,
+            _ => 0,
+        }
+    }
+    pub fn as_u32(&self) -> u32 { self.as_u64() as u32 }
+    pub fn as_f64(&self) -> f64 {
+        match &self.value {
+            Value::Double(d) => *d,
+            _ => 0.,
+        }
+    }
+    pub fn as_usize(&self) -> usize {
+        match &self.value {
+            Value::Int(d) => *d as usize,
+            Value::UInt(d) => *d as usize,
+            _ => 0_usize,
+        }
+    }
+    pub fn as_datetime(&self) -> datetime::DateTime {
+        match &self.value {
+            Value::DateTime(d) => *d,
+            _ => datetime::DateTime::from_epoch_msec(0),
+        }
+    }
+    pub fn to_datetime(&self) -> Option<datetime::DateTime> {
+        match &self.value {
+            Value::DateTime(d) => Some(*d),
+            _ => None,
+        }
+    }
+    pub fn as_decimal(&self) -> decimal::Decimal {
+        match &self.value {
+            Value::Decimal(d) => d.clone(),
+            _ => decimal::Decimal::new(0, 0),
+        }
+    }
 	// pub fn as_str(&self) -> Result<&str, Utf8Error> {
 	// 	match &self.value {
 	// 		Value::String(b) => std::str::from_utf8(b),
 	// 		_ => std::str::from_utf8(EMPTY_BYTES_REF),
 	// 	}
 	// }
-	pub fn as_blob(&self) -> &[u8] {
-		match &self.value {
-			Value::Blob(b) => b,
-			_ => EMPTY_BYTES_REF,
-		}
-	}
-	pub fn as_str(&self) -> &str {
-		match &self.value {
-			Value::String(b) => b,
-			_ => EMPTY_STR_REF,
-		}
-	}
-	pub fn as_list(&self) -> &Vec<RpcValue> {
-		match &self.value {
-			Value::List(b) => &b,
-			_ => EMPTY_LIST.get_or_init(|| List::new()),
-		}
-	}
-	pub fn as_map(&self) -> &Map {
-		match &self.value {
-			Value::Map(b) => &b,
-			_ => EMPTY_MAP.get_or_init(|| Map::new()),
-		}
-	}
-	pub fn as_imap(&self) -> &BTreeMap<i32, RpcValue> {
-		match &self.value {
-			Value::IMap(b) => &b,
-			_ => EMPTY_IMAP.get_or_init(|| IMap::new()),
-		}
-	}
-	pub fn get<I>(&self, key: I) -> Option<&RpcValue>
-		where I: GetIndex
-	{
-		match key.make_key() {
-			GetKey::Int(ix) => {
-				match &self.value {
-					Value::List(lst) => lst.get(ix as usize),
-					Value::IMap(map) => map.get(&ix),
-					_ => { None }
-				}
-			}
-			GetKey::Str(ix) => {
-				match &self.value {
-					Value::Map(map) => map.get(ix),
-					_ => { None }
-				}
-			}
-		}
-	}
-	pub fn to_cpon(&self) -> String { self.to_cpon_indented("").unwrap_or("".to_string()) }
-	pub fn to_cpon_indented(&self, indent: &str) -> crate::Result<String> {
-		let buff = self.to_cpon_bytes_indented(indent.as_bytes())?;
-		match String::from_utf8(buff) {
-			Ok(s) => Ok(s),
-			Err(e) => Err(e.into()),
-		}
-	}
-	pub fn to_cpon_bytes_indented(&self, indent: &[u8]) -> crate::Result<Vec<u8>> {
-		let mut buff: Vec<u8> = Vec::new();
-		let mut wr = CponWriter::new(&mut buff);
-		wr.set_indent(indent);
-		match wr.write(self) {
-			Ok(_) => { Ok(buff) }
-			Err(err) => { Err(err.into()) }
-		}
-	}
-	pub fn to_chainpack(&self) -> Vec<u8> {
-		let mut buff: Vec<u8> = Vec::new();
-		let mut wr = ChainPackWriter::new(&mut buff);
-		let r = wr.write(self);
-		match r {
-			Ok(_) => buff,
-			Err(_) => Vec::new(),
-		}
-	}
+    pub fn as_blob(&self) -> &[u8] {
+        match &self.value {
+            Value::Blob(b) => b,
+            _ => EMPTY_BYTES_REF,
+        }
+    }
+    pub fn as_str(&self) -> &str {
+        match &self.value {
+            Value::String(b) => b,
+            _ => EMPTY_STR_REF,
+        }
+    }
+    pub fn as_list(&self) -> &Vec<RpcValue> {
+        match &self.value {
+            Value::List(b) => b,
+            _ => EMPTY_LIST.get_or_init(List::new),
+        }
+    }
+    pub fn as_map(&self) -> &Map {
+        match &self.value {
+            Value::Map(b) => b,
+            _ => EMPTY_MAP.get_or_init(Map::new),
+        }
+    }
+    pub fn as_imap(&self) -> &BTreeMap<i32, RpcValue> {
+        match &self.value {
+            Value::IMap(b) => b,
+            _ => EMPTY_IMAP.get_or_init(IMap::new),
+        }
+    }
+    pub fn get<I>(&self, key: I) -> Option<&RpcValue>
+        where I: GetIndex
+        {
+            match key.make_key() {
+                GetKey::Int(ix) => {
+                    match &self.value {
+                        Value::List(lst) => lst.get(ix as usize),
+                        Value::IMap(map) => map.get(&ix),
+                        _ => { None }
+                    }
+                }
+                GetKey::Str(ix) => {
+                    match &self.value {
+                        Value::Map(map) => map.get(ix),
+                        _ => { None }
+                    }
+                }
+            }
+        }
+    pub fn to_cpon(&self) -> String { self.to_cpon_indented("").unwrap_or("".to_string()) }
+    pub fn to_cpon_indented(&self, indent: &str) -> crate::Result<String> {
+        let buff = self.to_cpon_bytes_indented(indent.as_bytes())?;
+        match String::from_utf8(buff) {
+            Ok(s) => Ok(s),
+            Err(e) => Err(e.into()),
+        }
+    }
+    pub fn to_cpon_bytes_indented(&self, indent: &[u8]) -> crate::Result<Vec<u8>> {
+        let mut buff: Vec<u8> = Vec::new();
+        let mut wr = CponWriter::new(&mut buff);
+        wr.set_indent(indent);
+        match wr.write(self) {
+            Ok(_) => { Ok(buff) }
+            Err(err) => { Err(err.into()) }
+        }
+    }
+    pub fn to_chainpack(&self) -> Vec<u8> {
+        let mut buff: Vec<u8> = Vec::new();
+        let mut wr = ChainPackWriter::new(&mut buff);
+        let r = wr.write(self);
+        match r {
+            Ok(_) => buff,
+            Err(_) => Vec::new(),
+        }
+    }
 
-	pub fn from_cpon(s: &str) -> ReadResult {
-		let mut buff = s.as_bytes();
-		let mut rd = CponReader::new(&mut buff);
-		rd.read()
-	}
-	pub fn from_chainpack(b: &[u8]) -> ReadResult {
-		let mut buff = b;
-		let mut rd = ChainPackReader::new(&mut buff);
-		rd.read()
-	}
-
+    pub fn from_cpon(s: &str) -> ReadResult {
+        let mut buff = s.as_bytes();
+        let mut rd = CponReader::new(&mut buff);
+        rd.read()
+    }
+    pub fn from_chainpack(b: &[u8]) -> ReadResult {
+        let mut buff = b;
+        let mut rd = ChainPackReader::new(&mut buff);
+        rd.read()
+    }
 }
 static NULL_RPCVALUE: OnceLock<RpcValue> = OnceLock::new();
 
 impl Default for &RpcValue {
 	fn default() -> Self {
-		NULL_RPCVALUE.get_or_init(|| RpcValue::null())
+		NULL_RPCVALUE.get_or_init(RpcValue::null)
 	}
 }
 impl fmt::Debug for RpcValue {
