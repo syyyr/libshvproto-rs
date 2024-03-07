@@ -75,7 +75,7 @@ impl Value {
 			Value::Int(i) => *i == 0,
 			Value::UInt(u) => *u == 0,
 			Value::Double(d) => *d == 0.0,
-			Value::Bool(b) => *b == false,
+			Value::Bool(b) => !(*b),
 			Value::DateTime(dt) => dt.epoch_msec() == 0,
 			Value::Decimal(d) => d.mantissa() == 0,
 			Value::String(s) => s.is_empty(),
@@ -100,7 +100,7 @@ impl From<isize> for Value { fn from(val: isize) -> Self { Value::Int(val as i64
 impl From<u32> for Value { fn from(val: u32) -> Self { Value::UInt(val.into()) }}
 impl From<u64> for Value { fn from(val: u64) -> Self { Value::UInt(val) }}
 impl From<usize> for Value { fn from(val: usize) -> Self { Value::UInt(val as u64) }}
-impl From<f64> for Value { fn from(val: f64) -> Self { Value::Double(val as f64) }}
+impl From<f64> for Value { fn from(val: f64) -> Self { Value::Double(val) }}
 impl From<Decimal> for Value { fn from(val: Decimal) -> Self { Value::Decimal(val) }}
 impl From<List> for Value { fn from(val: List) -> Self { Value::List(Box::new(val)) }}
 impl From<Map> for Value { fn from(val: Map) -> Self { Value::Map(Box::new(val)) }}
@@ -195,10 +195,7 @@ impl RpcValue {
 	}
 	pub fn new(v: Value, m: Option<MetaMap>) -> Self {
 		RpcValue {
-			meta: match m {
-				None => None,
-				Some(mm) => Some(Box::new(mm)),
-			},
+			meta:  m.map(Box::new),
 			value: v,
 		}
 	}
@@ -233,26 +230,20 @@ impl RpcValue {
 	}
 	*/
 	pub fn set_meta(mut self, meta: Option<MetaMap>) -> Self {
-		match meta {
-			None => { self.meta = None }
-			Some(mm) => { self.meta = Some(Box::new(mm)) }
-		}
+        self.meta = meta.map(Box::new);
 		self
 	}
 	pub fn has_meta(&self) -> bool {
-		match &self.meta {
-			Some(_) => true,
-			_ => false,
-		}
+        self.meta.is_some()
 	}
 	pub fn meta(&self) -> &MetaMap {
 		match &self.meta {
 			Some(mm) => {
-				return mm
+				mm
 			}
 			None => {
-				let mm = EMPTY_METAMAP.get_or_init(|| MetaMap::new());
-				return mm
+				let mm = EMPTY_METAMAP.get_or_init(MetaMap::new);
+				mm
 			}
 		}
 	}
@@ -274,7 +265,7 @@ impl RpcValue {
 	}
 
 	pub fn type_name(&self) -> &'static str {
-		&self.value.type_name()
+		self.value.type_name()
 	}
 
 	is_xxx!(is_null, Value::Null);
@@ -296,7 +287,7 @@ impl RpcValue {
 		}
 	}
 	pub fn as_int(&self) -> i64 {
-		return self.as_i64()
+        self.as_i64()
 	}
 	pub fn as_i64(&self) -> i64 {
 		match &self.value {
@@ -324,18 +315,18 @@ impl RpcValue {
 		match &self.value {
 			Value::Int(d) => *d as usize,
 			Value::UInt(d) => *d as usize,
-			_ => 0 as usize,
+			_ => 0_usize,
 		}
 	}
 	pub fn as_datetime(&self) -> datetime::DateTime {
 		match &self.value {
-			Value::DateTime(d) => d.clone(),
+			Value::DateTime(d) => *d,
 			_ => datetime::DateTime::from_epoch_msec(0),
 		}
 	}
 	pub fn to_datetime(&self) -> Option<datetime::DateTime> {
 		match &self.value {
-			Value::DateTime(d) => Some(d.clone()),
+			Value::DateTime(d) => Some(*d),
 			_ => None,
 		}
 	}
@@ -365,20 +356,20 @@ impl RpcValue {
 	}
 	pub fn as_list(&self) -> &Vec<RpcValue> {
 		match &self.value {
-			Value::List(b) => &b,
-			_ => EMPTY_LIST.get_or_init(|| List::new()),
+			Value::List(b) => b,
+			_ => EMPTY_LIST.get_or_init(List::new),
 		}
 	}
 	pub fn as_map(&self) -> &Map {
 		match &self.value {
-			Value::Map(b) => &b,
-			_ => EMPTY_MAP.get_or_init(|| Map::new()),
+			Value::Map(b) => b,
+			_ => EMPTY_MAP.get_or_init(Map::new),
 		}
 	}
 	pub fn as_imap(&self) -> &BTreeMap<i32, RpcValue> {
 		match &self.value {
-			Value::IMap(b) => &b,
-			_ => EMPTY_IMAP.get_or_init(|| IMap::new()),
+			Value::IMap(b) => b,
+			_ => EMPTY_IMAP.get_or_init(IMap::new),
 		}
 	}
 	pub fn get<I>(&self, key: I) -> Option<&RpcValue>
@@ -443,7 +434,7 @@ static NULL_RPCVALUE: OnceLock<RpcValue> = OnceLock::new();
 
 impl Default for &RpcValue {
 	fn default() -> Self {
-		NULL_RPCVALUE.get_or_init(|| RpcValue::null())
+		NULL_RPCVALUE.get_or_init(RpcValue::null)
 	}
 }
 impl fmt::Debug for RpcValue {
