@@ -43,10 +43,6 @@ impl Subscription {
         m.insert("methods".into(), self.methods.into());
         RpcValue::from(m)
     }
-    pub fn to_string(&self) -> String {
-        format!("{}:{}", self.paths, self.methods)
-    }
-
 }
 impl Display for Subscription {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
