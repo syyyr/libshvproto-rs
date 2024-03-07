@@ -61,15 +61,15 @@ impl DateTime {
         Self::from_epoch_msec_tz(epoch_msec, 0)
     }
     pub fn from_iso_str(iso_str: &str) -> Result<DateTime, String> {
-            const PATTERN: &'static str = "2020-02-03T11:59:43";
+            const PATTERN: &str = "2020-02-03T11:59:43";
             if iso_str.len() >= PATTERN.len() {
-                let s = &iso_str[..];
+                let s = iso_str;
                 let naive_str = &s[..PATTERN.len()];
                 if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(naive_str, "%Y-%m-%dT%H:%M:%S") {
                     let mut msec = 0;
                     let mut offset = 0;
                     let mut rest = &s[PATTERN.len()..];
-                    if rest.len() > 0 && rest.as_bytes()[0] == b'.' {
+                    if !rest.is_empty() && rest.as_bytes()[0] == b'.' {
                         rest = &rest[1..];
                         if rest.len() >= 3 {
                             match rest[..3].parse::<i32>() {
@@ -83,7 +83,7 @@ impl DateTime {
                             }
                         }
                     }
-                    if rest.len() > 0 {
+                    if !rest.is_empty() {
                         if rest.len() == 1 && rest.as_bytes()[0] == b'Z' {
                         } else if rest.len() == 3 {
                             if let Ok(hrs) = rest.parse::<i32>() {
@@ -106,7 +106,7 @@ impl DateTime {
                     return Ok(dt)
                 }
             }
-            return Err(format!("Invalid DateTime: '{:?}", iso_str))
+            Err(format!("Invalid DateTime: '{:?}", iso_str))
     }
     pub fn epoc_msec_utc_offset(&self) -> (i64, i32) {
         let msec= self.0 / (TZ_MASK + 1);
@@ -123,7 +123,7 @@ impl DateTime {
 
     pub fn to_chrono_naivedatetime(&self) -> chrono::NaiveDateTime {
         let msec = self.epoch_msec();
-        chrono::NaiveDateTime::from_timestamp_opt(msec / 1000, ((msec % 1000) * 1000000) as u32).unwrap_or(NaiveDateTime::default())
+        chrono::NaiveDateTime::from_timestamp_opt(msec / 1000, ((msec % 1000) * 1000000) as u32).unwrap_or_default()
     }
     pub fn to_chrono_datetime(&self) -> chrono::DateTime<chrono::offset::FixedOffset> {
         let offset = match FixedOffset::east_opt(self.utc_offset()) {
@@ -195,9 +195,7 @@ impl DateTime {
 
 impl PartialOrd for DateTime {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let e1 = self.epoch_msec();
-        let e2 = other.epoch_msec();
-        Some(e1.cmp(&e2))
+        Some(self.cmp(other))
     }
 }
 
