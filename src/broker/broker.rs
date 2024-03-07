@@ -384,7 +384,7 @@ impl Broker {
                 error!("Invalid pattern '{paths}'.")
             }
         }
-        let to_subscribe = to_subscribe.iter().map(|s| Subscription::from_str(s)).collect();
+        let to_subscribe = to_subscribe.iter().map(|s| Subscription::from_str_unchecked(s)).collect();
         self.call_subscribe_async(client_id, to_subscribe)?;
         Ok(())
     }

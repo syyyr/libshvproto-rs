@@ -26,7 +26,7 @@ impl Subscription {
             }
         }
     }
-    pub fn from_str(subscription: &str) -> Self {
+    pub fn from_str_unchecked(subscription: &str) -> Self {
         let (paths, methods) = Self::split(subscription);
         Self::new(paths, methods)
     }
