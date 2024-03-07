@@ -37,7 +37,7 @@ impl Decimal {
         let mut s = mantisa.to_string();
 
         let n = s.len() as i8;
-        let dec_places = -exponent as i8;
+        let dec_places = -exponent;
         if dec_places > 0 && dec_places < n {
             // insert decimal point
             let dot_ix = n - dec_places;
@@ -47,12 +47,12 @@ impl Decimal {
             // prepend 0.00000..
             let extra_0_cnt = dec_places - n;
             s = "0.".to_string()
-                + &*std::iter::repeat("0").take(extra_0_cnt as usize).collect::<String>()
+                + &*"0".repeat(extra_0_cnt as usize)
                 + &*s;
         }
         else if dec_places < 0 && n + exponent <= 9 {
             // append ..000000.
-            s = s + &*std::iter::repeat("0").take(exponent as usize).collect::<String>();
+            s += &*"0".repeat(exponent as usize);
             s.push('.');
         }
         else if dec_places == 0 {
@@ -72,6 +72,8 @@ impl Decimal {
     pub fn to_f64(&self) -> f64 {
         let (m, e) = self.decode();
         let mut d = m as f64;
+        // We probably don't want to call .cmp() because of performance loss
+        #[allow(clippy::comparison_chain)]
         if e < 0 {
             for _ in e .. 0 {
                 d /= 10.;
