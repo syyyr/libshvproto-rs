@@ -19,8 +19,8 @@ pub enum Protocol {
 impl fmt::Display for Protocol {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Protocol::ChainPack => write!(fmt, "{}", "ChainPack"),
-            Protocol::ResetSession => write!(fmt, "{}", "ResetSession"),
+            Protocol::ChainPack => write!(fmt, "ChainPack"),
+            Protocol::ResetSession => write!(fmt, "ResetSession"),
         }
     }
 }
@@ -32,23 +32,22 @@ impl RpcFrame {
         let mut data = Vec::new();
         {
             let mut wr = ChainPackWriter::new(&mut data);
-            wr.write_value(&msg.as_rpcvalue().value())?;
+            wr.write_value(msg.as_rpcvalue().value())?;
         }
         let meta = msg.as_rpcvalue().meta().clone();
         Ok(RpcFrame { protocol: Protocol::ChainPack, meta, data })
     }
     pub fn to_rpcmesage(&self) -> crate::Result<RpcMessage> {
         let mut buff = BufReader::new(&*self.data);
-        let value;
-        match &self.protocol {
+        let value = match &self.protocol {
             Protocol::ChainPack => {
                 let mut rd = ChainPackReader::new(&mut buff);
-                value = rd.read_value()?;
+                rd.read_value()?
             }
             _ => {
                 return Err("Invalid protocol".into());
             }
-        }
+        };
         Ok(RpcMessage::from_rpcvalue(RpcValue::new(value, Some(self.meta.clone())))?)
     }
     pub fn prepare_response_meta(src: &MetaMap) -> Result<MetaMap, &'static str> {
