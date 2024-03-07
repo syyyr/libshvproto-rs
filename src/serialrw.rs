@@ -241,7 +241,7 @@ impl<W: AsyncWrite + Unpin + Send> FrameWriter for SerialFrameWriter<W> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "async-std"))]
 mod test {
     use async_std::io::BufWriter;
     use crate::RpcMessage;

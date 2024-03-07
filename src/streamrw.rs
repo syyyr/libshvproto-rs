@@ -71,7 +71,31 @@ impl<R: AsyncRead + Unpin + Send> FrameReader for StreamFrameReader<R> {
             return Ok(frame);
         }
         return Err("Meta data read error".into());
+    }
+}
+
+pub fn read_frame(buff: &[u8]) -> crate::Result<RpcFrame> {
+    let mut buffrd = BufReader::new(buff);
+    let mut rd = ChainPackReader::new(&mut buffrd);
+    let frame_len = match rd.read_uint_data() {
+        Ok(len) => { len as usize }
+        Err(err) => {
+            return Err(err.msg.into());
         }
+    };
+    let pos = rd.position();
+    let data = &buff[pos .. pos + frame_len];
+    let protocol = if data[0] == 0 {Protocol::ResetSession} else { Protocol::ChainPack };
+    let data = &data[1 .. ];
+    let mut buffrd = BufReader::new(data);
+    let mut rd = ChainPackReader::new(&mut buffrd);
+    if let Ok(Some(meta)) = rd.try_read_meta() {
+        let pos = rd.position();
+        let frame = RpcFrame { protocol, meta, data: data[pos ..].to_vec() };
+        log!(target: "RpcMsg", Level::Debug, "R==> {}", &frame);
+        return Ok(frame);
+    }
+    return Err("Meta data read error".into());
 }
 
 pub struct StreamFrameWriter<W: AsyncWrite + Unpin + Send> {
@@ -84,6 +108,7 @@ impl<W: AsyncWrite + Unpin + Send> StreamFrameWriter<W> {
         }
     }
 }
+
 #[async_trait]
 impl<W: AsyncWrite + Unpin + Send> FrameWriter for StreamFrameWriter<W> {
     async fn send_frame(&mut self, frame: RpcFrame) -> crate::Result<()> {
@@ -103,6 +128,20 @@ impl<W: AsyncWrite + Unpin + Send> FrameWriter for StreamFrameWriter<W> {
         self.writer.flush().await?;
         Ok(())
     }
+}
+
+pub fn write_frame(buff: &mut Vec<u8>, frame: RpcFrame) -> crate::Result<()> {
+    let mut meta_data = serialize_meta(&frame)?;
+    let mut header = Vec::new();
+    let mut wr = ChainPackWriter::new(&mut header);
+    let msg_len = 1 + meta_data.len() + frame.data.len();
+    wr.write_uint_data(msg_len as u64)?;
+    header.push(frame.protocol as u8);
+    let mut frame = frame;
+    buff.append(&mut header);
+    buff.append(&mut meta_data);
+    buff.append(&mut frame.data);
+    Ok(())
 }
 
 
