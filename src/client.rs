@@ -119,7 +119,7 @@ impl ClientConfig {
         let file_path = Path::new(file_name);
         if file_path.exists() {
             info!("Loading config file {file_name}");
-            return match Self::from_file(&file_name) {
+            return match Self::from_file(file_name) {
                 Ok(cfg) => {
                     Ok(cfg)
                 }
