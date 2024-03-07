@@ -8,9 +8,9 @@ pub enum Flag {
     IsSetter = 1 << 2,
     LargeResultHint = 1 << 3,
 }
-impl Into<u32> for Flag {
-    fn into(self) -> u32 {
-        return self as u32;
+impl From<Flag> for u32 {
+    fn from(val: Flag) -> Self {
+        val as u32
     }
 }
 impl From<u8> for Flag {
@@ -113,15 +113,14 @@ pub enum DirAttribute {
     Result,
     Access,
 }
-
-impl Into<i32> for DirAttribute {
-    fn into(self) -> i32 {
-        self as i32
+impl From<DirAttribute> for i32 {
+    fn from(val: DirAttribute) -> Self {
+        val as i32
     }
 }
-impl Into<&str> for DirAttribute {
-    fn into(self) -> &'static str {
-        match self {
+impl From<DirAttribute> for &str {
+    fn from(val: DirAttribute) -> Self {
+        match val {
             DirAttribute::Name => {"name"}
             DirAttribute::Flags => {"flags"}
             DirAttribute::Param => {"param"}
@@ -130,9 +129,9 @@ impl Into<&str> for DirAttribute {
         }
     }
 }
-impl Into<String> for DirAttribute {
-    fn into(self) -> String {
-        <DirAttribute as Into<&str>>::into(self).to_string()
+impl From<DirAttribute> for String {
+    fn from(val: DirAttribute) -> Self {
+        <DirAttribute as Into<&str>>::into(val).to_string()
     }
 }
 
