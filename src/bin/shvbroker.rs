@@ -49,7 +49,7 @@ pub(crate) fn main() -> shv::Result<()> {
     } else {
         Default::default()
     };
-    let (access, create_editable_access_file) = loop {
+    let (access, create_editable_access_file) = 'access: {
         let mut create_editable_access_file = false;
         if let Some(data_dir) = &config.data_directory {
             if config.editable_access {
@@ -58,7 +58,7 @@ pub(crate) fn main() -> shv::Result<()> {
                     info!("Loading access file {file_name}");
                     match AccessControl::from_file(&file_name) {
                         Ok(acc) => {
-                            break (acc, false);
+                            break 'access (acc, false);
                         }
                         Err(err) => {
                             error!("Cannot read access file: {file_name} - {err}");
@@ -69,7 +69,7 @@ pub(crate) fn main() -> shv::Result<()> {
                 }
             }
         }
-        break (config.access.clone(), create_editable_access_file);
+        break 'access (config.access.clone(), create_editable_access_file);
     };
     if create_editable_access_file {
         let data_dir = &config.data_directory.clone().unwrap_or("/tmp/shvbroker/data".into());
