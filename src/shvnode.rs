@@ -51,7 +51,7 @@ fn dir<'a>(methods: impl Iterator<Item=&'a MetaMethod>, param: DirParam) -> RpcV
                 lst.push(mm.to_rpcvalue(metamethod::DirFormat::Map));
             }
             DirParam::BriefMethod(ref method_name) => {
-                if &mm.name == method_name {
+                if mm.name == method_name {
                     result = mm.to_rpcvalue(metamethod::DirFormat::IMap);
                     break;
                 }
@@ -93,13 +93,13 @@ pub fn process_local_dir_ls<V>(mounts: &BTreeMap<String, V>, frame: &RpcFrame) -
         return None
     }
     let shv_path = frame.shv_path().unwrap_or_default();
-    let mut children_on_path = children_on_path(&mounts, shv_path);
+    let mut children_on_path = children_on_path(mounts, shv_path);
     if let Some(children_on_path) = children_on_path.as_mut() {
         if frame.meta.get(DOT_LOCAL_HACK).is_some() {
             children_on_path.insert(0, DOT_LOCAL_DIR.into());
         }
     }
-    let mount = find_longest_prefix(mounts, &shv_path);
+    let mount = find_longest_prefix(mounts, shv_path);
     let is_mount_point = mount.is_some();
     let is_leaf = match &children_on_path {
         None => { is_mount_point }
@@ -112,10 +112,10 @@ pub fn process_local_dir_ls<V>(mounts: &BTreeMap<String, V>, frame: &RpcFrame) -
     if method == METH_DIR && !is_mount_point {
         // dir in the middle of the tree must be resolved locally
         if let Ok(rpcmsg) = frame.to_rpcmesage() {
-            let dir = dir(DIR_LS_METHODS.iter().into_iter(), rpcmsg.param().into());
+            let dir = dir(DIR_LS_METHODS.iter(), rpcmsg.param().into());
             return Some(Ok(dir))
         } else {
-            return Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, format!("Cannot convert RPC frame to Rpc message"))))
+            return Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, "Cannot convert RPC frame to Rpc message")))
         }
     }
     if method == METH_LS && !is_leaf {
@@ -124,7 +124,7 @@ pub fn process_local_dir_ls<V>(mounts: &BTreeMap<String, V>, frame: &RpcFrame) -
             let ls = ls_children_to_result(children_on_path, rpcmsg.param().into());
             return Some(ls)
         } else {
-            return Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, format!("Cannot convert RPC frame to Rpc message"))))
+            return Some(Err(RpcError::new(RpcErrorCode::InvalidRequest, "Cannot convert RPC frame to Rpc message")))
         }
     }
     None
@@ -137,7 +137,7 @@ fn ls_children_to_result(children: Option<Vec<String>>, param: LsParam) -> Resul
                     Err(RpcError::new(RpcErrorCode::MethodCallException, "Invalid shv path"))
                 }
                 Some(dirs) => {
-                    let res: rpcvalue::List = dirs.iter().map(|d| RpcValue::from(d)).collect();
+                    let res: rpcvalue::List = dirs.iter().map(RpcValue::from).collect();
                     Ok(res.into())
                 }
             }
@@ -161,18 +161,13 @@ pub fn children_on_path<V>(mounts: &BTreeMap<String, V>, path: &str) -> Option<V
     for (key, _) in mounts.range(path.to_string()..) {
         if key.starts_with(path) {
             dir_exists = true;
-            if path.is_empty()
-                || key.len() == path.len()
-                || key.as_bytes()[path.len()] == ('/' as u8)
-            {
-                if key.len() > path.len() {
-                    let dir_rest_start = if path.is_empty() { 0 } else { path.len() + 1 };
-                    let mut updirs = key[dir_rest_start..].split('/');
-                    if let Some(dir) = updirs.next() {
-                        if !unique_dirs.contains(dir) {
-                            dirs.push(dir.to_string());
-                            unique_dirs.insert(dir.to_string());
-                        }
+            if path.is_empty() || (key.len() > path.len() && key.as_bytes()[path.len()] == (b'/')) {
+                let dir_rest_start = if path.is_empty() { 0 } else { path.len() + 1 };
+                let mut updirs = key[dir_rest_start..].split('/');
+                if let Some(dir) = updirs.next() {
+                    if !unique_dirs.contains(dir) {
+                        dirs.push(dir.to_string());
+                        unique_dirs.insert(dir.to_string());
                     }
                 }
             }
@@ -203,8 +198,8 @@ mod tests {
         assert_eq!(super::children_on_path(&mounts, "b/2"), Some(vec!["C".to_string(), "D".to_string()]));
     }
 }
-pub fn find_longest_prefix<'a, 'b, V>(map: &'a BTreeMap<String, V>, shv_path: &'b str) -> Option<(&'b str, &'b str)> {
-    let mut path = &shv_path[..];
+pub fn find_longest_prefix<'a, V>(map: &BTreeMap<String, V>, shv_path: &'a str) -> Option<(&'a str, &'a str)> {
+    let mut path = shv_path;
     let mut rest = "";
     loop {
         if map.contains_key(path) {
@@ -248,7 +243,7 @@ impl ShvNode {
     pub fn process_dir(methods: &[&'static MetaMethod], rq: &RpcMessage) -> Result<RpcValue, RpcError> {
         let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
-            let resp = dir(methods.iter().map(|m| *m), rq.param().into());
+            let resp = dir(methods.iter().copied(), rq.param().into());
             Ok(resp)
         } else {
             let errmsg = format!("Unknown method '{}:{}()', invalid path.", rq.shv_path().unwrap_or_default(), rq.method().unwrap_or_default());
