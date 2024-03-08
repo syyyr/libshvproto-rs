@@ -61,7 +61,7 @@ impl RpcMessage {
         RpcFrame::from_rpcmessage(self)
     }
     pub fn param(&self) -> Option<&RpcValue> { self.key(Key::Params as i32) }
-    pub fn set_param(&mut self, rv: RpcValue) -> &mut Self  { self.set_key(Key::Params, Some(rv)); self }
+    pub fn set_param(&mut self, rv: impl Into<RpcValue>) -> &mut Self  { self.set_param_opt(Some(rv.into())) }
     pub fn set_param_opt(&mut self, rv: Option<RpcValue>) -> &mut Self  { self.set_key(Key::Params, rv); self }
     pub fn result(&self) -> Result<&RpcValue, RpcError> {
         match self.key(Key::Result as i32) {
@@ -74,7 +74,7 @@ impl RpcMessage {
             Some(rv) => {Ok(rv)}
         }
     }
-    pub fn set_result(&mut self, rv: RpcValue) -> &mut Self { self.set_key(Key::Result, Some(rv)); self }
+    pub fn set_result(&mut self, rv: impl Into<RpcValue>) -> &mut Self { self.set_key(Key::Result, Some(rv.into())); self }
     pub fn set_result_or_error(&mut self, result: Result<RpcValue, RpcError>) -> &mut Self {
         match result {
             Ok(val) => { self.set_result(val) }
