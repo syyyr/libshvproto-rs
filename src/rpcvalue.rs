@@ -109,38 +109,15 @@ impl From<datetime::DateTime> for Value { fn from(val: datetime::DateTime) -> Se
 impl From<chrono::NaiveDateTime> for Value { fn from(val: chrono::NaiveDateTime) -> Self { Value::DateTime(DateTime::from_naive_datetime(&val)) }}
 impl<Tz: chrono::TimeZone> From<chrono::DateTime<Tz>> for Value { fn from(item: chrono::DateTime<Tz>) -> Self { Value::DateTime(datetime::DateTime::from_datetime(&item)) }}
 
-// cannot use generic implementation
-//impl<T> From<T> for RpcValue { fn from(val: T) -> Self { RpcValue { meta: None, value: val.into() }}}
-// because of error: error[E0119]: conflicting implementations of trait `std::convert::From<rpcvalue::RpcValue>` for type `rpcvalue::RpcValue`
-impl From<()> for RpcValue { fn from(val: ()) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<bool> for RpcValue { fn from(val: bool) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<&bool> for RpcValue { fn from(val: &bool) -> Self { RpcValue { meta: None, value: (*val).into() }}}
-impl From<&str> for RpcValue { fn from(val: &str) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<String> for RpcValue { fn from(val: String) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<&String> for RpcValue { fn from(val: &String) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<Vec<u8>> for RpcValue { fn from(val: Vec<u8>) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<&[u8]> for RpcValue { fn from(val: &[u8]) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<i32> for RpcValue { fn from(val: i32) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<i64> for RpcValue { fn from(val: i64) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<isize> for RpcValue { fn from(val: isize) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<u32> for RpcValue { fn from(val: u32) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<u64> for RpcValue { fn from(val: u64) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<usize> for RpcValue { fn from(val: usize) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<f64> for RpcValue { fn from(val: f64) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<Decimal> for RpcValue { fn from(val: Decimal) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<List> for RpcValue { fn from(val: List) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<Map> for RpcValue { fn from(val: Map) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<IMap> for RpcValue { fn from(val: IMap) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<datetime::DateTime> for RpcValue { fn from(val: datetime::DateTime) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl From<chrono::NaiveDateTime> for RpcValue { fn from(val: chrono::NaiveDateTime) -> Self { RpcValue { meta: None, value: val.into() }}}
-impl<Tz: chrono::TimeZone> From<chrono::DateTime<Tz>> for RpcValue {
-	fn from(val: chrono::DateTime<Tz>) -> Self {
-		RpcValue {
-			meta: None,
-			value: val.into(),
-		}
-	}
+impl<T: Into<Value>> From<T> for RpcValue {
+    fn from(value: T) -> Self {
+         RpcValue {
+             meta: None,
+             value: value.into()
+         }
+    }
 }
+
 macro_rules! is_xxx {
     ($name:ident, $variant:pat) => {
         pub fn $name(&self) -> bool {
