@@ -320,7 +320,7 @@ impl RpcMessageMetaTags for MetaMap {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum RpcErrorCode {
     NoError = 0,
     InvalidRequest,	// The data sent is not a valid Request object.
