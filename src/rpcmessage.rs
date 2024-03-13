@@ -83,10 +83,7 @@ impl RpcMessage {
         self
     }
     pub fn error(&self) -> Option<RpcError> {
-        if let Some(rv) = self.key(Key::Error as i32) {
-            return RpcError::from_rpcvalue(rv)
-        }
-        None
+        self.key(Key::Error as i32).and_then(RpcError::from_rpcvalue)
     }
     pub fn set_error(&mut self, err: RpcError) -> &mut Self {
         self.set_key(Key::Error, Some(err.to_rpcvalue()));
@@ -119,8 +116,7 @@ impl RpcMessage {
     }
     fn key(&self, key: i32) -> Option<&RpcValue> {
         if let Value::IMap(m) = self.0.value() {
-            let v = m.get(&key);
-            return v;
+            return m.get(&key);
         }
         None
     }
@@ -201,20 +197,13 @@ pub trait RpcMessageMetaTags {
         self.tag(Tag::RequestId as i32).map(|rv| rv.as_i64())
     }
     fn try_request_id(&self) -> crate::Result<RqId> {
-        match self.request_id() {
-            None => Err("Request id not exists.".into()),
-            Some(id) => Ok(id),
-        }
+        self.request_id().ok_or_else(|| "Request id not exists.".into())
     }
     fn set_request_id(&mut self, id: RqId) -> &mut Self::Target {
         self.set_tag(Tag::RequestId as i32, Some(RpcValue::from(id)))
     }
     fn shv_path(&self) -> Option<&str> {
-        let t = self.tag(Tag::ShvPath as i32);
-        match t {
-            None => None,
-            Some(rv) => Some(rv.as_str()),
-        }
+        self.tag(Tag::ShvPath as i32).map(RpcValue::as_str)
     }
     //fn shv_path_or_empty(&self) -> &str {
     //    self.shv_path().unwrap_or("")
@@ -223,21 +212,13 @@ pub trait RpcMessageMetaTags {
         self.set_tag(Tag::ShvPath as i32, Some(RpcValue::from(shv_path)))
     }
     fn method(&self) -> Option<&str> {
-        let t = self.tag(Tag::Method as i32);
-        match t {
-            None => None,
-            Some(rv) => Some(rv.as_str()),
-        }
+        self.tag(Tag::Method as i32).map(RpcValue::as_str)
     }
     fn set_method(&mut self, method: &str) -> &mut Self::Target {
         self.set_tag(Tag::Method as i32, Some(RpcValue::from(method)))
     }
     fn access(&self) -> Option<&str> {
-        let t = self.tag(Tag::Access as i32);
-        match t {
-            None => None,
-            Some(rv) => Some(rv.as_str()),
-        }
+        self.tag(Tag::Access as i32).map(RpcValue::as_str)
     }
     fn set_access(&mut self, grant: &str) -> &mut Self::Target {
         self.set_tag(Tag::Access as i32, Some(RpcValue::from(grant)))

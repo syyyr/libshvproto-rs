@@ -85,7 +85,7 @@ impl SubscriptionPattern {
         Self::new(paths, methods)
     }
     pub fn from_subscription(subscription: &Subscription) -> crate::Result<Self> {
-        Ok(Self::new(&subscription.paths, &subscription.methods)?)
+        Self::new(&subscription.paths, &subscription.methods)
     }
     pub fn to_rpcvalue(&self) -> RpcValue {
         self.as_subscription().to_rpcvalue()
