@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use crate::reader::{Reader, ByteReader, ReadError, ReadErrorReason};
 use crate::rpcvalue::{Map, IMap};
 
+#[allow(clippy::upper_case_acronyms)]
 #[warn(non_camel_case_types)]
 #[allow(dead_code)]
 pub(crate) enum PackingSchema {
