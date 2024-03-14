@@ -439,7 +439,9 @@ impl fmt::Debug for RpcMessage {
 mod test {
     use crate::RpcValue;
     use crate::RpcMessage;
+    use crate::metamethod::AccessLevel;
     use crate::rpcmessage::RpcMessageMetaTags;
+    use crate::rpcmessage::Tag;
 
     #[test]
     fn rpc_request() {
@@ -466,5 +468,25 @@ mod test {
         assert_eq!(resp.pop_caller_id(), Some(4));
         //let cpon = rq.as_rpcvalue().to_cpon();
         //assert_eq!(cpon, format!("<1:1,8:{},10:\"foo\">i{{1:123}}", id + 1));
+    }
+
+    #[test]
+    fn rpc_msg_access_level_none() {
+        let rq = RpcMessage::new_request("foo/bar", "baz", None);
+        assert_eq!(rq.access_level(), None);
+    }
+
+    #[test]
+    fn rpc_msg_access_level_some() {
+        let mut rq = RpcMessage::new_request("foo/bar", "baz", None);
+        rq.set_access_level(AccessLevel::Read);
+        assert_eq!(rq.access_level(), Some(AccessLevel::Read));
+    }
+
+    #[test]
+    fn rpc_msg_access_level_compat() {
+        let mut rq = RpcMessage::new_request("foo/bar", "baz", None);
+        rq.set_tag(Tag::Access as i32, Some(RpcValue::from("srv")));
+        assert_eq!(rq.access_level(), Some(AccessLevel::Service));
     }
 }
