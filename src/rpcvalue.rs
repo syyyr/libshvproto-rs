@@ -214,21 +214,12 @@ impl RpcValue {
         self.meta.is_some()
     }
     pub fn meta(&self) -> &MetaMap {
-        match &self.meta {
-            Some(mm) => {
-                mm
-            }
-            None => {
-                let mm = EMPTY_METAMAP.get_or_init(MetaMap::new);
-                mm
-            }
-        }
+        self.meta.as_ref().map_or_else(
+            || EMPTY_METAMAP.get_or_init(MetaMap::new),
+            <Box<MetaMap>>::as_ref)
     }
     pub fn meta_mut(&mut self) -> Option<&mut MetaMap> {
-        match &mut self.meta {
-            Some(mm) => Some(mm.as_mut()),
-            _ => None,
-        }
+        self.meta.as_mut().map(<Box<MetaMap>>::as_mut)
     }
     pub fn clear_meta(&mut self) {
         self.meta = None;
@@ -371,10 +362,7 @@ impl RpcValue {
     pub fn to_cpon(&self) -> String { self.to_cpon_indented("").unwrap_or("".to_string()) }
     pub fn to_cpon_indented(&self, indent: &str) -> crate::Result<String> {
         let buff = self.to_cpon_bytes_indented(indent.as_bytes())?;
-        match String::from_utf8(buff) {
-            Ok(s) => Ok(s),
-            Err(e) => Err(e.into()),
-        }
+        String::from_utf8(buff).map_err(|e| e.into())
     }
     pub fn to_cpon_bytes_indented(&self, indent: &[u8]) -> crate::Result<Vec<u8>> {
         let mut buff: Vec<u8> = Vec::new();
@@ -389,10 +377,7 @@ impl RpcValue {
         let mut buff: Vec<u8> = Vec::new();
         let mut wr = ChainPackWriter::new(&mut buff);
         let r = wr.write(self);
-        match r {
-            Ok(_) => buff,
-            Err(_) => Vec::new(),
-        }
+        r.map_or_else(|_| Vec::new(), |_| buff)
     }
 
     pub fn from_cpon(s: &str) -> ReadResult {

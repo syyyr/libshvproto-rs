@@ -272,7 +272,7 @@ async fn make_call(url: &Url, opts: &Opts) -> Result {
                             match parse_line(line) {
                                 Ok((path, method, param)) => {
                                     let rqid =
-                                        send_request(&mut *frame_writer, &path, &method, &param)
+                                        send_request(&mut *frame_writer, path, method, param)
                                             .await?;
                                     loop {
                                         let resp = frame_reader.receive_message().await?;

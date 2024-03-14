@@ -28,6 +28,8 @@ impl From<u8> for Flag {
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum Access { Browse = 0, Read, Write, Command, Config, Service, SuperService, Developer, Superuser }
 impl Access {
+    // It makes sense to return Option rather than Result as the `FromStr` trait does.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(value: &str) -> Option<Self> {
         match value {
             "bws" => Some(Access::Browse),
