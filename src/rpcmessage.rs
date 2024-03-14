@@ -1,3 +1,4 @@
+use crate::metamethod::Access;
 use crate::{RpcValue, rpctype, Value};
 use crate::metamap::*;
 // use std::collections::BTreeMap;
@@ -23,6 +24,7 @@ pub enum Tag {
     RevCallerIds,
     Access,
     UserId,
+    AccessLevel,
     MAX
 }
 
@@ -217,11 +219,17 @@ pub trait RpcMessageMetaTags {
     fn set_method(&mut self, method: &str) -> &mut Self::Target {
         self.set_tag(Tag::Method as i32, Some(RpcValue::from(method)))
     }
-    fn access(&self) -> Option<&str> {
-        self.tag(Tag::Access as i32).map(RpcValue::as_str)
+    fn access(&self) -> Option<Access> {
+        self.tag(Tag::AccessLevel as i32)
+            .map(RpcValue::as_i32)
+            .and_then(|v| v.try_into().ok())
+            .or_else(|| self.tag(Tag::Access as i32)
+                     .map(RpcValue::as_str)
+                     .and_then(|s| s.split(',').find_map(Access::from_str)))
     }
-    fn set_access(&mut self, grant: &str) -> &mut Self::Target {
-        self.set_tag(Tag::Access as i32, Some(RpcValue::from(grant)))
+    fn set_access(&mut self, grant: Access) -> &mut Self::Target {
+        self.set_tag(Tag::Access as i32, Some(RpcValue::from(grant.as_str())));
+        self.set_tag(Tag::AccessLevel as i32, Some(RpcValue::from(grant as i32)))
     }
 
     fn caller_ids(&self) -> Vec<CliId> {

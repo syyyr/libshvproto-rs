@@ -12,7 +12,7 @@ use crate::shvnode::{DIR_APP, AppNode, find_longest_prefix, METH_DIR, METH_LS, p
 use crate::util::{sha1_hash, split_glob_on_match};
 use log::Level;
 use crate::broker::node::{DIR_APP_BROKER_CURRENTCLIENT, DIR_APP_BROKER, AppBrokerCurrentClientNode, AppBrokerNode, METH_SUBSCRIBE};
-use crate::metamethod::MetaMethod;
+use crate::metamethod::{MetaMethod, Access};
 
 pub struct Broker {
     peers: HashMap<CliId, Peer>,
@@ -95,14 +95,14 @@ impl Broker {
                         let mut frame = frame;
                         frame.push_caller_id(peer_id);
                         frame.set_shvpath(node_path);
-                        frame.set_access(grant.as_str());
+                        frame.set_access(grant);
                         let device_peer_id = device.peer_id;
                         self.peers.get(&device_peer_id).ok_or("client ID must exist")?.sender.send(BrokerToPeerMessage::SendFrame(frame)).await?;
                     }
                     Mount::Node(node) => {
                         let mut frame = frame;
                         frame.set_shvpath(node_path);
-                        frame.set_access(grant.as_str());
+                        frame.set_access(grant);
                         if let Some(method) = node.is_request_granted(&frame) {
                             let ctx = NodeRequestContext {
                                 peer_id,
@@ -223,7 +223,7 @@ impl Broker {
                 let rq_id = request.request_id().unwrap_or_default();
                 let mut rq2 = request;
                 // broker calls can have any access level, set 'su' to bypass client access control
-                rq2.set_access("su");
+                rq2.set_access(Access::Superuser);
                 self.start_broker_rpc_call(rq2, PendingRpcCall {
                     client_id,
                     request_id: rq_id,
@@ -440,7 +440,7 @@ impl Broker {
             None
         }
     }
-    fn grant_for_request(&self, client_id: CliId, frame: &RpcFrame) -> Result<RpcValue, RpcError> {
+    fn grant_for_request(&self, client_id: CliId, frame: &RpcFrame) -> Result<Access, RpcError> {
         log!(target: "Acc", Level::Debug, "======================= grant_for_request {}", &frame);
         let shv_path = frame.shv_path().unwrap_or_default();
         let method = frame.method().unwrap_or("");
@@ -459,7 +459,7 @@ impl Broker {
                                     log!(target: "Acc", Level::Debug, "\trule: {}", rule.path_method);
                                     if rule.path_method.match_shv_method(shv_path, method) {
                                         log!(target: "Acc", Level::Debug, "\t\t HIT");
-                                        return Ok(rule.grant.clone().into());
+                                        return Ok(rule.grant);
                                     }
                                 }
                             }
@@ -467,12 +467,8 @@ impl Broker {
                     }
                     Err(RpcError::new(RpcErrorCode::PermissionDenied, format!("Access denied for user: {}", peer.user)))
                 }
-                PeerKind::ParentBroker => {
-                    match frame.access() {
-                        None => Err(RpcError::new(RpcErrorCode::PermissionDenied, "")),
-                        Some(access) => Ok(access.into()),
-                    }
-                }
+                PeerKind::ParentBroker =>
+                    frame.access().ok_or_else(|| RpcError::new(RpcErrorCode::PermissionDenied, ""))
             }
         }
     }

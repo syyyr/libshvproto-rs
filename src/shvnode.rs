@@ -228,14 +228,11 @@ impl ShvNode {
     pub fn is_request_granted(&self, rq: &RpcFrame) -> Option<&'static MetaMethod> {
         let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
-            let level_str = rq.access().unwrap_or_default();
-            for level_str in level_str.split(',') {
-                if let Some(rq_level) = Access::from_str(level_str) {
-                    let method = rq.method().unwrap_or_default();
-                    for mm in &self.methods {
-                        if mm.name == method {
-                            return if rq_level >= mm.access { Some(*mm) } else { None }
-                        }
+            if let Some(rq_access) = rq.access() {
+                let method = rq.method().unwrap_or_default();
+                for mm in &self.methods {
+                    if mm.name == method {
+                        return if rq_access >= mm.access { Some(*mm) } else { None }
                     }
                 }
             }

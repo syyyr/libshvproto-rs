@@ -26,7 +26,18 @@ impl From<u8> for Flag {
     }
 }
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
-pub enum Access { Browse = 0, Read, Write, Command, Config, Service, SuperService, Developer, Superuser }
+pub enum Access {
+    Browse = 1,
+    Read = 8,
+    Write = 16,
+    Command = 24,
+    Config = 32,
+    Service = 40,
+    SuperService = 48,
+    Developer = 56,
+    Superuser = 63
+}
+
 impl Access {
     // It makes sense to return Option rather than Result as the `FromStr` trait does.
     #[allow(clippy::should_implement_trait)]
@@ -44,12 +55,45 @@ impl Access {
             _ => None,
         }
     }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Access::Browse => "bws",
+            Access::Read => "rd",
+            Access::Write => "wr",
+            Access::Command => "cmd",
+            Access::Config => "cfg",
+            Access::Service => "srv",
+            Access::SuperService => "ssrv",
+            Access::Developer => "dev",
+            Access::Superuser => "su",
+        }
+    }
 }
 impl From<&str> for Access {
     fn from(value: &str) -> Self {
         match Self::from_str(value) {
             None => { Self::Browse }
             Some(acc) => { acc }
+        }
+    }
+}
+
+impl TryFrom<i32> for Access {
+    type Error = ();
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            value if value == Access::Browse as i32 => Ok(Access::Browse),
+            value if value == Access::Read as i32 => Ok(Access::Read),
+            value if value == Access::Write as i32 => Ok(Access::Write),
+            value if value == Access::Command as i32 => Ok(Access::Command),
+            value if value == Access::Config as i32 => Ok(Access::Config),
+            value if value == Access::Service as i32 => Ok(Access::Service),
+            value if value == Access::SuperService as i32 => Ok(Access::SuperService),
+            value if value == Access::Developer as i32 => Ok(Access::Developer),
+            value if value == Access::Superuser as i32 => Ok(Access::Superuser),
+            _ => Err(()),
         }
     }
 }
