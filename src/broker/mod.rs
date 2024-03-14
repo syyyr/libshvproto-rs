@@ -1,7 +1,7 @@
 use async_std::{task};
 use async_std::net::TcpListener;
 use crate::broker::config::{AccessControl, BrokerConfig};
-use crate::metamethod::Access;
+use crate::metamethod::AccessLevel;
 use async_std::channel::{Sender};
 use glob::{Pattern};
 use log::{debug, info, warn};
@@ -150,7 +150,7 @@ enum Mount {
 
 struct ParsedAccessRule {
     path_method: SubscriptionPattern,
-    grant: Access,
+    grant: AccessLevel,
 }
 
 impl ParsedAccessRule {
@@ -165,7 +165,7 @@ impl ParsedAccessRule {
                             path_method: SubscriptionPattern { paths: path, methods: method },
                             grant: grant
                                 .split(',')
-                                .find_map(Access::from_str)
+                                .find_map(AccessLevel::from_str)
                                 .unwrap_or_else(|| panic!("Invalid access grant `{grant}`")),
                         })
                     }

@@ -7,7 +7,7 @@ use futures::io::BufWriter;
 use log::{debug, error, info};
 use rand::distributions::{Alphanumeric, DistString};
 use url::Url;
-use crate::metamethod::Access;
+use crate::metamethod::AccessLevel;
 use crate::{client, RpcMessage, RpcMessageMetaTags, RpcValue};
 use crate::client::LoginParams;
 use crate::rpcframe::RpcFrame;
@@ -264,7 +264,7 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
                 Ok(mut frame) => {
                     if frame.is_request() {
                         fn is_dot_local_granted(frame: &RpcFrame) -> bool {
-                            frame.access().is_some_and(|access| access >= Access::Superuser)
+                            frame.access_level().is_some_and(|access| access >= AccessLevel::Superuser)
                         }
                         fn is_dot_local_request(frame: &RpcFrame) -> bool {
                             let shv_path = frame.shv_path().unwrap_or_default();

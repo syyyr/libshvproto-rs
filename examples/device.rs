@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use log::*;
 use simple_logger::SimpleLogger;
 use shv::client::{ClientConfig};
-use shv::metamethod::{Access, Flag, MetaMethod};
+use shv::metamethod::{AccessLevel, Flag, MetaMethod};
 use shv::rpcframe::RpcFrame;
 use shv::rpcmessage::{RpcError, RpcErrorCode};
 use shv::shvnode::{ShvNode, AppNode, METH_GET, METH_SET, SIG_CHNG, META_METHOD_DIR, META_METHOD_LS, DIR_APP, DIR_APP_DEVICE, AppDeviceNode, METH_DIR, METH_LS};
@@ -192,9 +192,9 @@ struct IntPropertyNode {
     value: i32,
 }
 
-const META_METH_GET: MetaMethod = MetaMethod { name: METH_GET, flags: Flag::IsGetter as u32, access: Access::Read, param: "", result: "Int", description: "" };
-const META_METH_SET: MetaMethod = MetaMethod { name: METH_SET, flags: Flag::IsSetter as u32, access: Access::Write, param: "Int", result: "", description: "" };
-const META_SIG_CHNG: MetaMethod = MetaMethod { name: SIG_CHNG, flags: Flag::IsSignal as u32, access: Access::Read, param: "Int", result: "", description: "" };
+const META_METH_GET: MetaMethod = MetaMethod { name: METH_GET, flags: Flag::IsGetter as u32, access: AccessLevel::Read, param: "", result: "Int", description: "" };
+const META_METH_SET: MetaMethod = MetaMethod { name: METH_SET, flags: Flag::IsSetter as u32, access: AccessLevel::Write, param: "Int", result: "", description: "" };
+const META_SIG_CHNG: MetaMethod = MetaMethod { name: SIG_CHNG, flags: Flag::IsSignal as u32, access: AccessLevel::Read, param: "Int", result: "", description: "" };
 
 impl IntPropertyNode {
     pub fn new_shvnode(&self) -> ShvNode {

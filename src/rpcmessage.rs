@@ -1,4 +1,4 @@
-use crate::metamethod::Access;
+use crate::metamethod::AccessLevel;
 use crate::{RpcValue, rpctype, Value};
 use crate::metamap::*;
 // use std::collections::BTreeMap;
@@ -219,15 +219,15 @@ pub trait RpcMessageMetaTags {
     fn set_method(&mut self, method: &str) -> &mut Self::Target {
         self.set_tag(Tag::Method as i32, Some(RpcValue::from(method)))
     }
-    fn access(&self) -> Option<Access> {
+    fn access_level(&self) -> Option<AccessLevel> {
         self.tag(Tag::AccessLevel as i32)
             .map(RpcValue::as_i32)
             .and_then(|v| v.try_into().ok())
             .or_else(|| self.tag(Tag::Access as i32)
                      .map(RpcValue::as_str)
-                     .and_then(|s| s.split(',').find_map(Access::from_str)))
+                     .and_then(|s| s.split(',').find_map(AccessLevel::from_str)))
     }
-    fn set_access(&mut self, grant: Access) -> &mut Self::Target {
+    fn set_access_level(&mut self, grant: AccessLevel) -> &mut Self::Target {
         self.set_tag(Tag::Access as i32, Some(RpcValue::from(grant.as_str())));
         self.set_tag(Tag::AccessLevel as i32, Some(RpcValue::from(grant as i32)))
     }

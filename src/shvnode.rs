@@ -3,7 +3,7 @@ use std::format;
 use log::warn;
 use crate::metamethod::{Flag, MetaMethod};
 use crate::{metamethod, RpcMessage, RpcMessageMetaTags, RpcValue, rpcvalue};
-use crate::metamethod::Access;
+use crate::metamethod::AccessLevel;
 use crate::rpcframe::RpcFrame;
 use crate::rpcmessage::{RpcError, RpcErrorCode};
 
@@ -228,7 +228,7 @@ impl ShvNode {
     pub fn is_request_granted(&self, rq: &RpcFrame) -> Option<&'static MetaMethod> {
         let shv_path = rq.shv_path().unwrap_or_default();
         if shv_path.is_empty() {
-            if let Some(rq_access) = rq.access() {
+            if let Some(rq_access) = rq.access_level() {
                 let method = rq.method().unwrap_or_default();
                 for mm in &self.methods {
                     if mm.name == method {
@@ -281,12 +281,12 @@ pub const METH_PING: &str = "ping";
 pub const METH_VERSION: &str = "version";
 pub const METH_SERIAL_NUMBER: &str = "serialNumber";
 
-pub const META_METHOD_DIR: MetaMethod = MetaMethod { name: METH_DIR, flags: Flag::None as u32, access: Access::Browse, param: "DirParam", result: "DirResult", description: "" };
-pub const META_METHOD_LS: MetaMethod = MetaMethod { name: METH_LS, flags: Flag::None as u32, access: Access::Browse, param: "LsParam", result: "LsResult", description: "" };
+pub const META_METHOD_DIR: MetaMethod = MetaMethod { name: METH_DIR, flags: Flag::None as u32, access: AccessLevel::Browse, param: "DirParam", result: "DirResult", description: "" };
+pub const META_METHOD_LS: MetaMethod = MetaMethod { name: METH_LS, flags: Flag::None as u32, access: AccessLevel::Browse, param: "LsParam", result: "LsResult", description: "" };
 
 pub const DIR_LS_METHODS: [MetaMethod; 2] = [
-    MetaMethod { name: METH_DIR, flags: Flag::None as u32, access: Access::Browse, param: "DirParam", result: "DirResult", description: "" },
-    MetaMethod { name: METH_LS, flags: Flag::None as u32, access: Access::Browse, param: "LsParam", result: "LsResult", description: "" },
+    MetaMethod { name: METH_DIR, flags: Flag::None as u32, access: AccessLevel::Browse, param: "DirParam", result: "DirResult", description: "" },
+    MetaMethod { name: METH_LS, flags: Flag::None as u32, access: AccessLevel::Browse, param: "LsParam", result: "LsResult", description: "" },
 ];
 /*
 pub const PROPERTY_METHODS: [MetaMethod; 3] = [
@@ -315,10 +315,10 @@ impl Default for AppNode {
     }
 }
 
-const META_METH_APP_SHV_VERSION_MAJOR: MetaMethod = MetaMethod { name: METH_SHV_VERSION_MAJOR, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" };
-const META_METH_APP_SHV_VERSION_MINOR: MetaMethod = MetaMethod { name: METH_SHV_VERSION_MINOR, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" };
-const META_METH_APP_NAME: MetaMethod = MetaMethod { name: METH_NAME, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" };
-const META_METH_APP_PING: MetaMethod = MetaMethod { name: METH_PING, flags: Flag::None as u32, access: Access::Browse, param: "", result: "", description: "" };
+const META_METH_APP_SHV_VERSION_MAJOR: MetaMethod = MetaMethod { name: METH_SHV_VERSION_MAJOR, flags: Flag::IsGetter as u32, access: AccessLevel::Browse, param: "", result: "", description: "" };
+const META_METH_APP_SHV_VERSION_MINOR: MetaMethod = MetaMethod { name: METH_SHV_VERSION_MINOR, flags: Flag::IsGetter as u32, access: AccessLevel::Browse, param: "", result: "", description: "" };
+const META_METH_APP_NAME: MetaMethod = MetaMethod { name: METH_NAME, flags: Flag::IsGetter as u32, access: AccessLevel::Browse, param: "", result: "", description: "" };
+const META_METH_APP_PING: MetaMethod = MetaMethod { name: METH_PING, flags: Flag::None as u32, access: AccessLevel::Browse, param: "", result: "", description: "" };
 
 impl AppNode {
     pub fn new_shvnode(&self) -> ShvNode {
@@ -333,9 +333,9 @@ impl AppNode {
     }
 }
 
-const META_METH_VERSION: MetaMethod = MetaMethod { name: METH_VERSION, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" };
-const META_METH_NAME: MetaMethod = MetaMethod { name: METH_NAME, flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" };
-const META_METH_SERIAL_NUMBER: MetaMethod = MetaMethod { name: "serialNumber", flags: Flag::IsGetter as u32, access: Access::Browse, param: "", result: "", description: "" };
+const META_METH_VERSION: MetaMethod = MetaMethod { name: METH_VERSION, flags: Flag::IsGetter as u32, access: AccessLevel::Browse, param: "", result: "", description: "" };
+const META_METH_NAME: MetaMethod = MetaMethod { name: METH_NAME, flags: Flag::IsGetter as u32, access: AccessLevel::Browse, param: "", result: "", description: "" };
+const META_METH_SERIAL_NUMBER: MetaMethod = MetaMethod { name: "serialNumber", flags: Flag::IsGetter as u32, access: AccessLevel::Browse, param: "", result: "", description: "" };
 
 pub struct AppDeviceNode {
     pub device_name: &'static str,

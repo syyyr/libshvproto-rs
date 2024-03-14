@@ -26,7 +26,7 @@ impl From<u8> for Flag {
     }
 }
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
-pub enum Access {
+pub enum AccessLevel {
     Browse = 1,
     Read = 8,
     Write = 16,
@@ -38,39 +38,39 @@ pub enum Access {
     Superuser = 63
 }
 
-impl Access {
+impl AccessLevel {
     // It makes sense to return Option rather than Result as the `FromStr` trait does.
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(value: &str) -> Option<Self> {
         match value {
-            "bws" => Some(Access::Browse),
-            "rd" => Some(Access::Read),
-            "wr" => Some(Access::Write),
-            "cmd" => Some(Access::Command),
-            "cfg" => Some(Access::Config),
-            "srv" => Some(Access::Service),
-            "ssrv" => Some(Access::SuperService),
-            "dev" => Some(Access::Developer),
-            "su" => Some(Access::Superuser),
+            "bws" => Some(AccessLevel::Browse),
+            "rd" => Some(AccessLevel::Read),
+            "wr" => Some(AccessLevel::Write),
+            "cmd" => Some(AccessLevel::Command),
+            "cfg" => Some(AccessLevel::Config),
+            "srv" => Some(AccessLevel::Service),
+            "ssrv" => Some(AccessLevel::SuperService),
+            "dev" => Some(AccessLevel::Developer),
+            "su" => Some(AccessLevel::Superuser),
             _ => None,
         }
     }
 
     pub fn as_str(&self) -> &'static str {
         match self {
-            Access::Browse => "bws",
-            Access::Read => "rd",
-            Access::Write => "wr",
-            Access::Command => "cmd",
-            Access::Config => "cfg",
-            Access::Service => "srv",
-            Access::SuperService => "ssrv",
-            Access::Developer => "dev",
-            Access::Superuser => "su",
+            AccessLevel::Browse => "bws",
+            AccessLevel::Read => "rd",
+            AccessLevel::Write => "wr",
+            AccessLevel::Command => "cmd",
+            AccessLevel::Config => "cfg",
+            AccessLevel::Service => "srv",
+            AccessLevel::SuperService => "ssrv",
+            AccessLevel::Developer => "dev",
+            AccessLevel::Superuser => "su",
         }
     }
 }
-impl From<&str> for Access {
+impl From<&str> for AccessLevel {
     fn from(value: &str) -> Self {
         match Self::from_str(value) {
             None => { Self::Browse }
@@ -79,20 +79,20 @@ impl From<&str> for Access {
     }
 }
 
-impl TryFrom<i32> for Access {
+impl TryFrom<i32> for AccessLevel {
     type Error = ();
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         match value {
-            value if value == Access::Browse as i32 => Ok(Access::Browse),
-            value if value == Access::Read as i32 => Ok(Access::Read),
-            value if value == Access::Write as i32 => Ok(Access::Write),
-            value if value == Access::Command as i32 => Ok(Access::Command),
-            value if value == Access::Config as i32 => Ok(Access::Config),
-            value if value == Access::Service as i32 => Ok(Access::Service),
-            value if value == Access::SuperService as i32 => Ok(Access::SuperService),
-            value if value == Access::Developer as i32 => Ok(Access::Developer),
-            value if value == Access::Superuser as i32 => Ok(Access::Superuser),
+            value if value == AccessLevel::Browse as i32 => Ok(AccessLevel::Browse),
+            value if value == AccessLevel::Read as i32 => Ok(AccessLevel::Read),
+            value if value == AccessLevel::Write as i32 => Ok(AccessLevel::Write),
+            value if value == AccessLevel::Command as i32 => Ok(AccessLevel::Command),
+            value if value == AccessLevel::Config as i32 => Ok(AccessLevel::Config),
+            value if value == AccessLevel::Service as i32 => Ok(AccessLevel::Service),
+            value if value == AccessLevel::SuperService as i32 => Ok(AccessLevel::SuperService),
+            value if value == AccessLevel::Developer as i32 => Ok(AccessLevel::Developer),
+            value if value == AccessLevel::Superuser as i32 => Ok(AccessLevel::Superuser),
             _ => Err(()),
         }
     }
@@ -102,7 +102,7 @@ impl TryFrom<i32> for Access {
 pub struct MetaMethod {
     pub name: &'static str,
     pub flags: u32,
-    pub access: Access,
+    pub access: AccessLevel,
     pub param: &'static str,
     pub result: &'static str,
     pub description: &'static str,
@@ -112,7 +112,7 @@ impl Default for MetaMethod {
         MetaMethod {
             name: "",
             flags: 0,
-            access: Access::Browse,
+            access: AccessLevel::Browse,
             param: "",
             result: "",
             description: "",
