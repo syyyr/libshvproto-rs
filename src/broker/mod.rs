@@ -150,7 +150,10 @@ enum Mount {
 
 struct ParsedAccessRule {
     path_method: SubscriptionPattern,
-    grant: AccessLevel,
+    // Needed in order to pass 'dot-local' in 'Access' meta-attribute
+    // to support the dot-local hack on older brokers
+    grant_str: String,
+    grant_lvl: AccessLevel,
 }
 
 impl ParsedAccessRule {
@@ -163,7 +166,8 @@ impl ParsedAccessRule {
                     Ok(path) => {
                         Ok(Self {
                             path_method: SubscriptionPattern { paths: path, methods: method },
-                            grant: grant
+                            grant_str: grant.to_string(),
+                            grant_lvl: grant
                                 .split(',')
                                 .find_map(AccessLevel::from_str)
                                 .unwrap_or_else(|| panic!("Invalid access grant `{grant}`")),

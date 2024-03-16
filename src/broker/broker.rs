@@ -5,7 +5,7 @@ use log::{debug, error, info, log, warn};
 use crate::broker::{BrokerToPeerMessage, Device, Mount, ParsedAccessRule, Peer, PeerKind, BrokerCommand, PendingRpcCall, SubscribePath, node};
 use crate::broker::config::{AccessControl, Password};
 use crate::rpcframe::RpcFrame;
-use crate::rpcmessage::{CliId, RpcError, RpcErrorCode};
+use crate::rpcmessage::{CliId, RpcError, RpcErrorCode, Tag};
 use crate::{List, RpcMessage, RpcMessageMetaTags, RpcValue, rpcvalue, shvnode, util};
 use crate::rpc::{Subscription, SubscriptionPattern};
 use crate::shvnode::{DIR_APP, AppNode, find_longest_prefix, METH_DIR, METH_LS, process_local_dir_ls, ShvNode};
@@ -77,7 +77,7 @@ impl Broker {
             let method = frame.method().unwrap_or_default().to_string();
             let response_meta= RpcFrame::prepare_response_meta(&frame.meta)?;
             // println!("response meta: {:?}", response_meta);
-            let grant = match self.grant_for_request(peer_id, &frame) {
+            let (grant_access_level, grant_access) = match self.grant_for_request(peer_id, &frame) {
                 Ok(grant) => { grant }
                 Err(err) => {
                     self.command_sender.send(BrokerCommand::SendResponse { peer_id, meta: response_meta, result: Err(err) }).await?;
@@ -95,14 +95,16 @@ impl Broker {
                         let mut frame = frame;
                         frame.push_caller_id(peer_id);
                         frame.set_shvpath(node_path);
-                        frame.set_access_level(grant);
+                        frame.set_tag(Tag::AccessLevel as i32, grant_access_level.map(RpcValue::from));
+                        frame.set_tag(Tag::Access as i32, grant_access.map(RpcValue::from));
                         let device_peer_id = device.peer_id;
                         self.peers.get(&device_peer_id).ok_or("client ID must exist")?.sender.send(BrokerToPeerMessage::SendFrame(frame)).await?;
                     }
                     Mount::Node(node) => {
                         let mut frame = frame;
                         frame.set_shvpath(node_path);
-                        frame.set_access_level(grant);
+                        frame.set_tag(Tag::AccessLevel as i32, grant_access_level.map(RpcValue::from));
+                        frame.set_tag(Tag::Access as i32, grant_access.map(RpcValue::from));
                         if let Some(method) = node.is_request_granted(&frame) {
                             let ctx = NodeRequestContext {
                                 peer_id,
@@ -440,7 +442,7 @@ impl Broker {
             None
         }
     }
-    fn grant_for_request(&self, client_id: CliId, frame: &RpcFrame) -> Result<AccessLevel, RpcError> {
+    fn grant_for_request(&self, client_id: CliId, frame: &RpcFrame) -> Result<(Option<i32>, Option<String>), RpcError> {
         log!(target: "Acc", Level::Debug, "======================= grant_for_request {}", &frame);
         let shv_path = frame.shv_path().unwrap_or_default();
         let method = frame.method().unwrap_or("");
@@ -459,7 +461,7 @@ impl Broker {
                                     log!(target: "Acc", Level::Debug, "\trule: {}", rule.path_method);
                                     if rule.path_method.match_shv_method(shv_path, method) {
                                         log!(target: "Acc", Level::Debug, "\t\t HIT");
-                                        return Ok(rule.grant);
+                                        return Ok((Some(rule.grant_lvl as i32), Some(rule.grant_str.clone())));
                                     }
                                 }
                             }
@@ -467,8 +469,15 @@ impl Broker {
                     }
                     Err(RpcError::new(RpcErrorCode::PermissionDenied, format!("Access denied for user: {}", peer.user)))
                 }
-                PeerKind::ParentBroker =>
-                    frame.access_level().ok_or_else(|| RpcError::new(RpcErrorCode::PermissionDenied, ""))
+                PeerKind::ParentBroker => {
+                    let access = frame.tag(Tag::Access as i32).map(RpcValue::as_str).map(String::from);
+                    let access_level = frame.tag(Tag::AccessLevel as i32).map(RpcValue::as_i32);
+                    if access_level.is_some() || access.is_some() {
+                        Ok((access_level, access))
+                    } else {
+                        Err(RpcError::new(RpcErrorCode::PermissionDenied, ""))
+                    }
+                }
             }
         }
     }

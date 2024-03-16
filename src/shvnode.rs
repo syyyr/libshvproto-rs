@@ -232,7 +232,7 @@ impl ShvNode {
                 let method = rq.method().unwrap_or_default();
                 for mm in &self.methods {
                     if mm.name == method {
-                        return if rq_access >= mm.access { Some(*mm) } else { None }
+                        return if rq_access >= mm.access as i32 { Some(*mm) } else { None }
                     }
                 }
             }

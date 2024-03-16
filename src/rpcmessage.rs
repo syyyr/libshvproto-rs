@@ -219,13 +219,14 @@ pub trait RpcMessageMetaTags {
     fn set_method(&mut self, method: &str) -> &mut Self::Target {
         self.set_tag(Tag::Method as i32, Some(RpcValue::from(method)))
     }
-    fn access_level(&self) -> Option<AccessLevel> {
+    fn access_level(&self) -> Option<i32> {
         self.tag(Tag::AccessLevel as i32)
             .map(RpcValue::as_i32)
-            .and_then(|v| v.try_into().ok())
             .or_else(|| self.tag(Tag::Access as i32)
                      .map(RpcValue::as_str)
-                     .and_then(|s| s.split(',').find_map(AccessLevel::from_str)))
+                     .and_then(|s| s.split(',')
+                               .find_map(AccessLevel::from_str)
+                               .map(|v| v as i32)))
     }
     fn set_access_level(&mut self, grant: AccessLevel) -> &mut Self::Target {
         self.set_tag(Tag::Access as i32, Some(RpcValue::from(grant.as_str())));
@@ -480,13 +481,13 @@ mod test {
     fn rpc_msg_access_level_some() {
         let mut rq = RpcMessage::new_request("foo/bar", "baz", None);
         rq.set_access_level(AccessLevel::Read);
-        assert_eq!(rq.access_level(), Some(AccessLevel::Read));
+        assert_eq!(rq.access_level(), Some(AccessLevel::Read as i32));
     }
 
     #[test]
     fn rpc_msg_access_level_compat() {
         let mut rq = RpcMessage::new_request("foo/bar", "baz", None);
         rq.set_tag(Tag::Access as i32, Some(RpcValue::from("srv")));
-        assert_eq!(rq.access_level(), Some(AccessLevel::Service));
+        assert_eq!(rq.access_level(), Some(AccessLevel::Service as i32));
     }
 }
