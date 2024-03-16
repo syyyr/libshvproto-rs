@@ -1,3 +1,4 @@
+use crate::metamethod::AccessLevel;
 use crate::{RpcValue, rpctype, Value};
 use crate::metamap::*;
 // use std::collections::BTreeMap;
@@ -23,6 +24,7 @@ pub enum Tag {
     RevCallerIds,
     Access,
     UserId,
+    AccessLevel,
     MAX
 }
 
@@ -217,11 +219,18 @@ pub trait RpcMessageMetaTags {
     fn set_method(&mut self, method: &str) -> &mut Self::Target {
         self.set_tag(Tag::Method as i32, Some(RpcValue::from(method)))
     }
-    fn access(&self) -> Option<&str> {
-        self.tag(Tag::Access as i32).map(RpcValue::as_str)
+    fn access_level(&self) -> Option<i32> {
+        self.tag(Tag::AccessLevel as i32)
+            .map(RpcValue::as_i32)
+            .or_else(|| self.tag(Tag::Access as i32)
+                     .map(RpcValue::as_str)
+                     .and_then(|s| s.split(',')
+                               .find_map(AccessLevel::from_str)
+                               .map(|v| v as i32)))
     }
-    fn set_access(&mut self, grant: &str) -> &mut Self::Target {
-        self.set_tag(Tag::Access as i32, Some(RpcValue::from(grant)))
+    fn set_access_level(&mut self, grant: AccessLevel) -> &mut Self::Target {
+        self.set_tag(Tag::Access as i32, Some(RpcValue::from(grant.as_str())));
+        self.set_tag(Tag::AccessLevel as i32, Some(RpcValue::from(grant as i32)))
     }
 
     fn caller_ids(&self) -> Vec<CliId> {
@@ -431,7 +440,9 @@ impl fmt::Debug for RpcMessage {
 mod test {
     use crate::RpcValue;
     use crate::RpcMessage;
+    use crate::metamethod::AccessLevel;
     use crate::rpcmessage::RpcMessageMetaTags;
+    use crate::rpcmessage::Tag;
 
     #[test]
     fn rpc_request() {
@@ -458,5 +469,25 @@ mod test {
         assert_eq!(resp.pop_caller_id(), Some(4));
         //let cpon = rq.as_rpcvalue().to_cpon();
         //assert_eq!(cpon, format!("<1:1,8:{},10:\"foo\">i{{1:123}}", id + 1));
+    }
+
+    #[test]
+    fn rpc_msg_access_level_none() {
+        let rq = RpcMessage::new_request("foo/bar", "baz", None);
+        assert_eq!(rq.access_level(), None);
+    }
+
+    #[test]
+    fn rpc_msg_access_level_some() {
+        let mut rq = RpcMessage::new_request("foo/bar", "baz", None);
+        rq.set_access_level(AccessLevel::Read);
+        assert_eq!(rq.access_level(), Some(AccessLevel::Read as i32));
+    }
+
+    #[test]
+    fn rpc_msg_access_level_compat() {
+        let mut rq = RpcMessage::new_request("foo/bar", "baz", None);
+        rq.set_tag(Tag::Access as i32, Some(RpcValue::from("srv")));
+        assert_eq!(rq.access_level(), Some(AccessLevel::Service as i32));
     }
 }

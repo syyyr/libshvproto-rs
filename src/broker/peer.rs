@@ -7,10 +7,12 @@ use futures::io::BufWriter;
 use log::{debug, error, info};
 use rand::distributions::{Alphanumeric, DistString};
 use url::Url;
+use crate::metamethod::AccessLevel;
+use crate::rpcmessage::Tag;
 use crate::{client, RpcMessage, RpcMessageMetaTags, RpcValue};
 use crate::client::LoginParams;
 use crate::rpcframe::RpcFrame;
-use crate::shvnode::{DOT_LOCAL_DIR, DOT_LOCAL_GRANT, DOT_LOCAL_HACK, METH_PING};
+use crate::shvnode::{DOT_LOCAL_DIR, DOT_LOCAL_HACK, METH_PING, DOT_LOCAL_GRANT};
 use crate::util::{join_path, login_from_url, sha1_hash};
 use crate::broker::{BrokerCommand, BrokerToPeerMessage, PeerKind};
 use crate::broker::config::ParentBrokerConfig;
@@ -263,8 +265,13 @@ async fn parent_broker_peer_loop(client_id: i32, config: ParentBrokerConfig, bro
                 Ok(mut frame) => {
                     if frame.is_request() {
                         fn is_dot_local_granted(frame: &RpcFrame) -> bool {
-                                let access = frame.access().unwrap_or_default();
-                                access.split(',').any(|s| s == DOT_LOCAL_GRANT)
+                            frame.access_level()
+                                .is_some_and(|access| access == AccessLevel::Superuser as i32)
+                                ||
+                            frame.tag(Tag::Access as i32)
+                                .map(RpcValue::as_str)
+                                .is_some_and(|s| s.split(',')
+                                             .any(|access| access == DOT_LOCAL_GRANT))
                         }
                         fn is_dot_local_request(frame: &RpcFrame) -> bool {
                             let shv_path = frame.shv_path().unwrap_or_default();
