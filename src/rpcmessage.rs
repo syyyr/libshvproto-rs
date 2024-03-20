@@ -7,6 +7,8 @@ use crate::rpcvalue::{IMap, List};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::de::Visitor;
 use crate::rpcframe::RpcFrame;
 
 static G_RPC_REQUEST_COUNT: AtomicI64 = AtomicI64::new(0);
@@ -436,6 +438,48 @@ impl fmt::Debug for RpcMessage {
     }
 }
 */
+impl Serialize for RpcMessage {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+    {
+        let bytes = self.to_chainpack();
+        serializer.serialize_bytes(&bytes)
+    }
+}
+
+struct RpcMessageVisitor;
+
+impl<'de> Visitor<'de> for RpcMessageVisitor {
+    type Value = RpcMessage;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("RpcMessage")
+    }
+
+    fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+    {
+        match RpcValue::from_chainpack(value) {
+            Ok(rv) => match RpcMessage::from_rpcvalue(rv) {
+                Ok(msg) => Ok(msg),
+                Err(err) => Err(E::custom(format!("RpcMessage create error: {}", err))),
+            },
+            Err(err) => Err(E::custom(format!("RpcValue parse error: {}", err))),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for RpcMessage {
+    fn deserialize<D>(deserializer: D) -> Result<RpcMessage, D::Error>
+        where
+            D: Deserializer<'de>,
+    {
+        deserializer.deserialize_bytes(RpcMessageVisitor)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::RpcValue;
