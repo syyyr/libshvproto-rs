@@ -14,7 +14,7 @@ use log::Level;
 use crate::broker::node::{DIR_APP_BROKER_CURRENTCLIENT, DIR_APP_BROKER, AppBrokerCurrentClientNode, AppBrokerNode, METH_SUBSCRIBE};
 use crate::metamethod::{MetaMethod, AccessLevel};
 
-pub struct Broker {
+pub struct BrokerImpl {
     peers: HashMap<CliId, Peer>,
     mounts: BTreeMap<String, Mount>,
     access: AccessControl,
@@ -29,7 +29,7 @@ pub struct Broker {
 
 }
 
-impl Broker {
+impl BrokerImpl {
     pub(crate) fn new(access: AccessControl) -> Self {
         let (command_sender, command_receiver) = unbounded();
         let mut role_access: HashMap<String, Vec<ParsedAccessRule>> = Default::default();
@@ -492,7 +492,7 @@ impl Broker {
         )
     }
     fn client_info(&mut self, client_id: CliId) -> Option<rpcvalue::Map> {
-        self.peers.get(&client_id).map(|peer| Broker::peer_to_info(client_id, peer))
+        self.peers.get(&client_id).map(|peer| BrokerImpl::peer_to_info(client_id, peer))
     }
     async fn disconnect_client(&mut self, client_id: CliId) -> crate::Result<()> {
         let peer = self.peers.get(&client_id).ok_or("Invalid client ID")?;
@@ -503,7 +503,7 @@ impl Broker {
         for (client_id, peer) in &self.peers {
             if let Some(mount_point1) = &peer.mount_point {
                 if mount_point1 == mount_point {
-                    return Some(Broker::peer_to_info(*client_id, peer));
+                    return Some(BrokerImpl::peer_to_info(*client_id, peer));
                 }
             }
         }

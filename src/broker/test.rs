@@ -3,7 +3,7 @@ use async_std::channel::{Receiver};
 use crate::broker::{BrokerToPeerMessage, PeerKind, BrokerCommand, Sender, SubscribePath};
 use crate::rpcmessage::CliId;
 use crate::{List, RpcMessage, RpcMessageMetaTags, RpcValue};
-use crate::broker::broker::Broker;
+use crate::broker::brokerimpl::BrokerImpl;
 use crate::broker::config::BrokerConfig;
 use crate::broker::node::{METH_SUBSCRIBE, METH_UNSUBSCRIBE};
 use crate::rpcframe::RpcFrame;
@@ -51,7 +51,7 @@ async fn call(path: &str, method: &str, param: Option<RpcValue>, ctx: &CallCtx<'
 fn test_broker() {
     let config = BrokerConfig::default();
     let access = config.access.clone();
-    let broker = Broker::new(access);
+    let broker = BrokerImpl::new(access);
     let roles = broker.flatten_roles("child-broker").unwrap();
     assert_eq!(roles, vec!["child-broker", "device", "client", "ping", "subscribe", "browse"]);
 }
@@ -60,7 +60,7 @@ fn test_broker() {
 async fn test_broker_loop() {
     let config = BrokerConfig::default();
     let access = config.access.clone();
-    let broker = Broker::new(access);
+    let broker = BrokerImpl::new(access);
     let broker_sender = broker.command_sender.clone();
     let broker_task = task::spawn(crate::broker::broker_loop(broker));
 

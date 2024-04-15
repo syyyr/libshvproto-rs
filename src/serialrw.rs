@@ -21,7 +21,7 @@ enum Byte {
     Stx,
     Etx,
     Atx,
-    FramingError,
+    FramingError(u8),
 }
 pub struct SerialFrameReader<R: AsyncRead + Unpin + Send> {
     reader: R,
@@ -60,7 +60,7 @@ impl<R: AsyncRead + Unpin + Send> SerialFrameReader<R> {
                     EESC => Ok(crate::serialrw::Byte::Data(ESC)),
                     b => {
                         warn!("Framing error, invalid escape byte {}", b);
-                        Ok(crate::serialrw::Byte::FramingError)
+                        Ok(crate::serialrw::Byte::FramingError(b))
                     }
                 }
             }
@@ -78,7 +78,7 @@ impl<R: AsyncRead + Unpin + Send> SerialFrameReader<R> {
                         Byte::Stx => { data.push( STX) }
                         Byte::Etx => { data.push( ETX ) }
                         Byte::Atx => { data.push( ATX ) }
-                        Byte::FramingError(e) => { return Err(format!("Framing error, invalid character {e}").into()) }
+                        Byte::FramingError(b) => { return Err(format!("Framing error, invalid character {b}").into()) }
                     }
                 }
                 Err(_) => { break }

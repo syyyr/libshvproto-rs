@@ -13,14 +13,14 @@ use crate::shvnode::{ShvNode};
 use async_std::stream::StreamExt;
 use futures::select;
 use futures::FutureExt;
-use crate::broker::broker::Broker;
+use crate::broker::brokerimpl::BrokerImpl;
 
 pub mod config;
 pub mod peer;
 pub mod node;
 #[cfg(test)]
 mod test;
-mod broker;
+mod brokerimpl;
 
 #[derive(Debug)]
 pub(crate) enum BrokerCommand {
@@ -194,7 +194,7 @@ struct PendingRpcCall {
     response_sender: Sender<RpcFrame>,
 }
 
-pub(crate) async fn broker_loop(mut broker: Broker) {
+pub(crate) async fn broker_loop(mut broker: BrokerImpl) {
     loop {
         select! {
             command = broker.command_receiver.recv().fuse() => match command {
@@ -213,7 +213,7 @@ pub(crate) async fn broker_loop(mut broker: Broker) {
 
 pub async fn accept_loop(config: BrokerConfig, access: AccessControl) -> crate::Result<()> {
     if let Some(address) = config.listen.tcp.clone() {
-        let broker = Broker::new(access);
+        let broker = BrokerImpl::new(access);
         let broker_sender = broker.command_sender.clone();
         let parent_broker_peer_config = config.parent_broker.clone();
         let broker_task = task::spawn(crate::broker::broker_loop(broker));
