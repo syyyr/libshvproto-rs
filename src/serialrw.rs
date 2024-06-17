@@ -16,7 +16,7 @@ const ESTX: u8 = 0x02;
 const EETX: u8 = 0x03;
 const EATX: u8 = 0x04;
 const EESC: u8 = 0x0A;
-enum Byte {
+pub enum Byte {
     Data(u8),
     Stx,
     Etx,
