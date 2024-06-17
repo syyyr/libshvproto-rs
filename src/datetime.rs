@@ -35,18 +35,18 @@ impl DateTime {
     //pub fn is_valid(&self) -> bool { }
     pub fn now() -> DateTime {
         let dt = chrono::offset::Local::now();
-        let msec = dt.naive_utc().timestamp_millis();
+        let msec = dt.naive_utc().and_utc().timestamp_millis();
         let offset = dt.offset().local_minus_utc() / 60 / 15;
         DateTime::from_epoch_msec_tz(msec, offset)
     }
 
     pub fn from_datetime<Tz: chrono::TimeZone>(dt: &chrono::DateTime<Tz>) -> DateTime {
-        let msec = dt.naive_utc().timestamp_millis();
+        let msec = dt.naive_utc().and_utc().timestamp_millis();
         let offset = dt.offset().fix().local_minus_utc();
         DateTime::from_epoch_msec_tz(msec, offset)
     }
     pub fn from_naive_datetime(dt: &chrono::NaiveDateTime) -> DateTime {
-        let msec = dt.timestamp_millis();
+        let msec = dt.and_utc().timestamp_millis();
         DateTime::from_epoch_msec(msec)
     }
     pub fn from_epoch_msec_tz(epoch_msec: i64, utc_offset_sec: i32) -> DateTime {
@@ -102,7 +102,7 @@ impl DateTime {
                         }
                     }
 
-                    let dt = DateTime::from_epoch_msec_tz((ndt.timestamp() - (offset as i64)) * 1000 + (msec as i64), offset);
+                    let dt = DateTime::from_epoch_msec_tz((ndt.and_utc().timestamp() - (offset as i64)) * 1000 + (msec as i64), offset);
                     return Ok(dt)
                 }
             }
@@ -123,7 +123,7 @@ impl DateTime {
 
     pub fn to_chrono_naivedatetime(&self) -> chrono::NaiveDateTime {
         let msec = self.epoch_msec();
-        chrono::NaiveDateTime::from_timestamp_opt(msec / 1000, ((msec % 1000) * 1000000) as u32).unwrap_or_default()
+        chrono::DateTime::from_timestamp_millis(msec).unwrap_or_default().naive_utc()
     }
     pub fn to_chrono_datetime(&self) -> chrono::DateTime<chrono::offset::FixedOffset> {
         let offset = match FixedOffset::east_opt(self.utc_offset()) {
