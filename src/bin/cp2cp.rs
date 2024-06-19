@@ -2,10 +2,10 @@ use std::{process, io, fs};
 use std::io::{BufReader, BufRead, BufWriter, stdout};
 use std::path::PathBuf;
 use log::LevelFilter;
-use shv::{ChainPackReader, ChainPackWriter, CponReader, CponWriter};
+use shvproto::{ChainPackReader, ChainPackWriter, CponReader, CponWriter};
 use simple_logger::SimpleLogger;
-use shv::Reader;
-use shv::Writer;
+use shvproto::Reader;
+use shvproto::Writer;
 use clap::{Parser};
 
 #[derive(Parser, Debug)]

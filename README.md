@@ -1,2 +1,2 @@
-# shv-rs
-SHV implementation in rust
+# libshvproto-rs
+SHV protocols rust implementation
