@@ -449,7 +449,7 @@ impl RpcValue {
     }
     pub fn to_cpon_indented(&self, indent: &str) -> String {
         let buff = self.to_cpon_bytes_indented(indent.as_bytes());
-        String::from_utf8(buff).map_or_else(|_| "".to_string(), |s| s)
+        String::from_utf8(buff).unwrap_or_else(|_| "".to_string())
     }
     pub fn to_cpon_bytes_indented(&self, indent: &[u8]) -> Vec<u8> {
         let mut buff: Vec<u8> = Vec::new();
