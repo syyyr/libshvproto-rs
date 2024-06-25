@@ -853,9 +853,9 @@ mod test
 
     #[test]
     fn test_read() {
-        assert_eq!(RpcValue::from_cpon("null").unwrap().is_null(), true);
-        assert_eq!(RpcValue::from_cpon("false").unwrap().as_bool(), false);
-        assert_eq!(RpcValue::from_cpon("true").unwrap().as_bool(), true);
+        assert!(RpcValue::from_cpon("null").unwrap().is_null());
+        assert!(!RpcValue::from_cpon("false").unwrap().as_bool());
+        assert!(RpcValue::from_cpon("true").unwrap().as_bool());
         assert_eq!(RpcValue::from_cpon("0").unwrap().as_i32(), 0);
         assert_eq!(RpcValue::from_cpon("123").unwrap().as_i32(), 123);
         assert_eq!(RpcValue::from_cpon("-123").unwrap().as_i32(), -123);
@@ -876,17 +876,17 @@ mod test
 
         assert_eq!(RpcValue::from_cpon("[]").unwrap().to_cpon(), "[]");
         assert_eq!(RpcValue::from_cpon("[1,2,3]").unwrap().to_cpon(), "[1,2,3]");
-        assert_eq!(RpcValue::from_cpon("[").is_err(), true);
+        assert!(RpcValue::from_cpon("[").is_err());
 
         assert_eq!(RpcValue::from_cpon("{}").unwrap().to_cpon(), "{}");
         assert_eq!(RpcValue::from_cpon(r#"{"foo": 1, "bar":"baz", }"#).unwrap().to_cpon(), r#"{"bar":"baz","foo":1}"#);
-        assert_eq!(RpcValue::from_cpon("{").is_err(), true);
+        assert!(RpcValue::from_cpon("{").is_err());
 
         assert_eq!(RpcValue::from_cpon("i{}").unwrap().to_cpon(), "i{}");
         assert_eq!(RpcValue::from_cpon(r#"i{1: "foo", -1:"bar", 0:"baz", }"#).unwrap().to_cpon(), r#"i{-1:"bar",0:"baz",1:"foo"}"#);
-        assert_eq!(RpcValue::from_cpon("i{").is_err(), true);
+        assert!(RpcValue::from_cpon("i{").is_err());
 
-        let ndt = NaiveDateTime::new(NaiveDate::from_ymd_opt(2022, 01, 02).unwrap(), NaiveTime::from_hms_milli_opt(12, 59, 06, 0).unwrap());
+        let ndt = NaiveDateTime::new(NaiveDate::from_ymd_opt(2022, 1, 2).unwrap(), NaiveTime::from_hms_milli_opt(12, 59, 6, 0).unwrap());
         assert_eq!(RpcValue::from_cpon(r#"d"2022-01-02T12:59:06Z""#).unwrap().as_datetime(), DateTime::from_naive_datetime(&ndt));
         let dt = chrono::DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc);
         assert_eq!(RpcValue::from_cpon(r#"d"2022-01-02T12:59:06Z""#).unwrap().as_datetime(), DateTime::from_datetime(&dt));
@@ -894,10 +894,12 @@ mod test
         let minute = 60;
         let hour = 60 * minute;
 
+        // Allow in tests
+        #[allow(clippy::too_many_arguments)]
         fn dt_from_ymd_hms_milli_tz_offset(year: i32, month: u32, day: u32, hour: u32, min: u32, sec: u32, milli: i64, tz_offset: i32) -> chrono::DateTime<FixedOffset> {
             if let LocalResult::Single(dt) = FixedOffset::east_opt(tz_offset).unwrap()
                 .with_ymd_and_hms(year, month, day, hour, min, sec) {
-                return dt.checked_add_signed(Duration::milliseconds(milli)).unwrap();
+                dt.checked_add_signed(Duration::milliseconds(milli)).unwrap()
             } else {
                 panic!("Invalid date time");
             }

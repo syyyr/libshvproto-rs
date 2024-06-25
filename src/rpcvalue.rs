@@ -449,7 +449,7 @@ impl RpcValue {
     }
     pub fn to_cpon_indented(&self, indent: &str) -> String {
         let buff = self.to_cpon_bytes_indented(indent.as_bytes());
-        String::from_utf8(buff).map_or_else(|_| "".to_string(), |s| s)
+        String::from_utf8(buff).unwrap_or_else(|_| "".to_string())
     }
     pub fn to_cpon_bytes_indented(&self, indent: &[u8]) -> Vec<u8> {
         let mut buff: Vec<u8> = Vec::new();
@@ -533,7 +533,7 @@ mod test {
     #[test]
     fn rpcval_new() {
         let rv = RpcValue::from(true);
-        assert_eq!(rv.as_bool(), true);
+        assert!(rv.as_bool());
         let rv = RpcValue::from("foo");
         assert_eq!(rv.as_str(), "foo");
         let rv = RpcValue::from(&b"bar"[..]);
@@ -544,7 +544,7 @@ mod test {
         assert_eq!(rv.as_f64(), 12.3);
 
         let dt = DateTime::now();
-        let rv = RpcValue::from(dt.clone());
+        let rv = RpcValue::from(dt);
         assert_eq!(rv.as_datetime(), dt);
 
         let dc = Decimal::new(123, -1);
@@ -552,11 +552,11 @@ mod test {
         assert_eq!(rv.as_decimal(), dc);
 
         let dt = chrono::offset::Utc::now();
-        let rv = RpcValue::from(dt.clone());
+        let rv = RpcValue::from(dt);
         assert_eq!(rv.as_datetime().epoch_msec(), dt.timestamp_millis());
 
         let dt = chrono::offset::Local::now();
-        let rv = RpcValue::from(dt.clone());
+        let rv = RpcValue::from(dt);
         assert_eq!(
             rv.as_datetime().epoch_msec() + rv.as_datetime().utc_offset() as i64 * 1000,
             dt.timestamp_millis() + dt.offset().fix().local_minus_utc() as i64 * 1000
