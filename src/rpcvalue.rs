@@ -201,6 +201,378 @@ impl<T: Into<Value>> From<T> for RpcValue {
     }
 }
 
+fn format_err_try_from(expected_type: &str, actual_type: &str) -> String {
+    format!("Expected type `{expected_type}`, got `{actual_type}`")
+}
+
+impl TryFrom<&Value> for () {
+    type Error = String;
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Null => Ok(()),
+            _ => Err(format_err_try_from("Null",value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<Value> for () {
+    type Error = String;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Self::try_from(&value)
+    }
+}
+
+impl TryFrom<&Value> for bool {
+    type Error = String;
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Bool(val) => Ok(*val),
+            _ => Err(format_err_try_from("Bool", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<Value> for bool {
+    type Error = String;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Self::try_from(&value)
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a str {
+    type Error = String;
+    fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(val) => Ok(val.as_str()),
+            _ => Err(format_err_try_from("String", value.type_name()))
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a String {
+    type Error = String;
+    fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(val) => Ok(val.as_ref()),
+            _ => Err(format_err_try_from("String", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<&Value> for String {
+    type Error = String;
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(val) => Ok(*val.clone()),
+            _ => Err(format_err_try_from("String", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<Value> for String {
+    type Error = String;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(val) => Ok(*val),
+            _ => Err(format_err_try_from("String", value.type_name()))
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a Vec<u8> {
+    type Error = String;
+    fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Blob(val) => Ok(val),
+            _ => Err(format_err_try_from("Blob", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<&Value> for Vec<u8> {
+    type Error = String;
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Blob(val) => Ok(*val.clone()),
+            _ => Err(format_err_try_from("Blob", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<Value> for Vec<u8> {
+    type Error = String;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Blob(val) => Ok(*val),
+            _ => Err(format_err_try_from("Blob", value.type_name()))
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a [u8] {
+    type Error = String;
+    fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Blob(val) => Ok(val.as_slice()),
+            _ => Err(format_err_try_from("Blob", value.type_name()))
+        }
+    }
+}
+
+macro_rules! try_from_integral_value {
+    ($target:ty) => {
+        impl TryFrom<&Value> for $target {
+            type Error = String;
+            fn try_from(value: &Value) -> Result<Self, Self::Error> {
+                match value {
+                    Value::Int(val) => <$target>::try_from(*val).map_err(|e| e.to_string()),
+                    Value::UInt(val) => <$target>::try_from(*val).map_err(|e| e.to_string()),
+                    _ => Err(format_err_try_from("Int or UInt", value.type_name()))
+                }
+            }
+        }
+
+        impl TryFrom<Value> for $target {
+            type Error = String;
+            fn try_from(value: Value) -> Result<Self, Self::Error> {
+                Self::try_from(&value)
+            }
+        }
+    };
+}
+
+try_from_integral_value!(i32);
+try_from_integral_value!(i64);
+try_from_integral_value!(isize);
+try_from_integral_value!(usize);
+try_from_integral_value!(u32);
+try_from_integral_value!(u64);
+
+impl TryFrom<&Value> for f64 {
+    type Error = String;
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Double(val) => Ok(*val),
+            _ => Err(format_err_try_from("Double", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<Value> for f64 {
+    type Error = String;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Self::try_from(&value)
+    }
+}
+
+impl TryFrom<&Value> for Decimal {
+    type Error = String;
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Decimal(val) => Ok(*val),
+            _ => Err(format_err_try_from("Decimal", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<Value> for Decimal {
+    type Error = String;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Self::try_from(&value)
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a List {
+    type Error = String;
+    fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::List(val) => Ok(val),
+            _ => Err(format_err_try_from("List", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<&Value> for List {
+    type Error = String;
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::List(val) => Ok(*val.clone()),
+            _ => Err(format_err_try_from("List", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<Value> for List {
+    type Error = String;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::List(val) => Ok(*val),
+            _ => Err(format_err_try_from("List", value.type_name()))
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a Map {
+    type Error = String;
+    fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Map(val) => Ok(val),
+            _ => Err(format_err_try_from("Map", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<&Value> for Map {
+    type Error = String;
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Map(val) => Ok(*val.clone()),
+            _ => Err(format_err_try_from("Map", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<Value> for Map {
+    type Error = String;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Map(val) => Ok(*val),
+            _ => Err(format_err_try_from("Map", value.type_name()))
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a IMap {
+    type Error = String;
+    fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::IMap(val) => Ok(val),
+            _ => Err(format_err_try_from("IMap", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<&Value> for IMap {
+    type Error = String;
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::IMap(val) => Ok(*val.clone()),
+            _ => Err(format_err_try_from("IMap", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<Value> for IMap {
+    type Error = String;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::IMap(val) => Ok(*val),
+            _ => Err(format_err_try_from("IMap", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<&Value> for datetime::DateTime {
+    type Error = String;
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::DateTime(val) => Ok(*val),
+            _ => Err(format_err_try_from("DateTime", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<Value> for datetime::DateTime {
+    type Error = String;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Self::try_from(&value)
+    }
+}
+
+impl TryFrom<&Value> for chrono::NaiveDateTime {
+    type Error = String;
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::DateTime(val) => Ok(val.to_chrono_naivedatetime()),
+            _ => Err(format_err_try_from("DateTime", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<Value> for chrono::NaiveDateTime {
+    type Error = String;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Self::try_from(&value)
+    }
+}
+
+// Cannot use generic trait implementation here.
+// See `rustc --explain E0210`
+macro_rules! try_from_rpc_value_ref {
+    ($target:ty) => {
+        impl<'a> TryFrom<&'a RpcValue> for $target {
+            type Error = String;
+            fn try_from(value: &'a RpcValue) -> Result<Self, Self::Error> {
+                let inner = &value.value;
+                inner.try_into()
+            }
+        }
+    };
+}
+
+macro_rules! try_from_rpc_value {
+    ($target:ty) => {
+        impl TryFrom<RpcValue> for $target {
+            type Error = String;
+            fn try_from(value: RpcValue) -> Result<Self, Self::Error> {
+                value.value.try_into()
+            }
+        }
+    };
+}
+
+try_from_rpc_value_ref!(());
+try_from_rpc_value_ref!(bool);
+try_from_rpc_value!(bool);
+try_from_rpc_value_ref!(&'a str);
+try_from_rpc_value_ref!(&'a String);
+try_from_rpc_value_ref!(String);
+try_from_rpc_value!(String);
+try_from_rpc_value_ref!(&'a Vec<u8>);
+try_from_rpc_value_ref!(Vec<u8>);
+try_from_rpc_value!(Vec<u8>);
+try_from_rpc_value_ref!(&'a [u8]);
+try_from_rpc_value_ref!(i32);
+try_from_rpc_value!(i32);
+try_from_rpc_value_ref!(i64);
+try_from_rpc_value!(i64);
+try_from_rpc_value_ref!(isize);
+try_from_rpc_value!(isize);
+try_from_rpc_value_ref!(usize);
+try_from_rpc_value!(usize);
+try_from_rpc_value_ref!(u32);
+try_from_rpc_value!(u32);
+try_from_rpc_value_ref!(u64);
+try_from_rpc_value!(u64);
+try_from_rpc_value_ref!(f64);
+try_from_rpc_value!(f64);
+try_from_rpc_value_ref!(Decimal);
+try_from_rpc_value!(Decimal);
+try_from_rpc_value_ref!(&'a List);
+try_from_rpc_value_ref!(List);
+try_from_rpc_value!(List);
+try_from_rpc_value_ref!(&'a Map);
+try_from_rpc_value_ref!(Map);
+try_from_rpc_value!(Map);
+try_from_rpc_value_ref!(&'a IMap);
+try_from_rpc_value_ref!(IMap);
+try_from_rpc_value!(IMap);
+try_from_rpc_value_ref!(datetime::DateTime);
+try_from_rpc_value!(datetime::DateTime);
+try_from_rpc_value_ref!(chrono::NaiveDateTime);
+try_from_rpc_value!(chrono::NaiveDateTime);
+
+
 macro_rules! is_xxx {
     ($name:ident, $variant:pat) => {
         pub fn $name(&self) -> bool {
@@ -388,7 +760,7 @@ impl RpcValue {
     }
     pub fn as_decimal(&self) -> decimal::Decimal {
         match &self.value {
-            Value::Decimal(d) => d.clone(),
+            Value::Decimal(d) => *d,
             _ => decimal::Decimal::new(0, 0),
         }
     }
@@ -534,26 +906,48 @@ mod test {
     fn rpcval_new() {
         let rv = RpcValue::from(true);
         assert!(rv.as_bool());
+        let rrv = &rv;
+        assert_eq!(rrv.try_into(), Ok(true));
+        assert_eq!(rv.try_into(), Ok(true));
         let rv = RpcValue::from("foo");
         assert_eq!(rv.as_str(), "foo");
+        let rrv = &rv;
+        assert_eq!(rrv.try_into(), Ok("foo"));
         let rv = RpcValue::from(&b"bar"[..]);
         assert_eq!(rv.as_blob(), b"bar");
+        let rrv = &rv;
+        assert_eq!(rrv.try_into(), Ok(b"bar".as_slice()));
         let rv = RpcValue::from(123);
         assert_eq!(rv.as_i32(), 123);
+        let rrv = &rv;
+        assert_eq!(rrv.try_into(), Ok(123));
+        assert_eq!(rv.try_into(), Ok(123));
         let rv = RpcValue::from(12.3);
         assert_eq!(rv.as_f64(), 12.3);
+        let rrv = &rv;
+        assert_eq!(rrv.try_into(), Ok(12.3));
+        assert_eq!(rv.try_into(), Ok(12.3));
 
         let dt = DateTime::now();
         let rv = RpcValue::from(dt);
         assert_eq!(rv.as_datetime(), dt);
+        let rrv = &rv;
+        assert_eq!(rrv.try_into(), Ok(dt));
+        assert_eq!(rv.try_into(), Ok(dt));
 
         let dc = Decimal::new(123, -1);
-        let rv = RpcValue::from(dc.clone());
+        let rv = RpcValue::from(dc);
         assert_eq!(rv.as_decimal(), dc);
+        let rrv = &rv;
+        assert_eq!(rrv.try_into(), Ok(dc));
+        assert_eq!(rv.try_into(), Ok(dc));
 
         let dt = chrono::offset::Utc::now();
         let rv = RpcValue::from(dt);
         assert_eq!(rv.as_datetime().epoch_msec(), dt.timestamp_millis());
+        let rrv = &rv;
+        assert_eq!(rrv.try_into(), Ok(DateTime::from_datetime(&dt)));
+        assert_eq!(rv.try_into(), Ok(DateTime::from_datetime(&dt)));
 
         let dt = chrono::offset::Local::now();
         let rv = RpcValue::from(dt);
@@ -565,17 +959,26 @@ mod test {
         let vec1 = vec![RpcValue::from(123), RpcValue::from("foo")];
         let rv = RpcValue::from(vec1.clone());
         assert_eq!(rv.as_list(), &vec1);
+        let rrv = &rv;
+        assert_eq!(rrv.try_into(), Ok(&vec1));
+        assert_eq!(rv.try_into(), Ok(vec1));
 
         let mut m: Map = BTreeMap::new();
         m.insert("foo".to_string(), RpcValue::from(123));
         m.insert("bar".to_string(), RpcValue::from("foo"));
         let rv = RpcValue::from(m.clone());
         assert_eq!(rv.as_map(), &m);
+        let rrv = &rv;
+        assert_eq!(rrv.try_into(), Ok(&m));
+        assert_eq!(rv.try_into(), Ok(m));
 
         let mut m: BTreeMap<i32, RpcValue> = BTreeMap::new();
         m.insert(1, RpcValue::from(123));
         m.insert(2, RpcValue::from("foo"));
         let rv = RpcValue::from(m.clone());
         assert_eq!(rv.as_imap(), &m);
+        let rrv = &rv;
+        assert_eq!(rrv.try_into(), Ok(&m));
+        assert_eq!(rv.try_into(), Ok(m));
     }
 }
