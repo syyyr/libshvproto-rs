@@ -5,28 +5,16 @@ mod test {
     use libshvproto_macros::TryFromRpcValue;
     use shvproto::RpcValue;
 
-    #[derive(Debug,PartialEq,TryFromRpcValue)]
+    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
     struct EmptyStruct {
     }
 
-    impl From<EmptyStruct> for RpcValue {
-        fn from(_value: EmptyStruct) -> Self {
-            shvproto::make_map!().into()
-        }
-    }
-
-    #[derive(Debug,PartialEq,TryFromRpcValue)]
+    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
     struct OneFieldStruct {
         x: i32
     }
 
-    impl From<OneFieldStruct> for RpcValue {
-        fn from(value: OneFieldStruct) -> Self {
-            shvproto::make_map!("x" => value.x).into()
-        }
-    }
-
-    #[derive(Debug,PartialEq,TryFromRpcValue)]
+    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
     struct TestStruct {
         int_field: i32,
         #[field_name = "my_custom_field_name"] int_field_with_custom_field_name: i32,
@@ -37,22 +25,6 @@ mod test {
         vec_int_field: Vec<i32>,
         vec_empty_struct_field: Vec<EmptyStruct>,
         map_int_field: BTreeMap<String, i32>,
-    }
-
-    impl From<TestStruct> for RpcValue {
-        fn from(value: TestStruct) -> Self {
-            shvproto::make_map!(
-                "intField" => value.int_field,
-                "my_custom_field_name" => value.int_field_with_custom_field_name,
-                "stringField" => value.string_field,
-                "mapField" => value.map_field,
-                "emptyStructField" => value.empty_struct_field,
-                "oneFieldStruct" => value.one_field_struct,
-                "vecIntField" => value.vec_int_field,
-                "vecEmptyStructField" => value.vec_empty_struct_field,
-                "mapIntField" => value.map_int_field
-            ).into()
-        }
     }
 
     #[test]
