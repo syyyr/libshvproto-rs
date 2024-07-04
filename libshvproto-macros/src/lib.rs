@@ -74,10 +74,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                 impl TryFrom<shvproto::Map> for #struct_identifier {
                     type Error = String;
                     fn try_from(value: shvproto::Map) -> Result<Self, Self::Error> {
-                        let get_key = |key_name| value.get(key_name).ok_or_else(|| "Missing ".to_string() + key_name + " key");
-                        Ok(Self {
-                            #struct_initializers
-                        })
+                        Self::try_from(&value)
                     }
                 }
 
