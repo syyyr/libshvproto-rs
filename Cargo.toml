@@ -1,9 +1,12 @@
+workspace = { members = ["libshvproto-macros"] }
+
 [package]
 name = "shvproto"
 version = "3.0.2"
 edition = "2021"
 
 [dependencies]
+libshvproto-macros = { path = "./libshvproto-macros" }
 simple_logger = { git = "https://github.com/fvacek/rust-simple_logger.git", branch = "main", features = ["stderr"] }
 
 log = "0.4.21"
