@@ -24,7 +24,7 @@ static EMPTY_METAMAP: OnceLock<MetaMap> = OnceLock::new();
 #[macro_export(local_inner_macros)]
 macro_rules! make_map {
 	($( $key: expr => $val: expr ),*) => {{
-		 let mut map = rpcvalue::Map::new();
+		 let mut map = $crate::rpcvalue::Map::new();
 		 $( map.insert($key.to_string(), RpcValue::from($val)); )*
 		 map
 	}}
@@ -573,6 +573,115 @@ try_from_rpc_value_ref!(chrono::NaiveDateTime);
 try_from_rpc_value!(chrono::NaiveDateTime);
 
 
+impl<T> TryFrom<&RpcValue> for Vec<T>
+where
+    T: for<'a> TryFrom<&'a RpcValue, Error = String>,
+{
+    type Error = String;
+
+    fn try_from(value: &RpcValue) -> Result<Self, Self::Error> {
+        let mut res = Self::new();
+        for (idx,val) in List::try_from(value)?.iter().enumerate() {
+            res.push(val
+                .try_into()
+                .map_err(|e| format!("Wrong item at index {idx}: {e}"))?
+            );
+        }
+        Ok(res)
+    }
+}
+
+impl<T> TryFrom<RpcValue> for Vec<T>
+where
+    T: TryFrom<RpcValue, Error = String>,
+{
+    type Error = String;
+
+    fn try_from(value: RpcValue) -> Result<Self, Self::Error> {
+        let mut res = Self::new();
+        for (idx, val) in List::try_from(value)?.into_iter().enumerate() {
+            res.push(val
+                .try_into()
+                .map_err(|e| format!("Wrong item at index {idx}: {e}"))?
+            );
+        }
+        Ok(res)
+    }
+}
+
+impl<T> TryFrom<&RpcValue> for BTreeMap<String, T>
+where
+    T: for<'a> TryFrom<&'a RpcValue, Error = String>,
+{
+    type Error = String;
+
+    fn try_from(value: &RpcValue) -> Result<Self, Self::Error> {
+        let mut res = Self::new();
+        for (key, val) in Map::try_from(value)?.iter() {
+            res.insert(
+                key.to_owned(),
+                val.try_into()
+                .map_err(|e| format!("Wrong item at key `{key}`: {e}"))?
+            );
+        }
+        Ok(res)
+    }
+}
+
+impl<T> TryFrom<RpcValue> for BTreeMap<String, T>
+where
+    T: TryFrom<RpcValue, Error = String>,
+{
+    type Error = String;
+
+    fn try_from(value: RpcValue) -> Result<Self, Self::Error> {
+        let mut res = Self::new();
+        for (key, val) in Map::try_from(value)?.into_iter() {
+            let val = val.try_into().map_err(|e| format!("Wrong item at key `{key}`: {e}"))?;
+            res.insert(key,val);
+        }
+        Ok(res)
+    }
+}
+
+impl<T> TryFrom<&RpcValue> for BTreeMap<i32, T>
+where
+    T: for<'a> TryFrom<&'a RpcValue, Error = String>,
+{
+    type Error = String;
+
+    fn try_from(value: &RpcValue) -> Result<Self, Self::Error> {
+        let mut res = Self::new();
+        for (key, val) in IMap::try_from(value)?.iter() {
+            res.insert(
+                *key,
+                val.try_into()
+                .map_err(|e| format!("Wrong item at key `{key}`: {e}"))?
+            );
+        }
+        Ok(res)
+    }
+}
+
+impl<T> TryFrom<RpcValue> for BTreeMap<i32, T>
+where
+    T: TryFrom<RpcValue, Error = String>,
+{
+    type Error = String;
+
+    fn try_from(value: RpcValue) -> Result<Self, Self::Error> {
+        let mut res = Self::new();
+        for (key, val) in IMap::try_from(value)?.into_iter() {
+            res.insert(
+                key,
+                val.try_into()
+                .map_err(|e| format!("Wrong item at key `{key}`: {e}"))?
+            );
+        }
+        Ok(res)
+    }
+}
+
 macro_rules! is_xxx {
     ($name:ident, $variant:pat) => {
         pub fn $name(&self) -> bool {
@@ -875,7 +984,7 @@ mod test {
     use chrono::Offset;
 
     use crate::metamap::MetaMap;
-    use crate::rpcvalue::{Map, RpcValue, Value};
+    use crate::rpcvalue::{IMap, Map, RpcValue, Value};
     use crate::DateTime;
     use crate::Decimal;
 
@@ -979,6 +1088,30 @@ mod test {
         assert_eq!(rv.as_imap(), &m);
         let rrv = &rv;
         assert_eq!(rrv.try_into(), Ok(&m));
+        assert_eq!(rv.try_into(), Ok(m));
+
+        let vec1 = vec![123_i32, 456_i32];
+        let rv = RpcValue::from(vec1.iter().copied().map(RpcValue::from).collect::<Vec<RpcValue>>());
+        let rrv = &rv;
+        assert_eq!(rrv.try_into(), Ok(vec1.clone()));
+        assert_eq!(rv.try_into(), Ok(vec1));
+
+        let mut m = BTreeMap::new();
+        m.insert("foo".to_owned(), 123_i32);
+        m.insert("bar".to_owned(), 456_i32);
+        let rv = RpcValue::from(
+            m.iter().map(|(k, &v)| (k.clone(), v.into())).collect::<Map>());
+        let rrv = &rv;
+        assert_eq!(rrv.try_into(), Ok(m.clone()));
+        assert_eq!(rv.try_into(), Ok(m));
+
+        let mut m = BTreeMap::new();
+        m.insert(1, std::f64::consts::E);
+        m.insert(7, std::f64::consts::PI);
+        let rv = RpcValue::from(
+            m.iter().map(|(&k, &v)| (k, v.into())).collect::<IMap>());
+        let rrv = &rv;
+        assert_eq!(rrv.try_into(), Ok(m.clone()));
         assert_eq!(rv.try_into(), Ok(m));
     }
 }
