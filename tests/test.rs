@@ -64,6 +64,6 @@ mod test {
     fn missing_fields() {
         let _x: TestStruct = shvproto::make_map!(
             "my_custom_field_name" => 1234
-        ).try_into().expect("Asd");
+        ).try_into().expect("Expected parse failure");
     }
 }
