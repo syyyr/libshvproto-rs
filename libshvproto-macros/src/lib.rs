@@ -81,7 +81,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     }
                 }
 
-                impl From<#struct_identifier> for RpcValue {
+                impl From<#struct_identifier> for shvproto::RpcValue {
                     fn from(value: #struct_identifier) -> Self {
                         let mut map = shvproto::rpcvalue::Map::new();
                         #rpcvalue_inserts
