@@ -1207,5 +1207,45 @@ mod test {
         let rrv = &rv;
         assert_eq!(rrv.try_into(), Ok(m.clone()));
         assert_eq!(rv.try_into(), Ok(m));
+
+
+        // Collection -> RpcValue -> Collection
+
+        let v = vec![RpcValue::from(1i32), RpcValue::from(2i32)];
+        assert_eq!(Ok(v.clone()), RpcValue::from(v).try_into());
+
+        let v = vec![1i32, 2i32];
+        assert_eq!(Ok(v.clone()), RpcValue::from(v).try_into());
+
+        let v = [
+            "x",
+            "yy",
+            "zzz",
+        ].into_iter().map(String::from).collect::<Vec<_>>();
+        assert_eq!(Ok(v.clone()), RpcValue::from(v).try_into());
+
+        let v = [
+            ("xxx".to_owned(), RpcValue::from(1_i32)),
+            ("yyy".to_owned(), RpcValue::from(2_i32)),
+        ].into_iter().collect::<BTreeMap<_,_>>();
+        assert_eq!(Ok(v.clone()), RpcValue::from(v).try_into());
+
+        let v = [
+            ("xxx".to_owned(), 1_i32),
+            ("yyy".to_owned(), 2_i32),
+        ].into_iter().collect::<BTreeMap<_,_>>();
+        assert_eq!(Ok(v.clone()), RpcValue::from(v).try_into());
+
+        let v = [
+            (1, RpcValue::from(1_i32)),
+            (2, RpcValue::from(2_i32)),
+        ].into_iter().collect::<BTreeMap<_,_>>();
+        assert_eq!(Ok(v.clone()), RpcValue::from(v).try_into());
+
+        let v = [
+            (1, 1_i32),
+            (2, 2_i32),
+        ].into_iter().collect::<BTreeMap<_,_>>();
+        assert_eq!(Ok(v.clone()), RpcValue::from(v).try_into());
     }
 }
