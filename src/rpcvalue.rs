@@ -1166,18 +1166,20 @@ mod test {
         assert_eq!(rrv.try_into(), Ok(&vec1));
         assert_eq!(rv.try_into(), Ok(vec1));
 
-        let mut m: Map = BTreeMap::new();
-        m.insert("foo".to_string(), RpcValue::from(123));
-        m.insert("bar".to_string(), RpcValue::from("foo"));
+        let m = [
+            ("foo".to_string(), RpcValue::from(123)),
+            ("bar".to_string(), RpcValue::from("foo"))
+        ].into_iter().collect::<Map>();
         let rv = RpcValue::from(m.clone());
         assert_eq!(rv.as_map(), &m);
         let rrv = &rv;
         assert_eq!(rrv.try_into(), Ok(&m));
         assert_eq!(rv.try_into(), Ok(m));
 
-        let mut m: BTreeMap<i32, RpcValue> = BTreeMap::new();
-        m.insert(1, RpcValue::from(123));
-        m.insert(2, RpcValue::from("foo"));
+        let m = [
+            (1, RpcValue::from(123)),
+            (2, RpcValue::from("foo"))
+        ].into_iter().collect::<IMap>();
         let rv = RpcValue::from(m.clone());
         assert_eq!(rv.as_imap(), &m);
         let rrv = &rv;
@@ -1190,18 +1192,20 @@ mod test {
         assert_eq!(rrv.try_into(), Ok(vec1.clone()));
         assert_eq!(rv.try_into(), Ok(vec1));
 
-        let mut m = BTreeMap::new();
-        m.insert("foo".to_owned(), 123_i32);
-        m.insert("bar".to_owned(), 456_i32);
+        let m = [
+            ("foo".to_owned(), 123_i32),
+            ("bar".to_owned(), 456_i32)
+        ].into_iter().collect::<BTreeMap<_,_>>();
         let rv = RpcValue::from(
             m.iter().map(|(k, &v)| (k.clone(), v.into())).collect::<Map>());
         let rrv = &rv;
         assert_eq!(rrv.try_into(), Ok(m.clone()));
         assert_eq!(rv.try_into(), Ok(m));
 
-        let mut m = BTreeMap::new();
-        m.insert(1, std::f64::consts::E);
-        m.insert(7, std::f64::consts::PI);
+        let m = [
+            (1, std::f64::consts::E),
+            (7, std::f64::consts::PI)
+        ].into_iter().collect::<BTreeMap<_,_>>();
         let rv = RpcValue::from(
             m.iter().map(|(&k, &v)| (k, v.into())).collect::<IMap>());
         let rrv = &rv;
