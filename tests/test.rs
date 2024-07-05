@@ -2,7 +2,6 @@
 mod test {
     use libshvproto_macros::TryFromRpcValue;
     use shvproto::RpcValue;
-    use shvproto::rpcvalue;
 
     #[derive(Debug,PartialEq,TryFromRpcValue)]
     struct EmptyStruct {
