@@ -234,7 +234,7 @@ impl From<Vec<u8>> for RpcValue {
     fn from(val: Vec<u8>) -> Self {
         RpcValue {
             meta: None,
-            value: Value::Blob(Box::new(val)).into()
+            value: Value::Blob(Box::new(val))
         }
     }
 }
