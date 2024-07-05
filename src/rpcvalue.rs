@@ -192,14 +192,108 @@ impl<Tz: chrono::TimeZone> From<chrono::DateTime<Tz>> for Value {
     }
 }
 
-impl<T: Into<Value>> From<T> for RpcValue {
-    fn from(value: T) -> Self {
+macro_rules! impl_from_type_for_rpcvalue {
+    ($from:ty) => {
+        impl From<$from> for RpcValue {
+            fn from(value: $from) -> Self {
+                RpcValue {
+                    meta: None,
+                    value: value.into(),
+                }
+            }
+        }
+    };
+}
+
+impl_from_type_for_rpcvalue!(());
+impl_from_type_for_rpcvalue!(bool);
+impl_from_type_for_rpcvalue!(&str);
+impl_from_type_for_rpcvalue!(String);
+impl_from_type_for_rpcvalue!(&String);
+impl_from_type_for_rpcvalue!(&[u8]);
+impl_from_type_for_rpcvalue!(i32);
+impl_from_type_for_rpcvalue!(i64);
+impl_from_type_for_rpcvalue!(isize);
+impl_from_type_for_rpcvalue!(u32);
+impl_from_type_for_rpcvalue!(u64);
+impl_from_type_for_rpcvalue!(f64);
+impl_from_type_for_rpcvalue!(Decimal);
+impl_from_type_for_rpcvalue!(datetime::DateTime);
+impl_from_type_for_rpcvalue!(chrono::NaiveDateTime);
+
+impl<Tz: chrono::TimeZone> From<chrono::DateTime<Tz>> for RpcValue {
+    fn from(value: chrono::DateTime<Tz>) -> Self {
         RpcValue {
             meta: None,
             value: value.into(),
         }
     }
 }
+
+impl From<Vec<u8>> for RpcValue {
+    fn from(val: Vec<u8>) -> Self {
+        RpcValue {
+            meta: None,
+            value: Value::Blob(Box::new(val)).into()
+        }
+    }
+}
+
+// NOTE:
+//
+// We would need specializations for List, Map and IMap to just
+// move the value instead of iterating through the collections.
+//
+// At least in case of Vec<RpcValue> the compiler generates better
+// code compared to other Vec<T>, but unfortunately not for Map and
+// IMap.
+//
+// impl_from_type_for_rpcvalue!(List);
+// impl_from_type_for_rpcvalue!(Map);
+// impl_from_type_for_rpcvalue!(IMap);
+
+impl<T: Into<RpcValue>> From<Vec<T>> for RpcValue {
+    fn from(value: Vec<T>) -> Self {
+        RpcValue {
+            meta: None,
+            value: Value::List(Box::new(
+                    value
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+            ))
+        }
+    }
+}
+
+impl<T: Into<RpcValue>> From<BTreeMap<String, T>> for RpcValue {
+    fn from(value: BTreeMap<String, T>) -> Self {
+        RpcValue {
+            meta: None,
+            value: Value::Map(Box::new(
+                    value
+                    .into_iter()
+                    .map(|(k, v)| (k, v.into()))
+                    .collect::<BTreeMap<_,_>>()
+            ))
+        }
+    }
+}
+
+impl<T: Into<RpcValue>> From<BTreeMap<i32, T>> for RpcValue {
+    fn from(value: BTreeMap<i32, T>) -> Self {
+        RpcValue {
+            meta: None,
+            value: Value::IMap(Box::new(
+                    value
+                    .into_iter()
+                    .map(|(k, v)| (k, v.into()))
+                    .collect::<BTreeMap<_,_>>()
+            ))
+        }
+    }
+}
+
 
 fn format_err_try_from(expected_type: &str, actual_type: &str) -> String {
     format!("Expected type `{expected_type}`, got `{actual_type}`")
