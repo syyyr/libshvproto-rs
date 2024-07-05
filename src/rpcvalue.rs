@@ -239,58 +239,88 @@ impl From<Vec<u8>> for RpcValue {
     }
 }
 
-// NOTE:
-//
-// We would need specializations for List, Map and IMap to just
-// move the value instead of iterating through the collections.
-//
-// At least in case of Vec<RpcValue> the compiler generates better
-// code compared to other Vec<T>, but unfortunately not for Map and
-// IMap.
-//
-// impl_from_type_for_rpcvalue!(List);
-// impl_from_type_for_rpcvalue!(Map);
-// impl_from_type_for_rpcvalue!(IMap);
+// Specializations of `impl From<Collection<RpcValue>> for RpcValue`
+// for List, Map and IMap to just move the value instead of iterating
+// through the collections.
+
+#[cfg(feature = "specialization")]
+impl_from_type_for_rpcvalue!(List);
+
+#[cfg(feature = "specialization")]
+impl_from_type_for_rpcvalue!(Map);
+
+#[cfg(feature = "specialization")]
+impl_from_type_for_rpcvalue!(IMap);
+
+fn from_vec_rpcvalue_for_rpcvalue<T: Into<RpcValue>>(value: Vec<T>) -> RpcValue {
+    RpcValue {
+        meta: None,
+        value: Value::List(Box::new(
+                value
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<_>>()
+        ))
+    }
+}
 
 impl<T: Into<RpcValue>> From<Vec<T>> for RpcValue {
+    #[cfg(feature = "specialization")]
+    default fn from(value: Vec<T>) -> Self {
+        from_vec_rpcvalue_for_rpcvalue(value)
+    }
+
+    #[cfg(not(feature = "specialization"))]
     fn from(value: Vec<T>) -> Self {
-        RpcValue {
-            meta: None,
-            value: Value::List(Box::new(
-                    value
-                    .into_iter()
-                    .map(Into::into)
-                    .collect::<Vec<_>>()
-            ))
-        }
+        from_vec_rpcvalue_for_rpcvalue(value)
+    }
+}
+
+fn from_map_rpcvalue_for_rpcvalue<T: Into<RpcValue>>(value: BTreeMap<String, T>) -> RpcValue {
+    RpcValue {
+        meta: None,
+        value: Value::Map(Box::new(
+                value
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect::<BTreeMap<_,_>>()
+        ))
     }
 }
 
 impl<T: Into<RpcValue>> From<BTreeMap<String, T>> for RpcValue {
+    #[cfg(feature = "specialization")]
+    default fn from(value: BTreeMap<String, T>) -> Self {
+        from_map_rpcvalue_for_rpcvalue(value)
+    }
+
+    #[cfg(not(feature = "specialization"))]
     fn from(value: BTreeMap<String, T>) -> Self {
-        RpcValue {
-            meta: None,
-            value: Value::Map(Box::new(
-                    value
-                    .into_iter()
-                    .map(|(k, v)| (k, v.into()))
-                    .collect::<BTreeMap<_,_>>()
-            ))
-        }
+        from_map_rpcvalue_for_rpcvalue(value)
+    }
+}
+
+fn from_imap_rpcvalue_for_rpcvalue<T: Into<RpcValue>>(value: BTreeMap<i32, T>) -> RpcValue {
+    RpcValue {
+        meta: None,
+        value: Value::IMap(Box::new(
+                value
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect::<BTreeMap<_,_>>()
+        ))
     }
 }
 
 impl<T: Into<RpcValue>> From<BTreeMap<i32, T>> for RpcValue {
+    #[cfg(feature = "specialization")]
+    default fn from(value: BTreeMap<i32, T>) -> Self {
+        from_imap_rpcvalue_for_rpcvalue(value)
+    }
+
+    #[cfg(not(feature = "specialization"))]
     fn from(value: BTreeMap<i32, T>) -> Self {
-        RpcValue {
-            meta: None,
-            value: Value::IMap(Box::new(
-                    value
-                    .into_iter()
-                    .map(|(k, v)| (k, v.into()))
-                    .collect::<BTreeMap<_,_>>()
-            ))
-        }
+        from_imap_rpcvalue_for_rpcvalue(value)
     }
 }
 

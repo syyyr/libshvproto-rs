@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "specialization", feature(min_specialization))]
+
 pub mod chainpack;
 pub mod cpon;
 pub mod datetime;
