@@ -21,3 +21,4 @@ pub use writer::{WriteResult, Writer};
 pub use chainpack::{ChainPackReader, ChainPackWriter};
 pub use cpon::{CponReader, CponWriter};
 
+pub use libshvproto_macros::TryFromRpcValue;
