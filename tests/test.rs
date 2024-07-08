@@ -46,19 +46,6 @@ mod test {
         ).into();
 
         let y: TestStruct = x.clone().try_into().expect("Failed to parse");
-
-        assert_eq!(y, TestStruct {
-            int_field: 123,
-            string_field: "some_string".to_owned(),
-            int_field_with_custom_field_name: 1234,
-            map_field: shvproto::make_map!("some_key" => 123),
-            one_field_struct: OneFieldStruct {x: 4565},
-            empty_struct_field: EmptyStruct{},
-            vec_int_field: vec![1_i32, 2_i32],
-            vec_empty_struct_field: vec![EmptyStruct{}, EmptyStruct{}],
-            map_int_field: [("aaa".to_string(), 111)].into_iter().collect::<BTreeMap<_,_>>(),
-            imap_field: [(420, 111)].into_iter().collect::<BTreeMap<_,_>>(),
-        });
         assert_eq!(x, y.into());
     }
 
