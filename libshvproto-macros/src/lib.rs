@@ -4,6 +4,28 @@ use core::panic;
 
 use proc_macro::TokenStream;
 use quote::quote;
+fn is_option(ty: &syn::Type) -> bool {
+    let syn::Type::Path(typepath) = ty else {
+        return false
+    };
+    if !(typepath.qself.is_none() && typepath.path.segments.len() == 1) {
+        return false
+    }
+    let segment = &typepath.path.segments[0];
+
+    if segment.ident != "Option" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(ref data) = segment.arguments else {
+        return false;
+    };
+    if data.args.len() != 1 {
+        return false;
+    }
+
+    matches!(data.args[0], syn::GenericArgument::Type(_))
+}
+
 
 #[proc_macro_derive(TryFromRpcValue, attributes(field_name))]
 pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
@@ -24,12 +46,24 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     .map(|literal| if let syn::Lit::Str(expr) = &literal.lit { expr.value() } else { panic!("Expected a string literal for 'field_name'") })
                     .unwrap_or_else(|| identifier.to_string().to_case(Case::Camel));
 
-                struct_initializers.extend(quote!{
-                    #identifier: get_key(#field_name).and_then(|x| x.try_into())?,
-                });
-                rpcvalue_inserts.extend(quote!{
-                    map.insert(#field_name.into(), value.#identifier.into());
-                });
+                if is_option(&field.ty) {
+
+                    struct_initializers.extend(quote!{
+                        #identifier: get_key(#field_name).ok().and_then(|x| x.try_into().ok()),
+                    });
+                    rpcvalue_inserts.extend(quote!{
+                        if let Some(val) = value.#identifier {
+                            map.insert(#field_name.into(), val.into());
+                        }
+                    });
+                } else {
+                    struct_initializers.extend(quote!{
+                        #identifier: get_key(#field_name).and_then(|x| x.try_into())?,
+                    });
+                    rpcvalue_inserts.extend(quote!{
+                        map.insert(#field_name.into(), value.#identifier.into());
+                    });
+                }
             }
             quote!{
                 impl TryFrom<shvproto::RpcValue> for #struct_identifier {

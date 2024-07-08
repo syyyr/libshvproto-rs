@@ -28,6 +28,11 @@ mod test {
         imap_field: BTreeMap<i32, i32>,
     }
 
+    #[derive(Debug,PartialEq,TryFromRpcValue)]
+    struct OptionalFieldStruct {
+        optional_int_field: Option<i32>
+    }
+
     #[test]
     fn derive_struct() {
         let x: RpcValue = shvproto::make_map!(
@@ -55,5 +60,19 @@ mod test {
         let _x: TestStruct = shvproto::make_map!(
             "my_custom_field_name" => 1234
         ).try_into().expect("Expected parse failure");
+    }
+
+    #[test]
+    fn optional_field() {
+        let x: OptionalFieldStruct = shvproto::make_map!().try_into().expect("Failed to parse");
+        assert_eq!(x, OptionalFieldStruct {
+            optional_int_field: None
+        });
+        let y: OptionalFieldStruct = shvproto::make_map!(
+            "optionalIntField" => 59
+        ).try_into().expect("Failed to parse");
+        assert_eq!(y, OptionalFieldStruct {
+            optional_int_field: Some(59)
+        });
     }
 }
