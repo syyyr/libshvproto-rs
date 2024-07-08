@@ -5,16 +5,16 @@ mod test {
     use libshvproto_macros::TryFromRpcValue;
     use shvproto::RpcValue;
 
-    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
+    #[derive(Debug,PartialEq,TryFromRpcValue)]
     struct EmptyStruct {
     }
 
-    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
+    #[derive(Debug,PartialEq,TryFromRpcValue)]
     struct OneFieldStruct {
         x: i32
     }
 
-    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
+    #[derive(Debug,PartialEq,TryFromRpcValue)]
     struct TestStruct {
         int_field: i32,
         #[field_name = "my_custom_field_name"] int_field_with_custom_field_name: i32,
