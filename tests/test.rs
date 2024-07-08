@@ -17,7 +17,7 @@ mod test {
     #[derive(Debug,PartialEq,TryFromRpcValue)]
     struct TestStruct {
         int_field: i32,
-        #[field_name = "my_custom_field_name"] int_field_with_custom_field_name: i32,
+        #[field_name = "myCustomFieldName"] int_field_with_custom_field_name: i32,
         string_field: String,
         map_field: shvproto::Map,
         empty_struct_field: EmptyStruct,
@@ -32,7 +32,7 @@ mod test {
     fn derive_struct() {
         let x: RpcValue = shvproto::make_map!(
             "intField" => 123,
-            "my_custom_field_name" => 1234,
+            "myCustomFieldName" => 1234,
             "stringField" => "some_string",
             "mapField" => shvproto::make_map!(
                 "some_key" => 123
