@@ -192,14 +192,156 @@ impl<Tz: chrono::TimeZone> From<chrono::DateTime<Tz>> for Value {
     }
 }
 
-impl<T: Into<Value>> From<T> for RpcValue {
-    fn from(value: T) -> Self {
+macro_rules! impl_from_type_for_rpcvalue {
+    ($from:ty) => {
+        impl From<$from> for RpcValue {
+            fn from(value: $from) -> Self {
+                $crate::RpcValue {
+                    meta: None,
+                    value: value.into(),
+                }
+            }
+        }
+    };
+}
+
+impl_from_type_for_rpcvalue!(());
+impl_from_type_for_rpcvalue!(bool);
+impl_from_type_for_rpcvalue!(&str);
+impl_from_type_for_rpcvalue!(String);
+impl_from_type_for_rpcvalue!(&String);
+impl_from_type_for_rpcvalue!(&[u8]);
+impl_from_type_for_rpcvalue!(i32);
+impl_from_type_for_rpcvalue!(i64);
+impl_from_type_for_rpcvalue!(isize);
+impl_from_type_for_rpcvalue!(u32);
+impl_from_type_for_rpcvalue!(u64);
+impl_from_type_for_rpcvalue!(f64);
+impl_from_type_for_rpcvalue!(Decimal);
+impl_from_type_for_rpcvalue!(DateTime);
+impl_from_type_for_rpcvalue!(chrono::NaiveDateTime);
+
+impl<Tz: chrono::TimeZone> From<chrono::DateTime<Tz>> for RpcValue {
+    fn from(value: chrono::DateTime<Tz>) -> Self {
         RpcValue {
             meta: None,
             value: value.into(),
         }
     }
 }
+
+impl From<Vec<u8>> for RpcValue {
+    fn from(val: Vec<u8>) -> Self {
+        RpcValue {
+            meta: None,
+            value: Value::Blob(Box::new(val))
+        }
+    }
+}
+
+#[cfg(feature = "specialization")]
+mod with_specialization {
+    use super::{
+        from_vec_rpcvalue_for_rpcvalue,
+        from_map_rpcvalue_for_rpcvalue,
+        from_imap_rpcvalue_for_rpcvalue
+    };
+    use crate::RpcValue;
+    use std::collections::BTreeMap;
+    use super::{List,Map,IMap};
+
+    impl<T: Into<RpcValue>> From<Vec<T>> for RpcValue {
+        default fn from(value: Vec<T>) -> Self {
+            from_vec_rpcvalue_for_rpcvalue(value)
+        }
+    }
+    impl<T: Into<RpcValue>> From<BTreeMap<String, T>> for RpcValue {
+        default fn from(value: BTreeMap<String, T>) -> Self {
+            from_map_rpcvalue_for_rpcvalue(value)
+        }
+    }
+    impl<T: Into<RpcValue>> From<BTreeMap<i32, T>> for RpcValue {
+        default fn from(value: BTreeMap<i32, T>) -> Self {
+            from_imap_rpcvalue_for_rpcvalue(value)
+        }
+    }
+
+    // Specializations of `impl From<Collection<RpcValue>> for RpcValue`
+    // for List, Map and IMap to just move the value instead of iterating
+    // through the collections.
+    impl_from_type_for_rpcvalue!(List);
+    impl_from_type_for_rpcvalue!(Map);
+    impl_from_type_for_rpcvalue!(IMap);
+}
+
+
+#[cfg(not(feature = "specialization"))]
+mod without_specialization {
+    use super::{
+        from_vec_rpcvalue_for_rpcvalue,
+        from_map_rpcvalue_for_rpcvalue,
+        from_imap_rpcvalue_for_rpcvalue}
+    ;
+    use crate::RpcValue;
+    use std::collections::BTreeMap;
+
+
+    impl<T: Into<RpcValue>> From<Vec<T>> for RpcValue {
+        fn from(value: Vec<T>) -> Self {
+            from_vec_rpcvalue_for_rpcvalue(value)
+        }
+    }
+
+    impl<T: Into<RpcValue>> From<BTreeMap<String, T>> for RpcValue {
+        fn from(value: BTreeMap<String, T>) -> Self {
+            from_map_rpcvalue_for_rpcvalue(value)
+        }
+    }
+
+    impl<T: Into<RpcValue>> From<BTreeMap<i32, T>> for RpcValue {
+        fn from(value: BTreeMap<i32, T>) -> Self {
+            from_imap_rpcvalue_for_rpcvalue(value)
+        }
+    }
+}
+
+fn from_vec_rpcvalue_for_rpcvalue<T: Into<RpcValue>>(value: Vec<T>) -> RpcValue {
+    RpcValue {
+        meta: None,
+        value: Value::List(Box::new(
+                value
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<_>>()
+        ))
+    }
+}
+
+fn from_map_rpcvalue_for_rpcvalue<T: Into<RpcValue>>(value: BTreeMap<String, T>) -> RpcValue {
+    RpcValue {
+        meta: None,
+        value: Value::Map(Box::new(
+                value
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect::<BTreeMap<_,_>>()
+        ))
+    }
+}
+
+fn from_imap_rpcvalue_for_rpcvalue<T: Into<RpcValue>>(value: BTreeMap<i32, T>) -> RpcValue {
+    RpcValue {
+        meta: None,
+        value: Value::IMap(Box::new(
+                value
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect::<BTreeMap<_,_>>()
+        ))
+    }
+}
+
+
 
 fn format_err_try_from(expected_type: &str, actual_type: &str) -> String {
     format!("Expected type `{expected_type}`, got `{actual_type}`")
@@ -1072,18 +1214,20 @@ mod test {
         assert_eq!(rrv.try_into(), Ok(&vec1));
         assert_eq!(rv.try_into(), Ok(vec1));
 
-        let mut m: Map = BTreeMap::new();
-        m.insert("foo".to_string(), RpcValue::from(123));
-        m.insert("bar".to_string(), RpcValue::from("foo"));
+        let m = [
+            ("foo".to_string(), RpcValue::from(123)),
+            ("bar".to_string(), RpcValue::from("foo"))
+        ].into_iter().collect::<Map>();
         let rv = RpcValue::from(m.clone());
         assert_eq!(rv.as_map(), &m);
         let rrv = &rv;
         assert_eq!(rrv.try_into(), Ok(&m));
         assert_eq!(rv.try_into(), Ok(m));
 
-        let mut m: BTreeMap<i32, RpcValue> = BTreeMap::new();
-        m.insert(1, RpcValue::from(123));
-        m.insert(2, RpcValue::from("foo"));
+        let m = [
+            (1, RpcValue::from(123)),
+            (2, RpcValue::from("foo"))
+        ].into_iter().collect::<IMap>();
         let rv = RpcValue::from(m.clone());
         assert_eq!(rv.as_imap(), &m);
         let rrv = &rv;
@@ -1096,22 +1240,64 @@ mod test {
         assert_eq!(rrv.try_into(), Ok(vec1.clone()));
         assert_eq!(rv.try_into(), Ok(vec1));
 
-        let mut m = BTreeMap::new();
-        m.insert("foo".to_owned(), 123_i32);
-        m.insert("bar".to_owned(), 456_i32);
+        let m = [
+            ("foo".to_owned(), 123_i32),
+            ("bar".to_owned(), 456_i32)
+        ].into_iter().collect::<BTreeMap<_,_>>();
         let rv = RpcValue::from(
             m.iter().map(|(k, &v)| (k.clone(), v.into())).collect::<Map>());
         let rrv = &rv;
         assert_eq!(rrv.try_into(), Ok(m.clone()));
         assert_eq!(rv.try_into(), Ok(m));
 
-        let mut m = BTreeMap::new();
-        m.insert(1, std::f64::consts::E);
-        m.insert(7, std::f64::consts::PI);
+        let m = [
+            (1, std::f64::consts::E),
+            (7, std::f64::consts::PI)
+        ].into_iter().collect::<BTreeMap<_,_>>();
         let rv = RpcValue::from(
             m.iter().map(|(&k, &v)| (k, v.into())).collect::<IMap>());
         let rrv = &rv;
         assert_eq!(rrv.try_into(), Ok(m.clone()));
         assert_eq!(rv.try_into(), Ok(m));
+
+
+        // Collection -> RpcValue -> Collection
+
+        let v = vec![RpcValue::from(1i32), RpcValue::from(2i32)];
+        assert_eq!(Ok(v.clone()), RpcValue::from(v).try_into());
+
+        let v = vec![1i32, 2i32];
+        assert_eq!(Ok(v.clone()), RpcValue::from(v).try_into());
+
+        let v = [
+            "x",
+            "yy",
+            "zzz",
+        ].into_iter().map(String::from).collect::<Vec<_>>();
+        assert_eq!(Ok(v.clone()), RpcValue::from(v).try_into());
+
+        let v = [
+            ("xxx".to_owned(), RpcValue::from(1_i32)),
+            ("yyy".to_owned(), RpcValue::from(2_i32)),
+        ].into_iter().collect::<BTreeMap<_,_>>();
+        assert_eq!(Ok(v.clone()), RpcValue::from(v).try_into());
+
+        let v = [
+            ("xxx".to_owned(), 1_i32),
+            ("yyy".to_owned(), 2_i32),
+        ].into_iter().collect::<BTreeMap<_,_>>();
+        assert_eq!(Ok(v.clone()), RpcValue::from(v).try_into());
+
+        let v = [
+            (1, RpcValue::from(1_i32)),
+            (2, RpcValue::from(2_i32)),
+        ].into_iter().collect::<BTreeMap<_,_>>();
+        assert_eq!(Ok(v.clone()), RpcValue::from(v).try_into());
+
+        let v = [
+            (1, 1_i32),
+            (2, 2_i32),
+        ].into_iter().collect::<BTreeMap<_,_>>();
+        assert_eq!(Ok(v.clone()), RpcValue::from(v).try_into());
     }
 }

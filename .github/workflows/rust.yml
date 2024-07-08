@@ -12,14 +12,26 @@ env:
 
 jobs:
   build:
+    strategy:
+      matrix:
+        toolchain:
+          - channel: stable
+            cargo_args: --verbose --all-targets
+          - channel: nightly
+            cargo_args: --verbose --all-targets --all-features
 
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v3
+    - name: Setup toolchain
+      run: >
+        rustup update ${{ matrix.toolchain.channel }} &&
+        rustup default ${{ matrix.toolchain.channel }} &&
+        rustup component add clippy
     - name: Clippy
-      run: cargo clippy --verbose --all-targets --all-features
+      run: cargo clippy ${{ matrix.toolchain.cargo_args }}
     - name: Build
-      run: cargo build --verbose --all-features
+      run: cargo build ${{ matrix.toolchain.cargo_args }}
     - name: Run tests
-      run: cargo test --verbose --all-features -- --test-threads=1
+      run: cargo test ${{ matrix.toolchain.cargo_args }} -- --test-threads=1

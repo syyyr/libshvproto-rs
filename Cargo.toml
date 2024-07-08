@@ -15,5 +15,12 @@ chrono = "0.4.38"
 hex = "0.4.3"
 clap = { version = "4.5.7", features = ["derive"] }
 
+[features]
+
+# Enables feature `min_specialization` of nightly compiler and provides
+# special `impl From<Collection<RpcValue>> for RpcValue` to just move
+# the data without iterating through collections.
+specialization = []
+
 [[bin]]
 name = "cp2cp"
