@@ -33,6 +33,23 @@ mod test {
         optional_int_field: Option<i32>
     }
 
+    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
+    pub enum AllVariants {
+        Null,
+        Int(i64),
+        UInt(u64),
+        Double(f64),
+        Bool(bool),
+        DateTime(shvproto::datetime::DateTime),
+        Decimal(shvproto::decimal::Decimal),
+        String(String),
+        Blob(shvproto::Blob),
+        List(shvproto::List),
+        Map(shvproto::Map),
+        IMap(shvproto::rpcvalue::IMap),
+    }
+
+
     #[test]
     fn derive_struct() {
         let x: RpcValue = shvproto::make_map!(
@@ -74,5 +91,27 @@ mod test {
         assert_eq!(y, OptionalFieldStruct {
             optional_int_field: Some(59)
         });
+    }
+
+    #[test]
+    fn enum_field() {
+        let impl_test = |x: AllVariants| {
+            let y: RpcValue = x.clone().into();
+            let z: AllVariants = y.try_into().expect("Failed to parse");
+            assert_eq!(x, z);
+        };
+
+        impl_test(AllVariants::Null);
+        impl_test(AllVariants::Int(123));
+        impl_test(AllVariants::UInt(465));
+        impl_test(AllVariants::Double(123.0));
+        impl_test(AllVariants::Bool(true));
+        impl_test(AllVariants::DateTime(shvproto::DateTime::now()));
+        impl_test(AllVariants::Decimal(shvproto::Decimal::new(1234, 2)));
+        impl_test(AllVariants::String("Some string".to_owned()));
+        impl_test(AllVariants::Blob(vec![1, 2, 3]));
+        impl_test(AllVariants::List(vec![RpcValue::from("some_value")]));
+        impl_test(AllVariants::Map(shvproto::make_map!("key" => 1234)));
+        impl_test(AllVariants::IMap([(420, 111.into())].into_iter().collect::<BTreeMap<_,_>>()));
     }
 }
