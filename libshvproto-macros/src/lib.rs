@@ -13,20 +13,23 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
     match &input.data {
         syn::Data::Struct(syn::DataStruct { fields, .. }) => {
             let mut struct_initializers = quote!{};
+            let mut map_initializers = quote!{};
             for field in fields {
                 let identifier = field.ident.as_ref().unwrap();
                 let field_name = field
                     .attrs.first()
-                    .and_then(|x| x.meta.require_name_value().ok())
-                    .filter(|x| x.path.is_ident("field_name"))
-                    .map(|x| if let syn::Expr::Lit(expr) = &x.value { expr } else { panic!("Expected a string literal for 'field_name'") })
-                    .map(|x| if let syn::Lit::Str(expr) = &x.lit { expr.value() } else { panic!("Expected a string literal for 'field_name'") })
+                    .and_then(|attr| attr.meta.require_name_value().ok())
+                    .filter(|meta_name_value| meta_name_value.path.is_ident("field_name"))
+                    .map(|meta_name_value| if let syn::Expr::Lit(expr) = &meta_name_value.value { expr } else { panic!("Expected a string literal for 'field_name'") })
+                    .map(|literal| if let syn::Lit::Str(expr) = &literal.lit { expr.value() } else { panic!("Expected a string literal for 'field_name'") })
                     .unwrap_or_else(|| identifier.to_string().to_case(Case::Camel));
 
                 struct_initializers.extend(quote!{
                     #identifier: get_key(#field_name).and_then(|x| x.try_into())?,
                 });
-
+                map_initializers.extend(quote!{
+                    (#field_name.into(), value.#identifier.into()),
+                });
             }
             quote!{
                 impl TryFrom<shvproto::RpcValue> for #struct_identifier {
@@ -71,13 +74,15 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                 impl TryFrom<shvproto::Map> for #struct_identifier {
                     type Error = String;
                     fn try_from(value: shvproto::Map) -> Result<Self, Self::Error> {
-                        let get_key = |key_name| value.get(key_name).ok_or_else(|| "Missing ".to_string() + key_name + " key");
-                        Ok(Self {
-                            #struct_initializers
-                        })
+                        Self::try_from(&value)
                     }
                 }
 
+                impl From<#struct_identifier> for shvproto::RpcValue {
+                    fn from(value: #struct_identifier) -> Self {
+                        [#map_initializers].into_iter().collect::<shvproto::rpcvalue::Map>().into()
+                    }
+                }
             }
         }
         _ => panic!("This macro can only be used on a struct.")

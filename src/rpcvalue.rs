@@ -23,9 +23,9 @@ static EMPTY_METAMAP: OnceLock<MetaMap> = OnceLock::new();
 
 #[macro_export(local_inner_macros)]
 macro_rules! make_map {
-	($( $key: expr => $val: expr ),*) => {{
+	($( $key: expr => $val: expr ),* $(,)?) => {{
 		 let mut map = $crate::rpcvalue::Map::new();
-		 $( map.insert($key.to_string(), RpcValue::from($val)); )*
+		 $( map.insert($key.to_string(), $crate::RpcValue::from($val)); )*
 		 map
 	}}
 }
