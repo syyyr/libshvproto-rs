@@ -13,7 +13,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
     match &input.data {
         syn::Data::Struct(syn::DataStruct { fields, .. }) => {
             let mut struct_initializers = quote!{};
-            let mut rpcvalue_inserts = quote!{};
+            let mut map_initializers = quote!{};
             for field in fields {
                 let identifier = field.ident.as_ref().unwrap();
                 let field_name = field
@@ -27,8 +27,8 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                 struct_initializers.extend(quote!{
                     #identifier: get_key(#field_name).and_then(|x| x.try_into())?,
                 });
-                rpcvalue_inserts.extend(quote!{
-                    map.insert(#field_name.into(), value.#identifier.into());
+                map_initializers.extend(quote!{
+                    (#field_name.into(), value.#identifier.into()),
                 });
             }
             quote!{
@@ -80,9 +80,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
 
                 impl From<#struct_identifier> for shvproto::RpcValue {
                     fn from(value: #struct_identifier) -> Self {
-                        let mut map = shvproto::rpcvalue::Map::new();
-                        #rpcvalue_inserts
-                        map.into()
+                        [#map_initializers].into_iter().collect::<shvproto::rpcvalue::Map>().into()
                     }
                 }
             }
