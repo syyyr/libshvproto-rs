@@ -152,13 +152,13 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                 };
                 if let syn::Fields::Unnamed(variant_types) = &variant.fields {
                     if variant_types.unnamed.len() != 1 {
-                        panic!("jde jenom jeden typ" );
+                        panic!("Only single element variant tuples are supported for TryFromRpcValue");
                     }
                     match_arms_ser.extend(quote!{
                         #struct_identifier::#variant_ident(val) => RpcValue::from(val),
                     });
 
-                    let source_variant_type = &variant_types.unnamed.first().expect("variant_type").ty;
+                    let source_variant_type = &variant_types.unnamed.first().expect("No tuple elements").ty;
                     let deref_code = quote!((*x));
                     let unbox_code = quote!((x.as_ref().clone()));
 
