@@ -5,17 +5,17 @@ mod test {
     use libshvproto_macros::TryFromRpcValue;
     use shvproto::RpcValue;
 
-    #[derive(Debug,PartialEq,TryFromRpcValue)]
-    struct EmptyStruct {
+    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
+    pub struct EmptyStruct {
     }
 
-    #[derive(Debug,PartialEq,TryFromRpcValue)]
-    struct OneFieldStruct {
+    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
+    pub struct OneFieldStruct {
         x: i32
     }
 
     #[derive(Debug,PartialEq,TryFromRpcValue)]
-    struct TestStruct {
+    pub struct TestStruct {
         int_field: i32,
         #[field_name = "myCustomFieldName"] int_field_with_custom_field_name: i32,
         string_field: String,
@@ -49,6 +49,11 @@ mod test {
         IMap(shvproto::rpcvalue::IMap),
     }
 
+    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
+    pub enum EnumWithUserStruct {
+        OneFieldStructVariant(OneFieldStruct),
+        IntVariant(i64)
+    }
 
     #[test]
     fn derive_struct() {
@@ -66,7 +71,7 @@ mod test {
             "mapIntField" => [("aaa".to_string(), 111)].into_iter().collect::<BTreeMap<_,_>>(),
             "imapField" => [(420, 111)].into_iter().collect::<BTreeMap<_,_>>(),
         ).into();
-
+    
         let y: TestStruct = x.clone().try_into().expect("Failed to parse");
         assert_eq!(x, y.into());
     }
@@ -100,7 +105,7 @@ mod test {
             let z: AllVariants = y.try_into().expect("Failed to parse");
             assert_eq!(x, z);
         };
-
+    
         impl_test(AllVariants::Null);
         impl_test(AllVariants::Int(123));
         impl_test(AllVariants::UInt(465));
@@ -113,5 +118,21 @@ mod test {
         impl_test(AllVariants::List(vec![RpcValue::from("some_value")]));
         impl_test(AllVariants::Map(shvproto::make_map!("key" => 1234)));
         impl_test(AllVariants::IMap([(420, 111.into())].into_iter().collect::<BTreeMap<_,_>>()));
+
+        let impl_test = |x: EnumWithUserStruct| {
+            let y: RpcValue = x.clone().into();
+            let z: EnumWithUserStruct = y.try_into().expect("Failed to parse");
+            assert_eq!(x, z);
+        };
+
+        impl_test(EnumWithUserStruct::OneFieldStructVariant(OneFieldStruct{x: 123}));
+        impl_test(EnumWithUserStruct::IntVariant(123));
+    }
+
+    #[should_panic]
+    #[test]
+    fn cant_deser_enum() {
+        let input: RpcValue = String::new().into();
+        let _output: EnumWithUserStruct = input.try_into().expect("Expected failure");
     }
 }
