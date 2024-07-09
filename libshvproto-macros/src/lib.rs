@@ -145,53 +145,56 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                         shvproto::Value::#rpcvalue_variant_type => Ok(<#struct_identifier>::#variant_ident #block)
                     });
                 };
-                if let syn::Fields::Unnamed(variant_types) = &variant.fields {
-                    if variant_types.unnamed.len() != 1 {
-                        panic!("Only single element variant tuples are supported for TryFromRpcValue");
-                    }
-                    match_arms_ser.extend(quote!{
-                        #struct_identifier::#variant_ident(val) => RpcValue::from(val),
-                    });
-
-                    let source_variant_type = &variant_types.unnamed.first().expect("No tuple elements").ty;
-                    let deref_code = quote!((*x));
-                    let unbox_code = quote!((x.as_ref().clone()));
-
-                    if let Some(type_identifier) = get_type(source_variant_type) {
-                        match type_identifier.as_ref() {
-                            "i64" => add_type_matcher(&mut match_arms_de, quote!{Int(x)}, deref_code.clone()),
-                            "u64" => add_type_matcher(&mut match_arms_de, quote!{UInt(x)}, deref_code.clone()),
-                            "f64" => add_type_matcher(&mut match_arms_de, quote!{Double(x)}, deref_code.clone()),
-                            "bool" => add_type_matcher(&mut match_arms_de, quote!{Bool(x)}, deref_code.clone()),
-                            "DateTime" => add_type_matcher(&mut match_arms_de, quote!{DateTime(x)}, deref_code.clone()),
-                            "Decimal" => add_type_matcher(&mut match_arms_de, quote!{Decimal(x)}, deref_code.clone()),
-                            "String" => add_type_matcher(&mut match_arms_de, quote!{String(x)}, unbox_code.clone()),
-                            "Blob" => add_type_matcher(&mut match_arms_de, quote!{Blob(x)}, unbox_code.clone()),
-                            "List" => add_type_matcher(&mut match_arms_de, quote!{List(x)}, unbox_code.clone()),
-                            "Map" => {
-                                if let Some((matched_variant_ident, matched_variant_type)) = map_has_been_matched {
-                                    panic!("Can't match enum variant {}(Map), because a Map will already be matched as {}({})", quote!{#variant_ident}, quote!{#matched_variant_ident}, quote!{#matched_variant_type});
-                                }
-                                add_type_matcher(&mut match_arms_de,  quote!{Map(x)}, unbox_code.clone());
-                                map_has_been_matched = Some((quote!(#variant_ident), quote!{#source_variant_type}));
-                            },
-                            "IMap" => add_type_matcher(&mut match_arms_de,  quote!{IMap(x)}, unbox_code.clone()),
-                            _ => {
-                                if let Some((matched_variant_ident, matched_variant_type)) = map_has_been_matched {
-                                    panic!("Can't match enum variant {}({}) as a Map, because a Map will already be matched as {}({})", quote!{#variant_ident}, quote!{#source_variant_type}, quote!{#matched_variant_ident}, quote!{#matched_variant_type});
-                                }
-                                add_type_matcher(&mut match_arms_de, quote! {Map(x)}, quote!((x.as_ref().clone().try_into()?)));
-                                map_has_been_matched = Some((quote!(#variant_ident), quote!{#source_variant_type}));
-                            }
-
+                match &variant.fields {
+                    syn::Fields::Unnamed(variant_types) => {
+                        if variant_types.unnamed.len() != 1 {
+                            panic!("Only single element variant tuples are supported for TryFromRpcValue");
                         }
-                    }
-                }
-                if let syn::Fields::Unit = &variant.fields {
-                    match_arms_ser.extend(quote!{
-                        #struct_identifier::#variant_ident => RpcValue::null(),
-                    });
-                    add_type_matcher(&mut match_arms_de, quote! {Null}, quote!());
+                        match_arms_ser.extend(quote!{
+                            #struct_identifier::#variant_ident(val) => RpcValue::from(val),
+                        });
+
+                        let source_variant_type = &variant_types.unnamed.first().expect("No tuple elements").ty;
+                        let deref_code = quote!((*x));
+                        let unbox_code = quote!((x.as_ref().clone()));
+
+                        if let Some(type_identifier) = get_type(source_variant_type) {
+                            match type_identifier.as_ref() {
+                                "i64" => add_type_matcher(&mut match_arms_de, quote!{Int(x)}, deref_code.clone()),
+                                "u64" => add_type_matcher(&mut match_arms_de, quote!{UInt(x)}, deref_code.clone()),
+                                "f64" => add_type_matcher(&mut match_arms_de, quote!{Double(x)}, deref_code.clone()),
+                                "bool" => add_type_matcher(&mut match_arms_de, quote!{Bool(x)}, deref_code.clone()),
+                                "DateTime" => add_type_matcher(&mut match_arms_de, quote!{DateTime(x)}, deref_code.clone()),
+                                "Decimal" => add_type_matcher(&mut match_arms_de, quote!{Decimal(x)}, deref_code.clone()),
+                                "String" => add_type_matcher(&mut match_arms_de, quote!{String(x)}, unbox_code.clone()),
+                                "Blob" => add_type_matcher(&mut match_arms_de, quote!{Blob(x)}, unbox_code.clone()),
+                                "List" => add_type_matcher(&mut match_arms_de, quote!{List(x)}, unbox_code.clone()),
+                                "Map" => {
+                                    if let Some((matched_variant_ident, matched_variant_type)) = map_has_been_matched {
+                                        panic!("Can't match enum variant {}(Map), because a Map will already be matched as {}({})", quote!{#variant_ident}, quote!{#matched_variant_ident}, quote!{#matched_variant_type});
+                                    }
+                                    add_type_matcher(&mut match_arms_de,  quote!{Map(x)}, unbox_code.clone());
+                                    map_has_been_matched = Some((quote!(#variant_ident), quote!{#source_variant_type}));
+                                },
+                                "IMap" => add_type_matcher(&mut match_arms_de,  quote!{IMap(x)}, unbox_code.clone()),
+                                _ => {
+                                    if let Some((matched_variant_ident, matched_variant_type)) = map_has_been_matched {
+                                        panic!("Can't match enum variant {}({}) as a Map, because a Map will already be matched as {}({})", quote!{#variant_ident}, quote!{#source_variant_type}, quote!{#matched_variant_ident}, quote!{#matched_variant_type});
+                                    }
+                                    add_type_matcher(&mut match_arms_de, quote! {Map(x)}, quote!((x.as_ref().clone().try_into()?)));
+                                    map_has_been_matched = Some((quote!(#variant_ident), quote!{#source_variant_type}));
+                                }
+
+                            }
+                        }
+                    },
+                    syn::Fields::Unit => {
+                        match_arms_ser.extend(quote!{
+                            #struct_identifier::#variant_ident => RpcValue::null(),
+                        });
+                        add_type_matcher(&mut match_arms_de, quote! {Null}, quote!());
+                    },
+                    syn::Fields::Named(_) => ()
                 }
             }
 
