@@ -138,12 +138,12 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
         syn::Data::Enum(syn::DataEnum { variants, .. }) => {
             let mut match_arms_de  = quote!{};
             let mut match_arms_ser = quote!{};
-            let mut expected_types = quote!{""};
+            let mut allowed_types = vec![];
             for variant in variants {
                 let variant_ident = &variant.ident;
                 let mut add_type_matcher = |should, dest_variant_type, block| {
                     if should {
-                        expected_types.extend(quote! {+ " " + stringify!(#dest_variant_type)});
+                        allowed_types.push(quote!{stringify!(#dest_variant_type)});
 
                         match_arms_de.extend(quote!{
                             shvproto::Value::#dest_variant_type => Ok(<#struct_identifier>::#variant_ident #block),
@@ -188,7 +188,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     fn try_from(value: shvproto::RpcValue) -> Result<Self, Self::Error> {
                         match value.value() {
                             #match_arms_de
-                            _ => Err("Couldn't deserialize ".to_owned() + stringify!(#struct_identifier) + ", expected types: " + #expected_types + ", got: " + value.type_name())
+                            _ => Err("Couldn't deserialize into '".to_owned() + stringify!(#struct_identifier) + "' enum, allowed types: " + [#(#allowed_types),*].join("|").as_ref() + ", got: " + value.type_name())
                         }
                     }
                 }
