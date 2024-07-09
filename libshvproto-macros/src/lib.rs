@@ -162,17 +162,17 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     let deref_code = quote!((*x));
                     let unbox_code = quote!((x.as_ref().clone()));
 
-                    add_type_matcher(is_type(source_variant_type, "i64"), quote!{Int(x)}, (deref_code).clone());
-                    add_type_matcher(is_type(source_variant_type, "u64"), quote!{UInt(x)}, (deref_code).clone());
-                    add_type_matcher(is_type(source_variant_type, "f64"), quote!{Double(x)}, (deref_code).clone());
-                    add_type_matcher(is_type(source_variant_type, "bool"), quote!{Bool(x)}, (deref_code).clone());
-                    add_type_matcher(is_type(source_variant_type, "DateTime"), quote!{DateTime(x)}, (deref_code).clone());
-                    add_type_matcher(is_type(source_variant_type, "Decimal"), quote!{Decimal(x)}, (deref_code).clone());
-                    add_type_matcher(is_type(source_variant_type, "String"), quote!{String(x)}, (unbox_code).clone());
-                    add_type_matcher(is_type(source_variant_type, "Blob"), quote!{Blob(x)}, (unbox_code).clone());
-                    add_type_matcher(is_type(source_variant_type, "List"), quote!{List(x)}, (unbox_code).clone());
-                    add_type_matcher(is_type(source_variant_type, "Map"), quote!{Map(x)}, (unbox_code).clone());
-                    add_type_matcher(is_type(source_variant_type, "IMap"), quote!{IMap(x)}, (unbox_code).clone());
+                    add_type_matcher(is_type(source_variant_type, "i64"), quote!{Int(x)}, deref_code.clone());
+                    add_type_matcher(is_type(source_variant_type, "u64"), quote!{UInt(x)}, deref_code.clone());
+                    add_type_matcher(is_type(source_variant_type, "f64"), quote!{Double(x)}, deref_code.clone());
+                    add_type_matcher(is_type(source_variant_type, "bool"), quote!{Bool(x)}, deref_code.clone());
+                    add_type_matcher(is_type(source_variant_type, "DateTime"), quote!{DateTime(x)}, deref_code.clone());
+                    add_type_matcher(is_type(source_variant_type, "Decimal"), quote!{Decimal(x)}, deref_code.clone());
+                    add_type_matcher(is_type(source_variant_type, "String"), quote!{String(x)}, unbox_code.clone());
+                    add_type_matcher(is_type(source_variant_type, "Blob"), quote!{Blob(x)}, unbox_code.clone());
+                    add_type_matcher(is_type(source_variant_type, "List"), quote!{List(x)}, unbox_code.clone());
+                    add_type_matcher(is_type(source_variant_type, "Map"), quote!{Map(x)}, unbox_code.clone());
+                    add_type_matcher(is_type(source_variant_type, "IMap"), quote!{IMap(x)}, unbox_code.clone());
                 }
                 if let syn::Fields::Unit = &variant.fields {
                     match_arms_ser.extend(quote!{
