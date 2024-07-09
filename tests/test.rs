@@ -105,7 +105,7 @@ mod test {
             let z: AllVariants = y.try_into().expect("Failed to parse");
             assert_eq!(x, z);
         };
-    
+
         impl_test(AllVariants::Null);
         impl_test(AllVariants::Int(123));
         impl_test(AllVariants::UInt(465));
