@@ -136,8 +136,8 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
             }
         },
         syn::Data::Enum(syn::DataEnum { variants, .. }) => {
-            let mut try_froms = quote!{};
-            let mut match_arms = quote!{};
+            let mut match_arms_de  = quote!{};
+            let mut match_arms_ser = quote!{};
             let mut expected_types = quote!{""};
             for variant in variants {
                 let variant_ident = &variant.ident;
@@ -145,10 +145,8 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     if should {
                         expected_types.extend(quote! {+ " " + stringify!(#dest_variant_type)});
 
-                        try_froms.extend(quote!{
-                            if let shvproto::Value::#dest_variant_type = value.value() {
-                                return Ok(<#struct_identifier>::#variant_ident #block);
-                            }
+                        match_arms_de.extend(quote!{
+                            shvproto::Value::#dest_variant_type => Ok(<#struct_identifier>::#variant_ident #block),
                         });
                     }
                 };
@@ -156,7 +154,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     if variant_types.unnamed.len() != 1 {
                         panic!("jde jenom jeden typ" );
                     }
-                    match_arms.extend(quote!{
+                    match_arms_ser.extend(quote!{
                         #struct_identifier::#variant_ident(val) => RpcValue::from(val),
                     });
 
@@ -177,7 +175,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     add_type_matcher(is_type(source_variant_type, "IMap"), quote!{IMap(x)}, (unbox_code).clone());
                 }
                 if let syn::Fields::Unit = &variant.fields {
-                    match_arms.extend(quote!{
+                    match_arms_ser.extend(quote!{
                         #struct_identifier::#variant_ident => RpcValue::null(),
                     });
                     add_type_matcher(true, quote! {Null}, quote!());
@@ -188,9 +186,10 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                 impl TryFrom<shvproto::RpcValue> for #struct_identifier {
                     type Error = String;
                     fn try_from(value: shvproto::RpcValue) -> Result<Self, Self::Error> {
-                        #try_froms
-
-                        Err("Couldn't deserialize ".to_owned() + stringify!(#struct_identifier) + ", expected types: " + #expected_types + ", got: " + value.type_name())
+                        match value.value() {
+                            #match_arms_de
+                            _ => Err("Couldn't deserialize ".to_owned() + stringify!(#struct_identifier) + ", expected types: " + #expected_types + ", got: " + value.type_name())
+                        }
                     }
                 }
 
@@ -204,7 +203,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                 impl From<#struct_identifier> for shvproto::RpcValue {
                     fn from(value: #struct_identifier) -> Self {
                         match value {
-                            #match_arms
+                            #match_arms_ser
                         }
                     }
                 }
