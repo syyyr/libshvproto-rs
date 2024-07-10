@@ -136,16 +136,17 @@ mod test {
     }
 
     #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
-    pub struct GenericStruct<T> {
-        x: T,
-        y: Vec<T>
+    pub struct GenericStruct<Type1, Type2> {
+        x: Type1,
+        y: Vec<Type1>,
+        z: Type2
     }
 
     #[test]
     fn generic_struct() {
-        let int_struct_in: GenericStruct::<i64> = shvproto::make_map!("x" => 123, "y" => vec![123, 456]).try_into().expect("Failed to parse");
+        let int_struct_in: GenericStruct::<i64, String> = shvproto::make_map!("x" => 123, "y" => vec![123, 456], "z" => "some_string").try_into().expect("Failed to parse");
         let int_struct_rpcvalue: shvproto::RpcValue = int_struct_in.clone().into();
-        let int_struct_out: GenericStruct::<i64> = int_struct_rpcvalue.clone().try_into().expect("Failed to parse");
+        let int_struct_out: GenericStruct::<i64, String> = int_struct_rpcvalue.clone().try_into().expect("Failed to parse");
         assert_eq!(int_struct_in, int_struct_out);
 
     }
