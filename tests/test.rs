@@ -2,7 +2,7 @@
 mod test {
     use std::collections::BTreeMap;
 
-    use shvproto::{RpcValue, TryFromRpcValue};
+    use shvproto::TryFromRpcValue;
 
     #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
     pub struct EmptyStruct {
@@ -56,7 +56,7 @@ mod test {
 
     #[test]
     fn derive_struct() {
-        let x: RpcValue = shvproto::make_map!(
+        let x: shvproto::RpcValue = shvproto::make_map!(
             "intField" => 123,
             "myCustomFieldName" => 1234,
             "stringField" => "some_string",
@@ -65,8 +65,8 @@ mod test {
             ),
             "emptyStructField" => shvproto::make_map!(),
             "oneFieldStruct" => shvproto::make_map!("x" => 4565),
-            "vecIntField" => vec![1_i32, 2_i32].into_iter().map(RpcValue::from).collect::<Vec<_>>(),
-            "vecEmptyStructField" => vec![shvproto::make_map!(), shvproto::make_map!()].into_iter().map(RpcValue::from).collect::<Vec<_>>(),
+            "vecIntField" => vec![1_i32, 2_i32].into_iter().map(shvproto::RpcValue::from).collect::<Vec<_>>(),
+            "vecEmptyStructField" => vec![shvproto::make_map!(), shvproto::make_map!()].into_iter().map(shvproto::RpcValue::from).collect::<Vec<_>>(),
             "mapIntField" => [("aaa".to_string(), 111)].into_iter().collect::<BTreeMap<_,_>>(),
             "imapField" => [(420, 111)].into_iter().collect::<BTreeMap<_,_>>(),
         ).into();
@@ -100,7 +100,7 @@ mod test {
     #[test]
     fn enum_field() {
         let impl_test = |x: AllVariants| {
-            let y: RpcValue = x.clone().into();
+            let y: shvproto::RpcValue = x.clone().into();
             let z: AllVariants = y.try_into().expect("Failed to parse");
             assert_eq!(x, z);
         };
@@ -114,12 +114,12 @@ mod test {
         impl_test(AllVariants::Decimal(shvproto::Decimal::new(1234, 2)));
         impl_test(AllVariants::String("Some string".to_owned()));
         impl_test(AllVariants::Blob(vec![1, 2, 3]));
-        impl_test(AllVariants::List(vec![RpcValue::from("some_value")]));
+        impl_test(AllVariants::List(vec![shvproto::RpcValue::from("some_value")]));
         impl_test(AllVariants::Map(shvproto::make_map!("key" => 1234)));
         impl_test(AllVariants::IMap([(420, 111.into())].into_iter().collect::<BTreeMap<_,_>>()));
 
         let impl_test = |x: EnumWithUserStruct| {
-            let y: RpcValue = x.clone().into();
+            let y: shvproto::RpcValue = x.clone().into();
             let z: EnumWithUserStruct = y.try_into().expect("Failed to parse");
             assert_eq!(x, z);
         };
@@ -131,19 +131,20 @@ mod test {
     #[should_panic]
     #[test]
     fn cant_deser_enum() {
-        let input: RpcValue = String::new().into();
+        let input: shvproto::RpcValue = String::new().into();
         let _output: EnumWithUserStruct = input.try_into().expect("Expected failure");
     }
 
     #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
     pub struct GenericStruct<T> {
-        x: T
+        x: T,
+        y: Vec<T>
     }
 
     #[test]
     fn generic_struct() {
-        let int_struct_in: GenericStruct::<i64> = shvproto::make_map!("x" => 123).try_into().expect("Failed to parse");
-        let int_struct_rpcvalue: RpcValue = int_struct_in.clone().into();
+        let int_struct_in: GenericStruct::<i64> = shvproto::make_map!("x" => 123, "y" => vec![123, 456]).try_into().expect("Failed to parse");
+        let int_struct_rpcvalue: shvproto::RpcValue = int_struct_in.clone().into();
         let int_struct_out: GenericStruct::<i64> = int_struct_rpcvalue.clone().try_into().expect("Failed to parse");
         assert_eq!(int_struct_in, int_struct_out);
 
