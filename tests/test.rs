@@ -136,7 +136,7 @@ mod test {
     }
 
     #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
-    pub struct GenericStruct<T: Into<RpcValue> + for<'a> TryFrom<&'a RpcValue, Error = String>> {
+    pub struct GenericStruct<T> {
         x: T
     }
 

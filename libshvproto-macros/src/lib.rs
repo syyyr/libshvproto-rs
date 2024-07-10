@@ -41,7 +41,6 @@ fn get_type(ty: &syn::Type) -> Option<String> {
 pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(item as syn::DeriveInput);
     let struct_identifier = &input.ident;
-    let struct_generics = &input.generics;
     let struct_generics_without_bounds_vec = input.generics.params.clone().into_iter().map(|generic_param|
         if let syn::GenericParam::Type(mut type_param) = generic_param {
             type_param.bounds.clear();
@@ -50,6 +49,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
             generic_param
         }).collect::<Vec<_>>();
     let struct_generics_without_bounds = quote!(<#(#struct_generics_without_bounds_vec),*>);
+    let struct_generics_with_bounds = quote!{<#(#struct_generics_without_bounds_vec: Into<RpcValue> + for<'a> TryFrom<&'a RpcValue, Error = String>),*>};
 
     match &input.data {
         syn::Data::Struct(syn::DataStruct { fields, .. }) => {
@@ -86,7 +86,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
             }
 
             quote!{
-                impl #struct_generics TryFrom<shvproto::RpcValue> for #struct_identifier #struct_generics_without_bounds {
+                impl #struct_generics_with_bounds TryFrom<shvproto::RpcValue> for #struct_identifier #struct_generics_without_bounds {
                     type Error = String;
                     fn try_from(value: shvproto::RpcValue) -> Result<Self, Self::Error> {
                         if let shvproto::Value::Map(value) = value.value() {
@@ -97,7 +97,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     }
                 }
 
-                impl #struct_generics TryFrom<&shvproto::RpcValue> for #struct_identifier #struct_generics_without_bounds {
+                impl #struct_generics_with_bounds TryFrom<&shvproto::RpcValue> for #struct_identifier #struct_generics_without_bounds {
                     type Error = String;
                     fn try_from(value: &shvproto::RpcValue) -> Result<Self, Self::Error> {
                         if let shvproto::Value::Map(value) = value.value() {
@@ -108,14 +108,14 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     }
                 }
 
-                impl #struct_generics  TryFrom<&Box<shvproto::Map>> for #struct_identifier #struct_generics_without_bounds  {
+                impl #struct_generics_with_bounds  TryFrom<&Box<shvproto::Map>> for #struct_identifier #struct_generics_without_bounds  {
                     type Error = String;
                     fn try_from(value: &Box<shvproto::Map>) -> Result<Self, Self::Error> {
                         value.as_ref().try_into()
                     }
                 }
 
-                impl #struct_generics TryFrom<&shvproto::Map> for #struct_identifier #struct_generics_without_bounds  {
+                impl #struct_generics_with_bounds TryFrom<&shvproto::Map> for #struct_identifier #struct_generics_without_bounds  {
                     type Error = String;
                     fn try_from(value: &shvproto::Map) -> Result<Self, Self::Error> {
                         let get_key = |key_name| value.get(key_name).ok_or_else(|| "Missing ".to_string() + key_name + " key");
@@ -125,14 +125,14 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     }
                 }
 
-                impl #struct_generics TryFrom<shvproto::Map> for #struct_identifier #struct_generics_without_bounds {
+                impl #struct_generics_with_bounds TryFrom<shvproto::Map> for #struct_identifier #struct_generics_without_bounds {
                     type Error = String;
                     fn try_from(value: shvproto::Map) -> Result<Self, Self::Error> {
                         Self::try_from(&value)
                     }
                 }
 
-                impl #struct_generics From<#struct_identifier #struct_generics_without_bounds> for shvproto::RpcValue {
+                impl #struct_generics_with_bounds From<#struct_identifier #struct_generics_without_bounds> for shvproto::RpcValue {
                     fn from(value: #struct_identifier #struct_generics_without_bounds) -> Self {
                         let mut map = shvproto::rpcvalue::Map::new();
                         #rpcvalue_inserts
