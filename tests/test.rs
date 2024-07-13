@@ -113,10 +113,10 @@ mod test {
 
     fn test_case<T>(v: T)
     where
-        T: TryFrom<RpcValue> + Into<RpcValue> + std::fmt::Debug + Clone + PartialEq,
-        <T as TryFrom<RpcValue>>::Error: std::fmt::Debug + PartialEq,
+        T: TryFrom<shvproto::RpcValue> + Into<shvproto::RpcValue> + std::fmt::Debug + Clone + PartialEq,
+        <T as TryFrom<shvproto::RpcValue>>::Error: std::fmt::Debug + PartialEq,
     {
-        let rv: RpcValue = v.clone().into();
+        let rv: shvproto::RpcValue = v.clone().into();
         assert_eq!(Ok(v), rv.try_into());
     }
 
@@ -130,39 +130,27 @@ mod test {
 
     #[test]
     #[should_panic]
-    fn enum_more_user_structs_fails() {
-        let _: EnumWithMoreUserStructs = RpcValue::from(shvproto::make_map!("y" => 1.23_f64)).try_into().unwrap();
+    fn enum_more_user_structs_failing() {
+        let _: EnumWithMoreUserStructs = shvproto::RpcValue::from(shvproto::make_map!("y" => 1.23_f64)).try_into().unwrap();
     }
 
     #[test]
     fn enum_field() {
-        let impl_test = |x: AllVariants| {
-            let y: shvproto::RpcValue = x.clone().into();
-            let z: AllVariants = y.try_into().expect("Failed to parse");
-            assert_eq!(x, z);
-        };
+        test_case(AllVariants::Null);
+        test_case(AllVariants::Int(123));
+        test_case(AllVariants::UInt(465));
+        test_case(AllVariants::Double(123.0));
+        test_case(AllVariants::Bool(true));
+        test_case(AllVariants::DateTime(shvproto::DateTime::now()));
+        test_case(AllVariants::Decimal(shvproto::Decimal::new(1234, 2)));
+        test_case(AllVariants::String("Some string".to_owned()));
+        test_case(AllVariants::Blob(vec![1, 2, 3]));
+        test_case(AllVariants::List(vec![shvproto::RpcValue::from("some_value")]));
+        test_case(AllVariants::Map(shvproto::make_map!("key" => 1234)));
+        test_case(AllVariants::IMap([(420, 111.into())].into_iter().collect::<BTreeMap<_,_>>()));
 
-        impl_test(AllVariants::Null);
-        impl_test(AllVariants::Int(123));
-        impl_test(AllVariants::UInt(465));
-        impl_test(AllVariants::Double(123.0));
-        impl_test(AllVariants::Bool(true));
-        impl_test(AllVariants::DateTime(shvproto::DateTime::now()));
-        impl_test(AllVariants::Decimal(shvproto::Decimal::new(1234, 2)));
-        impl_test(AllVariants::String("Some string".to_owned()));
-        impl_test(AllVariants::Blob(vec![1, 2, 3]));
-        impl_test(AllVariants::List(vec![shvproto::RpcValue::from("some_value")]));
-        impl_test(AllVariants::Map(shvproto::make_map!("key" => 1234)));
-        impl_test(AllVariants::IMap([(420, 111.into())].into_iter().collect::<BTreeMap<_,_>>()));
-
-        let impl_test = |x: EnumWithUserStruct| {
-            let y: shvproto::RpcValue = x.clone().into();
-            let z: EnumWithUserStruct = y.try_into().expect("Failed to parse");
-            assert_eq!(x, z);
-        };
-
-        impl_test(EnumWithUserStruct::OneFieldStructVariant(OneFieldStruct{x: 123}));
-        impl_test(EnumWithUserStruct::IntVariant(123));
+        test_case(EnumWithUserStruct::OneFieldStructVariant(OneFieldStruct{x: 123}));
+        test_case(EnumWithUserStruct::IntVariant(123));
     }
 
     #[should_panic]
