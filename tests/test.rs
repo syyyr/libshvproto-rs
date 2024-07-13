@@ -13,6 +13,12 @@ mod test {
         x: i32
     }
 
+    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
+    pub struct TwoFieldsStruct {
+        x: i32,
+        y: f64,
+    }
+
     #[derive(Debug,PartialEq,TryFromRpcValue)]
     pub struct TestStruct {
         int_field: i32,
@@ -52,6 +58,14 @@ mod test {
     pub enum EnumWithUserStruct {
         OneFieldStructVariant(OneFieldStruct),
         IntVariant(i64)
+    }
+
+    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
+    pub enum EnumWithMoreUserStructs {
+        Null,
+        TwoFieldsStructVariant(TwoFieldsStruct),
+        OneFieldStructVariant(OneFieldStruct),
+        IntVariant(i64),
     }
 
     #[test]
@@ -95,6 +109,29 @@ mod test {
         assert_eq!(y, OptionalFieldStruct {
             optional_int_field: Some(59)
         });
+    }
+
+    fn test_case<T>(v: T)
+    where
+        T: TryFrom<RpcValue> + Into<RpcValue> + std::fmt::Debug + Clone + PartialEq,
+        <T as TryFrom<RpcValue>>::Error: std::fmt::Debug + PartialEq,
+    {
+        let rv: RpcValue = v.clone().into();
+        assert_eq!(Ok(v), rv.try_into());
+    }
+
+    #[test]
+    fn enum_more_user_structs() {
+        test_case(EnumWithMoreUserStructs::Null);
+        test_case(EnumWithMoreUserStructs::OneFieldStructVariant(OneFieldStruct { x: 42 }));
+        test_case(EnumWithMoreUserStructs::TwoFieldsStructVariant(TwoFieldsStruct { x: 1, y: 1.23 }));
+        test_case(EnumWithMoreUserStructs::IntVariant(-1));
+    }
+
+    #[test]
+    #[should_panic]
+    fn enum_more_user_structs_fails() {
+        let _: EnumWithMoreUserStructs = RpcValue::from(shvproto::make_map!("y" => 1.23_f64)).try_into().unwrap();
     }
 
     #[test]

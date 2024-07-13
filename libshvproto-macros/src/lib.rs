@@ -145,7 +145,9 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
             let mut match_arms_de = vec![];
             let mut match_arms_ser  = quote!{};
             let mut allowed_types = vec![];
-            let mut map_has_been_matched: Option<(proc_macro2::TokenStream, proc_macro2::TokenStream)> = None;
+            let mut custom_type_matchers = vec![];
+            let mut map_has_been_matched_as_map: Option<(proc_macro2::TokenStream, proc_macro2::TokenStream)> = None;
+            let mut map_has_been_matched_as_struct: Option<Vec<(proc_macro2::TokenStream, proc_macro2::TokenStream)>> = None;
             for variant in variants {
                 let variant_ident = &variant.ident;
                 let mut add_type_matcher = |match_arms: &mut Vec<proc_macro2::TokenStream>, rpcvalue_variant_type, block| {
@@ -180,19 +182,32 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                                 "Blob" => add_type_matcher(&mut match_arms_de, quote!{Blob(x)}, unbox_code.clone()),
                                 "List" => add_type_matcher(&mut match_arms_de, quote!{List(x)}, unbox_code.clone()),
                                 "Map" => {
-                                    if let Some((matched_variant_ident, matched_variant_type)) = map_has_been_matched {
+                                    if let Some((matched_variant_ident, matched_variant_type)) = map_has_been_matched_as_map {
                                         panic!("Can't match enum variant {}(Map), because a Map will already be matched as {}({})", quote!{#variant_ident}, quote!{#matched_variant_ident}, quote!{#matched_variant_type});
                                     }
+                                    if let Some(matched_variants) = map_has_been_matched_as_struct {
+                                        let matched_variants = matched_variants
+                                            .iter()
+                                            .map(|(ident, ty)| quote!{ #ident(#ty) })
+                                            .collect::<Vec<proc_macro2::TokenStream>>();
+                                        panic!("Can't match enum variant {}(Map), because a Map will already be matched as one of: {}", quote!{#variant_ident}, quote!{#(#matched_variants),*});
+                                    }
                                     add_type_matcher(&mut match_arms_de,  quote!{Map(x)}, unbox_code.clone());
-                                    map_has_been_matched = Some((quote!(#variant_ident), quote!{#source_variant_type}));
+                                    map_has_been_matched_as_map = Some((quote!(#variant_ident), quote!{#source_variant_type}));
                                 },
                                 "IMap" => add_type_matcher(&mut match_arms_de,  quote!{IMap(x)}, unbox_code.clone()),
                                 _ => {
-                                    if let Some((matched_variant_ident, matched_variant_type)) = map_has_been_matched {
+                                    if let Some((matched_variant_ident, matched_variant_type)) = map_has_been_matched_as_map {
                                         panic!("Can't match enum variant {}({}) as a Map, because a Map will already be matched as {}({})", quote!{#variant_ident}, quote!{#source_variant_type}, quote!{#matched_variant_ident}, quote!{#matched_variant_type});
                                     }
-                                    add_type_matcher(&mut match_arms_de, quote! {Map(x)}, quote!((x.as_ref().clone().try_into()?)));
-                                    map_has_been_matched = Some((quote!(#variant_ident), quote!{#source_variant_type}));
+                                    custom_type_matchers.push(quote!{
+                                        if let Ok(val) = #source_variant_type::try_from(x.as_ref().clone()) {
+                                            return Ok(#struct_identifier::#variant_ident(val));
+                                        }
+                                    });
+                                    map_has_been_matched_as_struct
+                                        .get_or_insert(vec![])
+                                        .push((quote!(#variant_ident), quote!(#source_variant_type)));
                                 }
 
                             }
@@ -206,6 +221,18 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     },
                     syn::Fields::Named(_) => ()
                 }
+            }
+
+            if !custom_type_matchers.is_empty() {
+                allowed_types.push(quote!{stringify!(Map(x))});
+                custom_type_matchers.push(quote!{
+                    Err("Couldn't deserialize into '".to_owned() + stringify!(#struct_identifier) + "' enum from a Map.")
+                });
+                match_arms_de.push(quote!{
+                    shvproto::Value::Map(x) => {
+                        #(#custom_type_matchers)*
+                    }
+                });
             }
 
             quote!{
