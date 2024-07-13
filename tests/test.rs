@@ -63,8 +63,9 @@ mod test {
     #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
     pub enum EnumWithMoreUserStructs {
         Null,
-        TwoFieldsStructVariant(TwoFieldsStruct),
+        EmptyStructVariant(EmptyStruct),
         OneFieldStructVariant(OneFieldStruct),
+        TwoFieldsStructVariant(TwoFieldsStruct),
         IntVariant(i64),
     }
 
@@ -98,6 +99,23 @@ mod test {
     }
 
     #[test]
+    #[should_panic]
+    fn unexpected_field() {
+        let _: OneFieldStruct = shvproto::make_map!(
+            "x" => 1234,
+            "extra" => 33,
+        ).try_into().unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn unexpected_field_empty_struct() {
+        let _: EmptyStruct = shvproto::make_map!(
+            "extra" => 33,
+        ).try_into().unwrap();
+    }
+
+    #[test]
     fn optional_field() {
         let x: OptionalFieldStruct = shvproto::make_map!().try_into().expect("Failed to parse");
         assert_eq!(x, OptionalFieldStruct {
@@ -125,6 +143,7 @@ mod test {
         test_case(EnumWithMoreUserStructs::Null);
         test_case(EnumWithMoreUserStructs::OneFieldStructVariant(OneFieldStruct { x: 42 }));
         test_case(EnumWithMoreUserStructs::TwoFieldsStructVariant(TwoFieldsStruct { x: 1, y: 1.23 }));
+        test_case(EnumWithMoreUserStructs::EmptyStructVariant(EmptyStruct { }));
         test_case(EnumWithMoreUserStructs::IntVariant(-1));
     }
 
