@@ -54,6 +54,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
     match &input.data {
         syn::Data::Struct(syn::DataStruct { fields, .. }) => {
             let mut struct_initializers = quote!{};
+            let mut expected_keys = vec![];
             let mut rpcvalue_inserts = quote!{};
             for field in fields {
                 let identifier = field.ident.as_ref().unwrap();
@@ -66,7 +67,6 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     .unwrap_or_else(|| identifier.to_string().to_case(Case::Camel));
 
                 if is_option(&field.ty) {
-
                     struct_initializers.extend(quote!{
                         #identifier: get_key(#field_name).ok().and_then(|x| x.try_into().ok()),
                     });
@@ -83,6 +83,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                         map.insert(#field_name.into(), value.#identifier.into());
                     });
                 }
+                expected_keys.push(quote!{#field_name});
             }
 
             quote!{
@@ -119,9 +120,18 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     type Error = String;
                     fn try_from(value: &shvproto::Map) -> Result<Self, Self::Error> {
                         let get_key = |key_name| value.get(key_name).ok_or_else(|| "Missing ".to_string() + key_name + " key");
-                        Ok(Self {
-                            #struct_initializers
-                        })
+                        let unexpected_keys = value
+                            .keys()
+                            .map(String::as_str)
+                            .filter(|k| ![#(#expected_keys),*].contains(k))
+                            .collect::<Vec<_>>();
+                        if unexpected_keys.is_empty() {
+                            Ok(Self {
+                                #struct_initializers
+                            })
+                        } else {
+                            Err(["Cannot parse Map, unexpected keys: ", &unexpected_keys.join(", ")].concat())
+                        }
                     }
                 }
 
