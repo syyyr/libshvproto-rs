@@ -49,7 +49,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
             generic_param
         }).collect::<Vec<_>>();
     let struct_generics_without_bounds = quote!(<#(#struct_generics_without_bounds_vec),*>);
-    let struct_generics_with_bounds = quote!{<#(#struct_generics_without_bounds_vec: Into<RpcValue> + for<'a> TryFrom<&'a RpcValue, Error = String>),*>};
+    let struct_generics_with_bounds = quote!{<#(#struct_generics_without_bounds_vec: Into<shvproto::RpcValue> + for<'a> TryFrom<&'a shvproto::RpcValue, Error = String>),*>};
 
     match &input.data {
         syn::Data::Struct(syn::DataStruct { fields, .. }) => {
@@ -161,7 +161,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                             panic!("Only single element variant tuples are supported for TryFromRpcValue");
                         }
                         match_arms_ser.extend(quote!{
-                            #struct_identifier::#variant_ident(val) => RpcValue::from(val),
+                            #struct_identifier::#variant_ident(val) => shvproto::RpcValue::from(val),
                         });
 
                         let source_variant_type = &variant_types.unnamed.first().expect("No tuple elements").ty;
@@ -200,7 +200,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     },
                     syn::Fields::Unit => {
                         match_arms_ser.extend(quote!{
-                            #struct_identifier::#variant_ident => RpcValue::null(),
+                            #struct_identifier::#variant_ident => shvproto::RpcValue::null(),
                         });
                         add_type_matcher(&mut match_arms_de, quote! {Null}, quote!());
                     },
