@@ -205,11 +205,25 @@ mod test {
     }
 
     #[test]
-    fn unit_variants_enum_test() {
+    fn unit_variants_enum() {
         test_case(UnitVariantsEnum::Variant1);
         test_case(UnitVariantsEnum::Variant2);
         test_case(UnitVariantsEnum::NoValue(()));
         test_case(UnitVariantsEnum::Str("foo".into()));
         test_case(UnitVariantsEnum::Int(32));
+
+    }
+
+    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
+    enum UnitVariantsOnlyEnum {
+        Variant1,
+        Variant2,
+    }
+
+    #[test]
+    #[should_panic]
+    fn unit_variants_enum_failing() {
+        let rv = shvproto::RpcValue::from("foo");
+        let _v: UnitVariantsOnlyEnum = rv.try_into().unwrap();
     }
 }
