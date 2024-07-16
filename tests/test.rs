@@ -40,7 +40,7 @@ mod test {
 
     #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
     pub enum AllVariants {
-        Null,
+        Null(()),
         Int(i64),
         UInt(u64),
         Double(f64),
@@ -62,7 +62,7 @@ mod test {
 
     #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
     pub enum EnumWithMoreUserStructs {
-        Null,
+        Null(()),
         EmptyStructVariant(EmptyStruct),
         OneFieldStructVariant(OneFieldStruct),
         TwoFieldsStructVariant(TwoFieldsStruct),
@@ -140,7 +140,7 @@ mod test {
 
     #[test]
     fn enum_more_user_structs() {
-        test_case(EnumWithMoreUserStructs::Null);
+        test_case(EnumWithMoreUserStructs::Null(()));
         test_case(EnumWithMoreUserStructs::OneFieldStructVariant(OneFieldStruct { x: 42 }));
         test_case(EnumWithMoreUserStructs::TwoFieldsStructVariant(TwoFieldsStruct { x: 1, y: 1.23 }));
         test_case(EnumWithMoreUserStructs::EmptyStructVariant(EmptyStruct { }));
@@ -155,7 +155,7 @@ mod test {
 
     #[test]
     fn enum_field() {
-        test_case(AllVariants::Null);
+        test_case(AllVariants::Null(()));
         test_case(AllVariants::Int(123));
         test_case(AllVariants::UInt(465));
         test_case(AllVariants::Double(123.0));
@@ -193,5 +193,37 @@ mod test {
         let int_struct_out: GenericStruct::<i64, String> = int_struct_rpcvalue.clone().try_into().expect("Failed to parse");
         assert_eq!(int_struct_in, int_struct_out);
 
+    }
+
+    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
+    enum UnitVariantsEnum {
+        Variant1,
+        Variant2,
+        NoValue(()),
+        Str(String),
+        Int(i64),
+    }
+
+    #[test]
+    fn unit_variants_enum() {
+        test_case(UnitVariantsEnum::Variant1);
+        test_case(UnitVariantsEnum::Variant2);
+        test_case(UnitVariantsEnum::NoValue(()));
+        test_case(UnitVariantsEnum::Str("foo".into()));
+        test_case(UnitVariantsEnum::Int(32));
+
+    }
+
+    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
+    enum UnitVariantsOnlyEnum {
+        Variant1,
+        Variant2,
+    }
+
+    #[test]
+    #[should_panic]
+    fn unit_variants_enum_failing() {
+        let rv = shvproto::RpcValue::from("foo");
+        let _v: UnitVariantsOnlyEnum = rv.try_into().unwrap();
     }
 }

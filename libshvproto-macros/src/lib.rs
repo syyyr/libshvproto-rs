@@ -28,13 +28,15 @@ fn is_option(ty: &syn::Type) -> bool {
 }
 
 fn get_type(ty: &syn::Type) -> Option<String> {
-    let syn::Type::Path(typepath) = ty else {
-        return None
-    };
-    if typepath.qself.is_some() {
-        return None
+    match ty {
+        syn::Type::Path(typepath) if typepath.qself.is_none() => {
+            typepath.path.segments
+            .last()
+            .map(|x| x.ident.to_string())
+        }
+        syn::Type::Tuple(tuple) if tuple.elems.is_empty() => Some("()".to_owned()),
+        _ => None,
     }
-    typepath.path.segments.last().map(|x| x.ident.to_string())
 }
 
 #[proc_macro_derive(TryFromRpcValue, attributes(field_name))]
@@ -160,8 +162,8 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
             let mut map_has_been_matched_as_struct: Option<Vec<(proc_macro2::TokenStream, proc_macro2::TokenStream)>> = None;
             for variant in variants {
                 let variant_ident = &variant.ident;
-                let mut add_type_matcher = |match_arms: &mut Vec<proc_macro2::TokenStream>, rpcvalue_variant_type, block| {
-                    allowed_types.push(quote!{stringify!(#rpcvalue_variant_type)});
+                let mut add_type_matcher = |match_arms: &mut Vec<proc_macro2::TokenStream>, rpcvalue_variant_type, allowed_variant_type, block| {
+                    allowed_types.push(quote!{stringify!(#allowed_variant_type)});
 
                     match_arms.push(quote!{
                         shvproto::Value::#rpcvalue_variant_type => Ok(<#struct_identifier>::#variant_ident #block)
@@ -182,15 +184,16 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
 
                         if let Some(type_identifier) = get_type(source_variant_type) {
                             match type_identifier.as_ref() {
-                                "i64" => add_type_matcher(&mut match_arms_de, quote!{Int(x)}, deref_code.clone()),
-                                "u64" => add_type_matcher(&mut match_arms_de, quote!{UInt(x)}, deref_code.clone()),
-                                "f64" => add_type_matcher(&mut match_arms_de, quote!{Double(x)}, deref_code.clone()),
-                                "bool" => add_type_matcher(&mut match_arms_de, quote!{Bool(x)}, deref_code.clone()),
-                                "DateTime" => add_type_matcher(&mut match_arms_de, quote!{DateTime(x)}, deref_code.clone()),
-                                "Decimal" => add_type_matcher(&mut match_arms_de, quote!{Decimal(x)}, deref_code.clone()),
-                                "String" => add_type_matcher(&mut match_arms_de, quote!{String(x)}, unbox_code.clone()),
-                                "Blob" => add_type_matcher(&mut match_arms_de, quote!{Blob(x)}, unbox_code.clone()),
-                                "List" => add_type_matcher(&mut match_arms_de, quote!{List(x)}, unbox_code.clone()),
+                                "()" => add_type_matcher(&mut match_arms_de, quote!{Null}, quote!{Null}, quote!{(())}),
+                                "i64" => add_type_matcher(&mut match_arms_de, quote!{Int(x)}, quote!{Int}, deref_code.clone()),
+                                "u64" => add_type_matcher(&mut match_arms_de, quote!{UInt(x)}, quote!{UInt}, deref_code.clone()),
+                                "f64" => add_type_matcher(&mut match_arms_de, quote!{Double(x)}, quote!{Double}, deref_code.clone()),
+                                "bool" => add_type_matcher(&mut match_arms_de, quote!{Bool(x)}, quote!{Bool}, deref_code.clone()),
+                                "DateTime" => add_type_matcher(&mut match_arms_de, quote!{DateTime(x)}, quote!{DateTime}, deref_code.clone()),
+                                "Decimal" => add_type_matcher(&mut match_arms_de, quote!{Decimal(x)}, quote!{Decimal}, deref_code.clone()),
+                                "String" => add_type_matcher(&mut match_arms_de, quote!{String(x)}, quote!{String}, unbox_code.clone()),
+                                "Blob" => add_type_matcher(&mut match_arms_de, quote!{Blob(x)}, quote!{Blob}, unbox_code.clone()),
+                                "List" => add_type_matcher(&mut match_arms_de, quote!{List(x)}, quote!{List}, unbox_code.clone()),
                                 "Map" => {
                                     if let Some((matched_variant_ident, matched_variant_type)) = map_has_been_matched_as_map {
                                         panic!("Can't match enum variant {}(Map), because a Map will already be matched as {}({})", quote!{#variant_ident}, quote!{#matched_variant_ident}, quote!{#matched_variant_type});
@@ -202,10 +205,10 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                                             .collect::<Vec<proc_macro2::TokenStream>>();
                                         panic!("Can't match enum variant {}(Map), because a Map will already be matched as one of: {}", quote!{#variant_ident}, quote!{#(#matched_variants),*});
                                     }
-                                    add_type_matcher(&mut match_arms_de,  quote!{Map(x)}, unbox_code.clone());
+                                    add_type_matcher(&mut match_arms_de,  quote!{Map(x)}, quote!{Map}, unbox_code.clone());
                                     map_has_been_matched_as_map = Some((quote!(#variant_ident), quote!{#source_variant_type}));
                                 },
-                                "IMap" => add_type_matcher(&mut match_arms_de,  quote!{IMap(x)}, unbox_code.clone()),
+                                "IMap" => add_type_matcher(&mut match_arms_de,  quote!{IMap(x)}, quote!{IMap}, unbox_code.clone()),
                                 _ => {
                                     if let Some((matched_variant_ident, matched_variant_type)) = map_has_been_matched_as_map {
                                         panic!("Can't match enum variant {}({}) as a Map, because a Map will already be matched as {}({})", quote!{#variant_ident}, quote!{#source_variant_type}, quote!{#matched_variant_ident}, quote!{#matched_variant_type});
@@ -225,9 +228,9 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     },
                     syn::Fields::Unit => {
                         match_arms_ser.extend(quote!{
-                            #struct_identifier::#variant_ident => shvproto::RpcValue::null(),
+                            #struct_identifier::#variant_ident => shvproto::RpcValue::from(stringify!(#variant_ident)),
                         });
-                        add_type_matcher(&mut match_arms_de, quote! {Null}, quote!());
+                        add_type_matcher(&mut match_arms_de, quote!{String(s) if s.as_str() == stringify!(#variant_ident)}, quote!{#variant_ident}, quote!());
                     },
                     syn::Fields::Named(_) => ()
                 }
