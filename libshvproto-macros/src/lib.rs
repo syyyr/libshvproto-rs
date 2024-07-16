@@ -91,7 +91,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
             quote!{
                 impl #struct_generics_with_bounds TryFrom<shvproto::RpcValue> for #struct_identifier #struct_generics_without_bounds {
                     type Error = String;
-                    fn try_from(value: shvproto::RpcValue) -> Result<Self, Self::Error> {
+                    fn try_from(value: shvproto::RpcValue) -> Result<Self, <Self as TryFrom<shvproto::RpcValue>>::Error> {
                         if let shvproto::Value::Map(value) = value.value() {
                             value.try_into()
                         } else {
@@ -102,7 +102,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
 
                 impl #struct_generics_with_bounds TryFrom<&shvproto::RpcValue> for #struct_identifier #struct_generics_without_bounds {
                     type Error = String;
-                    fn try_from(value: &shvproto::RpcValue) -> Result<Self, Self::Error> {
+                    fn try_from(value: &shvproto::RpcValue) -> Result<Self, <Self as TryFrom<&shvproto::RpcValue>>::Error> {
                         if let shvproto::Value::Map(value) = value.value() {
                             value.as_ref().try_into()
                         } else {
@@ -113,14 +113,14 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
 
                 impl #struct_generics_with_bounds  TryFrom<&Box<shvproto::Map>> for #struct_identifier #struct_generics_without_bounds  {
                     type Error = String;
-                    fn try_from(value: &Box<shvproto::Map>) -> Result<Self, Self::Error> {
+                    fn try_from(value: &Box<shvproto::Map>) -> Result<Self, <Self as TryFrom<&Box<shvproto::Map>>>::Error> {
                         value.as_ref().try_into()
                     }
                 }
 
                 impl #struct_generics_with_bounds TryFrom<&shvproto::Map> for #struct_identifier #struct_generics_without_bounds  {
                     type Error = String;
-                    fn try_from(value: &shvproto::Map) -> Result<Self, Self::Error> {
+                    fn try_from(value: &shvproto::Map) -> Result<Self, <Self as TryFrom<&shvproto::Map>>::Error> {
                         let get_key = |key_name| value.get(key_name).ok_or_else(|| "Missing ".to_string() + key_name + " key");
                         let unexpected_keys = value
                             .keys()
@@ -139,7 +139,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
 
                 impl #struct_generics_with_bounds TryFrom<shvproto::Map> for #struct_identifier #struct_generics_without_bounds {
                     type Error = String;
-                    fn try_from(value: shvproto::Map) -> Result<Self, Self::Error> {
+                    fn try_from(value: shvproto::Map) -> Result<Self, <Self as TryFrom<shvproto::Map>>::Error> {
                         Self::try_from(&value)
                     }
                 }
@@ -166,7 +166,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     allowed_types.push(quote!{stringify!(#allowed_variant_type)});
 
                     match_arms.push(quote!{
-                        shvproto::Value::#rpcvalue_variant_type => Ok(<#struct_identifier>::#variant_ident #block)
+                        shvproto::Value::#rpcvalue_variant_type => Ok(#struct_identifier::#variant_ident #block)
                     });
                 };
                 match &variant.fields {
@@ -251,7 +251,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
             quote!{
                 impl TryFrom<shvproto::RpcValue> for #struct_identifier {
                     type Error = String;
-                    fn try_from(value: shvproto::RpcValue) -> Result<Self, Self::Error> {
+                    fn try_from(value: shvproto::RpcValue) -> Result<Self, <Self as TryFrom<shvproto::RpcValue>>::Error> {
                         match value.value() {
                             #(#match_arms_de),*,
                             _ => Err("Couldn't deserialize into '".to_owned() + stringify!(#struct_identifier) + "' enum, allowed types: " + [#(#allowed_types),*].join("|").as_ref() + ", got: " + value.type_name())
@@ -261,7 +261,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
 
                 impl TryFrom<&shvproto::RpcValue> for #struct_identifier {
                     type Error = String;
-                    fn try_from(value: &shvproto::RpcValue) -> Result<Self, Self::Error> {
+                    fn try_from(value: &shvproto::RpcValue) -> Result<Self, <Self as TryFrom<&shvproto::RpcValue>>::Error> {
                         value.clone().try_into()
                     }
                 }
