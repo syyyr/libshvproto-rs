@@ -28,13 +28,15 @@ fn is_option(ty: &syn::Type) -> bool {
 }
 
 fn get_type(ty: &syn::Type) -> Option<String> {
-    let syn::Type::Path(typepath) = ty else {
-        return None
-    };
-    if typepath.qself.is_some() {
-        return None
+    match ty {
+        syn::Type::Path(typepath) if typepath.qself.is_none() => {
+            typepath.path.segments
+            .last()
+            .map(|x| x.ident.to_string())
+        }
+        syn::Type::Tuple(tuple) if tuple.elems.is_empty() => Some("()".to_owned()),
+        _ => None,
     }
-    typepath.path.segments.last().map(|x| x.ident.to_string())
 }
 
 #[proc_macro_derive(TryFromRpcValue, attributes(field_name))]
@@ -182,6 +184,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
 
                         if let Some(type_identifier) = get_type(source_variant_type) {
                             match type_identifier.as_ref() {
+                                "()" => add_type_matcher(&mut match_arms_de, quote!{Null}, quote!{(())}),
                                 "i64" => add_type_matcher(&mut match_arms_de, quote!{Int(x)}, deref_code.clone()),
                                 "u64" => add_type_matcher(&mut match_arms_de, quote!{UInt(x)}, deref_code.clone()),
                                 "f64" => add_type_matcher(&mut match_arms_de, quote!{Double(x)}, deref_code.clone()),
@@ -225,9 +228,9 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     },
                     syn::Fields::Unit => {
                         match_arms_ser.extend(quote!{
-                            #struct_identifier::#variant_ident => shvproto::RpcValue::null(),
+                            #struct_identifier::#variant_ident => shvproto::RpcValue::from(stringify!(#variant_ident)),
                         });
-                        add_type_matcher(&mut match_arms_de, quote! {Null}, quote!());
+                        add_type_matcher(&mut match_arms_de, quote!{String(s) if s.as_str() == stringify!(#variant_ident)}, quote!());
                     },
                     syn::Fields::Named(_) => ()
                 }
