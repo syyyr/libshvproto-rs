@@ -199,6 +199,7 @@ mod test {
     enum UnitVariantsEnum {
         Variant1,
         Variant2,
+        Error,
         NoValue(()),
         Str(String),
         Int(i64),
@@ -208,6 +209,7 @@ mod test {
     fn unit_variants_enum() {
         test_case(UnitVariantsEnum::Variant1);
         test_case(UnitVariantsEnum::Variant2);
+        test_case(UnitVariantsEnum::Error);
         test_case(UnitVariantsEnum::NoValue(()));
         test_case(UnitVariantsEnum::Str("foo".into()));
         test_case(UnitVariantsEnum::Int(32));
