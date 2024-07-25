@@ -239,6 +239,15 @@ impl From<Vec<u8>> for RpcValue {
     }
 }
 
+impl<T> From<Option<T>> for RpcValue
+where
+    RpcValue: From<T>,
+{
+    fn from(value: Option<T>) -> Self {
+        value.map_or_else(RpcValue::null, RpcValue::from)
+    }
+}
+
 #[cfg(feature = "specialization")]
 mod with_specialization {
     use super::{
