@@ -129,6 +129,14 @@ mod test {
         });
     }
 
+    #[test]
+    #[should_panic]
+    fn optional_field_failing() {
+        let _x: OptionalFieldStruct = shvproto::make_map!(
+            "optionalIntField" => "bar"
+        ).try_into().expect("Failed to parse");
+    }
+
     fn test_case<T>(v: T)
     where
         T: TryFrom<shvproto::RpcValue> + Into<shvproto::RpcValue> + std::fmt::Debug + Clone + PartialEq,

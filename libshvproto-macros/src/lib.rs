@@ -70,7 +70,10 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
 
                 if is_option(&field.ty) {
                     struct_initializers.extend(quote!{
-                        #identifier: get_key(#field_name).ok().and_then(|x| x.try_into().ok()),
+                        #identifier: match get_key(#field_name).ok() {
+                            Some(x) => Some(x.try_into().map_err(|e| format!("Cannot parse `{}` field: {e}", #field_name))?),
+                            None => None,
+                        },
                     });
                     rpcvalue_inserts.extend(quote!{
                         if let Some(val) = value.#identifier {
@@ -79,7 +82,8 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     });
                 } else {
                     struct_initializers.extend(quote!{
-                        #identifier: get_key(#field_name).and_then(|x| x.try_into())?,
+                        #identifier: get_key(#field_name)
+                            .and_then(|x| x.try_into().map_err(|e| format!("Cannot parse `{}` field: {e}", #field_name)))?,
                     });
                     rpcvalue_inserts.extend(quote!{
                         map.insert(#field_name.into(), value.#identifier.into());
