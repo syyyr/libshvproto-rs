@@ -369,7 +369,8 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                         .and_then(|val| val
                             .try_into()
                             .map_err(|e: String| "Cannot parse `".to_string() + #tag_key + "` field: " + &e)
-                        )?;
+                        )
+                        .map_err(|e| "Cannot get tag: ".to_string() + &e)?;
 
                     match tag.as_str() {
                         #(#match_arms_tags)*
