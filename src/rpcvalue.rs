@@ -700,6 +700,7 @@ macro_rules! try_from_rpc_value {
 }
 
 try_from_rpc_value_ref!(());
+try_from_rpc_value!(());
 try_from_rpc_value_ref!(bool);
 try_from_rpc_value!(bool);
 try_from_rpc_value_ref!(&'a str);
