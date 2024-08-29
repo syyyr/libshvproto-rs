@@ -1,4 +1,6 @@
 use convert_case::{Case, Casing};
+use syn::punctuated::Punctuated;
+use syn::{Meta, Token};
 
 use core::panic;
 
@@ -90,7 +92,33 @@ fn field_to_initializers(
     (struct_initializer, rpcvalue_insert)
 }
 
-#[proc_macro_derive(TryFromRpcValue, attributes(field_name))]
+struct StructAttributes {
+    tag: Option<String>,
+}
+
+fn parse_struct_attributes(attrs: &Vec<syn::Attribute>) -> syn::Result<StructAttributes> {
+    let mut tag: Option<String> = None;
+    for attr in attrs {
+        if attr.path().is_ident("rpcvalue") {
+            let nested = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+            for meta in &nested {
+                match meta {
+                    // #[rpcvalue(tag = "type")]
+                    Meta::NameValue(name_value) if name_value.path.is_ident("tag") => {
+                        let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(tag_lit), .. }) = &name_value.value else {
+                            return Err(syn::Error::new_spanned(meta, "tag value is not a string literal"));
+                        };
+                        tag = Some(tag_lit.value());
+                    }
+                    _ => return Err(syn::Error::new_spanned(meta, "unrecognized attributes")),
+                }
+            }
+        }
+    }
+    Ok(StructAttributes { tag })
+}
+
+#[proc_macro_derive(TryFromRpcValue, attributes(field_name,rpcvalue))]
 pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(item as syn::DeriveInput);
     let struct_identifier = &input.ident;
@@ -194,8 +222,8 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
             let mut allowed_types = vec![];
             let mut custom_type_matchers = vec![];
             let mut match_arms_tags = vec![];
-            // TODO: get tag from attributes, support for external tags
-            let tag_key = "type";
+            // TODO: support for external tags
+            let tag_key = parse_struct_attributes(&input.attrs).unwrap().tag.unwrap_or("type".to_string());
             let mut map_has_been_matched_as_map: Option<(proc_macro2::TokenStream, proc_macro2::TokenStream)> = None;
             let mut map_has_been_matched_as_struct: Option<Vec<(proc_macro2::TokenStream, proc_macro2::TokenStream)>> = None;
             for variant in variants {

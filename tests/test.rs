@@ -291,4 +291,54 @@ mod test {
         }.into();
         let _v: EnumWithNamedFields = rv.try_into().unwrap();
     }
+
+    #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
+    #[rpcvalue(tag = "os")]
+    pub enum EnumWithNamedFieldsCustomTag {
+        Linux { shell: String, user: String, uptime_days: i32, },
+        MacOsX { shell: String, user: String, uptime_days: i32, },
+        Windows { user: Option<String>, number_of_failures: i64 },
+    }
+
+    #[test]
+    fn enum_with_named_fields_custom_tag() {
+        test_case(EnumWithNamedFields::Linux { user: "alice".to_string(), shell: "bash".to_string(), uptime_days: 888 });
+        test_case(EnumWithNamedFields::MacOsX { shell: "zsh".to_string(), user: "bob".to_string(), uptime_days: 666, });
+        test_case(EnumWithNamedFields::Windows { user: Some("boomer".to_string()), number_of_failures: 12 << 33 });
+    }
+
+    #[test]
+    fn enum_with_named_fields_custom_tag_tryinto() {
+        let rv: shvproto::RpcValue = shvproto::make_map!{
+            "os" => "linux",
+            "user" => "alice",
+            "shell" => "bash",
+            "uptimeDays" => 10,
+        }.into();
+        let _v: EnumWithNamedFieldsCustomTag = rv.try_into().unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn enum_with_named_fields_custom_tag_type_mismatch() {
+        let rv: shvproto::RpcValue = shvproto::make_map!{
+            "os" => 0,
+            "user" => "alice",
+            "shell" => "bash",
+            "uptimeDays" => 10,
+        }.into();
+        let _v: EnumWithNamedFieldsCustomTag = rv.try_into().unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn enum_with_named_fields_custom_tag_missing() {
+        let rv: shvproto::RpcValue = shvproto::make_map!{
+            "type" => "linux",
+            "user" => "alice",
+            "shell" => "bash",
+            "uptimeDays" => 10,
+        }.into();
+        let _v: EnumWithNamedFieldsCustomTag = rv.try_into().unwrap();
+    }
 }
