@@ -292,6 +292,18 @@ mod test {
         let _v: EnumWithNamedFields = rv.try_into().unwrap();
     }
 
+    #[test]
+    fn enum_with_named_fields_tryinto() {
+        let rv: shvproto::RpcValue = shvproto::make_map!{
+            "linux" => shvproto::make_map!{
+                "user" => "alice",
+                "shell" => "bash",
+                "uptimeDays" => 10,
+            },
+        }.into();
+        let _v: EnumWithNamedFields = rv.try_into().unwrap();
+    }
+
     #[derive(Clone,Debug,PartialEq,TryFromRpcValue)]
     #[rpcvalue(tag = "os")]
     pub enum EnumWithNamedFieldsCustomTag {
@@ -302,9 +314,9 @@ mod test {
 
     #[test]
     fn enum_with_named_fields_custom_tag() {
-        test_case(EnumWithNamedFields::Linux { user: "alice".to_string(), shell: "bash".to_string(), uptime_days: 888 });
-        test_case(EnumWithNamedFields::MacOsX { shell: "zsh".to_string(), user: "bob".to_string(), uptime_days: 666, });
-        test_case(EnumWithNamedFields::Windows { user: Some("boomer".to_string()), number_of_failures: 12 << 33 });
+        test_case(EnumWithNamedFieldsCustomTag::Linux { user: "alice".to_string(), shell: "bash".to_string(), uptime_days: 888 });
+        test_case(EnumWithNamedFieldsCustomTag::MacOsX { shell: "zsh".to_string(), user: "bob".to_string(), uptime_days: 666, });
+        test_case(EnumWithNamedFieldsCustomTag::Windows { user: Some("boomer".to_string()), number_of_failures: 12 << 33 });
     }
 
     #[test]

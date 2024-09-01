@@ -92,12 +92,13 @@ fn field_to_initializers(
     (struct_initializer, rpcvalue_insert)
 }
 
+#[derive(Default)]
 struct StructAttributes {
     tag: Option<String>,
 }
 
 fn parse_struct_attributes(attrs: &Vec<syn::Attribute>) -> syn::Result<StructAttributes> {
-    let mut tag: Option<String> = None;
+    let mut res = StructAttributes::default();
     for attr in attrs {
         if attr.path().is_ident("rpcvalue") {
             let nested = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
@@ -108,14 +109,14 @@ fn parse_struct_attributes(attrs: &Vec<syn::Attribute>) -> syn::Result<StructAtt
                         let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(tag_lit), .. }) = &name_value.value else {
                             return Err(syn::Error::new_spanned(meta, "tag value is not a string literal"));
                         };
-                        tag = Some(tag_lit.value());
+                        res.tag = Some(tag_lit.value());
                     }
                     _ => return Err(syn::Error::new_spanned(meta, "unrecognized attributes")),
                 }
             }
         }
     }
-    Ok(StructAttributes { tag })
+    Ok(res)
 }
 
 #[proc_macro_derive(TryFromRpcValue, attributes(field_name,rpcvalue))]
@@ -222,8 +223,7 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
             let mut allowed_types = vec![];
             let mut custom_type_matchers = vec![];
             let mut match_arms_tags = vec![];
-            // TODO: support for external tags
-            let tag_key = parse_struct_attributes(&input.attrs).unwrap().tag.unwrap_or("type".to_string());
+            let struct_attributes = parse_struct_attributes(&input.attrs).unwrap();
             let mut map_has_been_matched_as_map: Option<(proc_macro2::TokenStream, proc_macro2::TokenStream)> = None;
             let mut map_has_been_matched_as_struct: Option<Vec<(proc_macro2::TokenStream, proc_macro2::TokenStream)>> = None;
             for variant in variants {
@@ -320,10 +320,6 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                         let mut field_idents = vec![];
                         let variant_ident_name = variant_ident.to_string().to_case(Case::Camel);
 
-                        rpcvalue_inserts.extend(quote! {
-                            map.insert(#tag_key.into(), #variant_ident_name.into());
-                        });
-
                         for field in &variant_fields.named {
                             let field_ident = field.ident.as_ref().expect("Missing field identifier");
                             let (struct_initializer, rpcvalue_insert) = field_to_initializers(
@@ -336,6 +332,20 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                             struct_initializers.extend(struct_initializer);
                             rpcvalue_inserts.extend(rpcvalue_insert);
                             field_idents.push(field_ident);
+                        }
+
+                        if let Some(tag_key) = &struct_attributes.tag {
+                            rpcvalue_inserts.extend(quote! {
+                                map.insert(#tag_key.into(), #variant_ident_name.into());
+                            });
+                        } else {
+                            rpcvalue_inserts = quote! {
+                                map.insert(#variant_ident_name.into(), {
+                                    let mut map = shvproto::rpcvalue::Map::new();
+                                    #rpcvalue_inserts
+                                    map.into()
+                                });
+                            };
                         }
 
                         match_arms_ser.extend(quote!{
@@ -360,17 +370,27 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
             }
 
             if !match_arms_tags.is_empty() {
+                if let Some(tag_key) = &struct_attributes.tag {
+                    custom_type_matchers.push(quote! {
+                        let tag: String = x.get(#tag_key)
+                            .ok_or_else(|| "Missing `".to_string() + #tag_key + "` key")
+                            .and_then(|val| val
+                                .try_into()
+                                .map_err(|e: String| "Cannot parse `".to_string() + #tag_key + "` field: " + &e)
+                            )
+                            .map_err(|e| "Cannot get tag: ".to_string() + &e)?;
+                        });
+                    } else {
+                        custom_type_matchers.push(quote! {
+                            let (tag, val) = x.iter().nth(0).ok_or_else(|| "Cannot get tag from an empty Map")?;
+                            let x: shvproto::rpcvalue::Map = val.try_into()?;
+                        });
+                }
+
                 custom_type_matchers.push(quote! {
                     let get_key = |key_name| x
                         .get(key_name)
                         .ok_or_else(|| "Missing `".to_string() + key_name + "` key");
-
-                    let tag: String = get_key(#tag_key)
-                        .and_then(|val| val
-                            .try_into()
-                            .map_err(|e: String| "Cannot parse `".to_string() + #tag_key + "` field: " + &e)
-                        )
-                        .map_err(|e| "Cannot get tag: ".to_string() + &e)?;
 
                     match tag.as_str() {
                         #(#match_arms_tags)*
