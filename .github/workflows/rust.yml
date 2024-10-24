@@ -17,8 +17,10 @@ jobs:
         toolchain:
           - channel: stable
             cargo_args: --verbose --all-targets
+            clippy_args: ""
           - channel: nightly
             cargo_args: --verbose --all-targets --all-features
+            clippy_args: --allow clippy::needless_lifetimes
 
     runs-on: ubuntu-latest
 
@@ -30,7 +32,7 @@ jobs:
         rustup default ${{ matrix.toolchain.channel }} &&
         rustup component add clippy
     - name: Clippy
-      run: cargo clippy ${{ matrix.toolchain.cargo_args }}
+      run: cargo clippy ${{ matrix.toolchain.cargo_args }} -- ${{matrix.toolchain.clippy_args}}
     - name: Build
       run: cargo build ${{ matrix.toolchain.cargo_args }}
     - name: Run tests
