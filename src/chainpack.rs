@@ -193,9 +193,8 @@ impl<'a, W> ChainPackWriter<'a, W>
     }
     fn write_decimal(&mut self, decimal: &Decimal) -> WriteResult {
         let cnt = self.write_byte(PackingSchema::Decimal as u8)?;
-        let (mantisa, exponent) = decimal.decode();
-        self.write_int_data(mantisa)?;
-        self.write_int_data(exponent as i64)?;
+        self.write_int_data(decimal.mantissa())?;
+        self.write_int_data(decimal.exponent() as i64)?;
         Ok(self.byte_writer.count() - cnt)
     }
     fn write_datetime(&mut self, dt: &DateTime) -> WriteResult {

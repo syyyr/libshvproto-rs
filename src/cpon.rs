@@ -299,8 +299,7 @@ impl<'a, W> CponWriter<'a, W>
 impl<'a, W> Writer for CponWriter<'a, W>
     where W: Write
 {
-    fn write(&mut self, val: &RpcValue) -> WriteResult
-    {
+    fn write(&mut self, val: &RpcValue) -> WriteResult {
         let cnt = self.byte_writer.count();
         let mm = val.meta();
         if !mm.is_empty() {
@@ -309,8 +308,7 @@ impl<'a, W> Writer for CponWriter<'a, W>
         self.write_value(val.value())?;
         Ok(self.byte_writer.count() - cnt)
     }
-    fn write_meta(&mut self, map: &MetaMap) -> WriteResult
-    {
+    fn write_meta(&mut self, map: &MetaMap) -> WriteResult {
         let cnt: usize = self.byte_writer.count();
         let is_oneliner = Self::is_oneliner_meta(map);
         self.write_byte(b'<')?;
@@ -335,8 +333,7 @@ impl<'a, W> Writer for CponWriter<'a, W>
         self.write_byte(b'>')?;
         Ok(self.byte_writer.count() - cnt)
     }
-    fn write_value(&mut self, val: &Value) -> WriteResult
-    {
+    fn write_value(&mut self, val: &Value) -> WriteResult {
         let cnt: usize = self.byte_writer.count();
         match val {
             Value::Null => self.write_bytes("null".as_bytes()),
@@ -368,7 +365,12 @@ pub struct CponReader<'a, R>
 {
     byte_reader: ByteReader<'a, R>,
 }
-
+struct ReadInt {
+    value: i64,
+    digit_cnt: i32,
+    is_negative: bool,
+    is_overflow: bool,
+}
 impl<'a, R> CponReader<'a, R>
     where R: Read
 {
@@ -538,16 +540,21 @@ impl<'a, R> CponReader<'a, R>
         }
         Ok(Value::from(buff))
     }
-    fn read_int(&mut self, no_signum: bool) -> Result<(u64, bool, i32), ReadError>
-    {
+    fn read_int(&mut self, init_val: i64, no_signum: bool) -> Result<ReadInt, ReadError> {
         let mut base = 10;
-        let mut val: u64 = 0;
-        let mut neg = false;
+        let mut value: i64 = init_val;
+        let mut is_negative = false;
         let mut n = 0;
         let mut digit_cnt = 0;
+        let mut is_overflow = false;
+        fn add_digit(val: i64, base: i64, digit: u8) -> Option<i64> {
+            let res = val.checked_mul(base)?;
+            let res = res.checked_add(digit as i64)?;
+            Some(res)
+        }
         loop {
             let b = self.peek_byte();
-            match b {
+            let digit = match b {
                 0 => break,
                 b'+' | b'-' => {
                     if n != 0 {
@@ -558,11 +565,12 @@ impl<'a, R> CponReader<'a, R>
                     }
                     let b = self.get_byte()?;
                     if b == b'-' {
-                        neg = true;
+                        is_negative = true;
                     }
+                    None
                 }
-                b'x' => {
-                    if n == 1 && val != 0 {
+                b'x' | b'X' => {
+                    if n == 1 && value != 0 {
                         break;
                     }
                     if n != 1 {
@@ -570,66 +578,75 @@ impl<'a, R> CponReader<'a, R>
                     }
                     self.get_byte()?;
                     base = 16;
+                    None
                 }
                 b'0' ..= b'9' => {
                     self.get_byte()?;
-                    val *= base;
-                    //log::debug!("val: {:x} {}", val, (b as i64));
-                    val += (b - b'0') as u64;
-                    digit_cnt += 1;
+                    Some(b - b'0')
                 }
                 b'A' ..= b'F' => {
                     if base != 16 {
                         break;
                     }
                     self.get_byte()?;
-                    val *= base;
-                    val += (b - b'A') as u64 + 10;
-                    digit_cnt += 1;
+                    Some(10 + (b - b'A'))
                 }
                 b'a' ..= b'f' => {
                     if base != 16 {
                         break;
                     }
                     self.get_byte()?;
-                    val *= base;
-                    val += (b - b'a') as u64 + 10;
-                    digit_cnt += 1;
+                    Some(10 + (b - b'a'))
                 }
                 _ => break,
+            };
+            if let Some(digit) = digit {
+                if !is_overflow {
+                    if let Some(val) = add_digit(value, base, digit) {
+                        value = val;
+                        digit_cnt += 1;
+                    } else {
+                        is_overflow = true;
+                    }
+                }
             }
             n += 1;
         }
-        Ok((val, neg, digit_cnt))
+        Ok(ReadInt {
+            value,
+            digit_cnt,
+            is_negative,
+            is_overflow,
+        })
     }
-    fn read_number(&mut self) -> Result<Value, ReadError>
-    {
-        let mut mantisa;
+    fn read_number(&mut self) -> Result<Value, ReadError> {
+        let mut mantissa;
         let mut exponent = 0;
-        let mut decimals = 0;
         let mut dec_cnt = 0;
         let mut is_decimal = false;
         let mut is_uint = false;
-        let mut is_neg = false;
+        let mut is_negative = false;
+        let mut decimal_overflow = false;
 
         let b = self.peek_byte();
         if b == b'+' {
-            is_neg = false;
+            is_negative = false;
             self.get_byte()?;
         }
         else if b == b'-' {
-            is_neg = true;
+            is_negative = true;
             self.get_byte()?;
         }
 
-        let (n, _, digit_cnt) = self.read_int(false)?;
+        let ReadInt{ value, digit_cnt, is_overflow, .. } = self.read_int(0, false)?;
+        decimal_overflow = decimal_overflow || is_overflow;
         if digit_cnt == 0 {
             return Err(self.make_error("Number should contain at least one digit.", ReadErrorReason::InvalidCharacter))
         }
-        mantisa = n;
+        mantissa = value;
         #[derive(PartialEq)]
-        enum State { Mantisa, Decimals,  }
-        let mut state = State::Mantisa;
+        enum State { Mantissa, Decimals,  }
+        let mut state = State::Mantissa;
         loop {
             let b = self.peek_byte();
             match b {
@@ -639,52 +656,55 @@ impl<'a, R> CponReader<'a, R>
                     break;
                 }
                 b'.' => {
-                    if state != State::Mantisa {
+                    if state != State::Mantissa {
                         return Err(self.make_error("Unexpected decimal point.", ReadErrorReason::InvalidCharacter))
                     }
                     state = State::Decimals;
                     is_decimal = true;
                     self.get_byte()?;
-                    let (n, _, digit_cnt) = self.read_int(true)?;
-                    decimals = n;
+                    let ReadInt{ value, digit_cnt, is_overflow, .. } = self.read_int(mantissa, true)?;
+                    decimal_overflow = decimal_overflow || is_overflow;
+                    mantissa = value;
                     dec_cnt = digit_cnt as i64;
                 }
                 b'e' | b'E' => {
-                    if state != State::Mantisa && state != State::Decimals {
-                        return Err(self.make_error("Unexpected exponet mark.", ReadErrorReason::InvalidCharacter))
+                    if state != State::Mantissa && state != State::Decimals {
+                        return Err(self.make_error("Unexpected exponent mark.", ReadErrorReason::InvalidCharacter))
                     }
                     //state = State::Exponent;
                     is_decimal = true;
                     self.get_byte()?;
-                    let (n, neg, digit_cnt) = self.read_int(false)?;
-                    exponent = n as i64;
-                    if neg { exponent = -exponent; }
+                    let ReadInt{ value, digit_cnt, is_negative, is_overflow } = self.read_int(0, false)?;
+                    decimal_overflow = decimal_overflow || is_overflow;
+                    exponent = value;
+                    if is_negative { exponent = -exponent; }
                     if digit_cnt == 0 {
-                        return Err(self.make_error("Malformed number exponetional part.", ReadErrorReason::InvalidCharacter))
+                        return Err(self.make_error("Malformed number exponential part.", ReadErrorReason::InvalidCharacter))
                     }
                     break;
                 }
                 _ => { break; }
             }
         }
+        let mantissa = if is_negative { -mantissa } else { mantissa };
         if is_decimal {
-            for _i in 0 .. dec_cnt {
-                mantisa *= 10;
+            if decimal_overflow && dec_cnt == 0 {
+                return Ok(Value::from(Decimal::new(if is_negative {i64::MIN} else {i64::MAX}, 0)))
             }
-            mantisa += decimals;
-            let mut snum = mantisa as i64;
-            if is_neg { snum = -snum }
-            return Ok(Value::from(Decimal::new(snum, (exponent - dec_cnt) as i8)))
+            return Ok(Value::from(Decimal::new(mantissa, (exponent - dec_cnt) as i8)))
         }
         if is_uint {
-            return Ok(Value::from(mantisa))
+            if decimal_overflow {
+                return Ok(Value::from(i64::MAX as u64))
+            }
+            return Ok(Value::from(mantissa as u64))
         }
-        let mut snum = mantisa as i64;
-        if is_neg { snum = -snum }
-        Ok(Value::from(snum))
+        if decimal_overflow {
+            return Ok(Value::from(if is_negative { i64::MIN } else { i64::MAX }))
+        }
+        Ok(Value::from(mantissa))
     }
-    fn read_list(&mut self) -> Result<Value, ReadError>
-    {
+    fn read_list(&mut self) -> Result<Value, ReadError> {
         let mut lst = Vec::new();
         self.get_byte()?; // eat '['
         loop {
@@ -742,8 +762,8 @@ impl<'a, R> CponReader<'a, R>
                 self.get_byte()?;
                 break;
             }
-            let (k, neg, _) = self.read_int(false)?;
-            let key = if neg { -(k as i64) } else { k as i64 };
+            let ReadInt{ value, is_negative, .. } = self.read_int(0, false)?;
+            let key = if is_negative { -value } else { value };
             self.skip_white_insignificant()?;
             let val = self.read()?;
             map.insert(key as i32, val);
@@ -850,25 +870,32 @@ mod test
     use crate::cpon::CponReader;
     use crate::reader::Reader;
     use crate::rpcvalue::Map;
-
     #[test]
     fn test_read() {
-        assert!(RpcValue::from_cpon("null").unwrap().is_null());
-        assert!(!RpcValue::from_cpon("false").unwrap().as_bool());
-        assert!(RpcValue::from_cpon("true").unwrap().as_bool());
+        fn test_cpon_round_trip<T>(cpon: &str, val: T) where RpcValue: From<T> {
+            let rv1 = RpcValue::from_cpon(cpon).unwrap();
+            let rv2 = RpcValue::from(val);
+            assert_eq!(rv1, rv2);
+            let cpon2 = rv1.to_cpon();
+            assert_eq!(cpon, &cpon2);
+        }
+        test_cpon_round_trip("null", RpcValue::null());
+        test_cpon_round_trip("false", false);
+        test_cpon_round_trip("true", true);
         assert_eq!(RpcValue::from_cpon("0").unwrap().as_i32(), 0);
         assert_eq!(RpcValue::from_cpon("123").unwrap().as_i32(), 123);
-        assert_eq!(RpcValue::from_cpon("-123").unwrap().as_i32(), -123);
+        test_cpon_round_trip("-123", -123);
         assert_eq!(RpcValue::from_cpon("+123").unwrap().as_i32(), 123);
-        assert_eq!(RpcValue::from_cpon("123u").unwrap().as_u32(), 123u32);
+        test_cpon_round_trip("123u", 123u32);
         assert_eq!(RpcValue::from_cpon("0xFF").unwrap().as_i32(), 255);
         assert_eq!(RpcValue::from_cpon("-0x1000").unwrap().as_i32(), -4096);
-        assert_eq!(RpcValue::from_cpon("123.4").unwrap().as_decimal(), Decimal::new(1234, -1));
-        assert_eq!(RpcValue::from_cpon("0.123").unwrap().as_decimal(), Decimal::new(123, -3));
+        test_cpon_round_trip("123.4", Decimal::new(1234, -1));
+        test_cpon_round_trip("0.123", Decimal::new(123, -3));
         assert_eq!(RpcValue::from_cpon("-0.123").unwrap().as_decimal(), Decimal::new(-123, -3));
         assert_eq!(RpcValue::from_cpon("0e0").unwrap().as_decimal(), Decimal::new(0, 0));
         assert_eq!(RpcValue::from_cpon("0.123e3").unwrap().as_decimal(), Decimal::new(123, 0));
-        assert_eq!(RpcValue::from_cpon("1000000.").unwrap().as_decimal(), Decimal::new(1000000, 0));
+        test_cpon_round_trip("1000000.", Decimal::new(1000000, 0));
+        test_cpon_round_trip("50.031387414025325", Decimal::new(50031387414025325, -15));
         assert_eq!(RpcValue::from_cpon(r#""foo""#).unwrap().as_str(), "foo");
         assert_eq!(RpcValue::from_cpon(r#""ěščřžýáí""#).unwrap().as_str(), "ěščřžýáí");
         assert_eq!(RpcValue::from_cpon("b\"foo\tbar\nbaz\"").unwrap().as_blob(), b"foo\tbar\nbaz");
@@ -946,11 +973,20 @@ mod test
         mm2.insert(1, RpcValue::from(123));
         mm2.insert(2, RpcValue::from("baz"));
         assert_eq!(mm1, mm2);
-
-        //let cpon1 = r#"<1:123,2:"foo","bar":"baz">42"#;
-        //let rv = cpon1.to_rpcvalue().unwrap();
-        //let cpon2 = rv.to_cpon_string().unwrap();
-        //assert_eq!(cpon1, cpon2);
     }
-
+    #[test]
+    fn test_read_too_long_numbers() {
+        // read very long decimal without overflow error, value is capped
+        assert_eq!(RpcValue::from_cpon("123456789012345678901234567890123456789012345678901234567890").unwrap().as_int(), i64::MAX);
+        assert_eq!(RpcValue::from_cpon("9223372036854775806").unwrap().as_int(), 9223372036854775806_i64);
+        assert_eq!(RpcValue::from_cpon("9223372036854775807").unwrap().as_int(), i64::MAX);
+        assert_eq!(RpcValue::from_cpon("9223372036854775808").unwrap().as_int(), i64::MAX);
+        assert_eq!(RpcValue::from_cpon("-123456789012345678901234567890123456789012345678901234567890").unwrap().as_int(), i64::MIN);
+        assert_eq!(RpcValue::from_cpon("-9223372036854775807").unwrap().as_int(), -9223372036854775807_i64);
+        assert_eq!(RpcValue::from_cpon("-9223372036854775808").unwrap().as_int(), i64::MIN);
+        assert_eq!(RpcValue::from_cpon("-9223372036854775809").unwrap().as_int(), i64::MIN);
+        assert_eq!(RpcValue::from_cpon("1.23456789012345678901234567890123456789012345678901234567890").unwrap().as_decimal(), Decimal::new(1234567890123456789, -18));
+        assert_eq!(RpcValue::from_cpon("12345678901234567890123456789012345678901234567890123456.7890").unwrap().as_decimal(), Decimal::new(i64::MAX, 0));
+        assert_eq!(RpcValue::from_cpon("123456789012345678901234567890123456789012345678901234567890.").unwrap().as_decimal(), Decimal::new(i64::MAX, 0));
+    }
 }

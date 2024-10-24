@@ -3,38 +3,31 @@
 /// mantisa: 56, exponent: 8;
 /// I'm storing whole Decimal in one i64 to keep size_of RpcValue == 24
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub struct Decimal (i64);
+pub struct Decimal {
+    mantissa: i64,
+    exponent: i8,
+}
 
 impl Decimal {
 
-    pub fn new(mantisa: i64, exponent: i8) -> Decimal {
-        //log::debug!("\t mantisa: {} {:b}", mantisa, mantisa);
-        let mut n = mantisa << 8;
-        //log::debug!("\t 1antisa: {} {:b}", n, n);
-        n |= (exponent as i64) & 0xff;
-        //log::debug!("\t 2antisa: {} {:b}", n, n);
-        Decimal(n)
-    }
-    pub fn decode(&self) -> (i64, i8) {
-        let m = self.0 >> 8;
-        let e = self.0 as i8;
-        (m, e)
+    pub fn new(mantissa: i64, exponent: i8) -> Decimal {
+        Decimal{ mantissa, exponent }
     }
     pub fn mantissa(&self) -> i64 {
-        self.decode().0
+        self.mantissa
     }
     pub fn exponent(&self) -> i8 {
-        self.decode().1
+        self.exponent
     }
     pub fn to_cpon_string(&self) -> String {
         let mut neg = false;
-        let (mut mantisa, exponent) = self.decode();
-        if mantisa < 0 {
-            mantisa = -mantisa;
+        let (mut mantissa, exponent) = (self.mantissa, self.exponent);
+        if mantissa < 0 {
+            mantissa = -mantissa;
             neg = true;
         }
         //let buff: Vec<u8> = Vec::new();
-        let mut s = mantisa.to_string();
+        let mut s = mantissa.to_string();
 
         let n = s.len() as i8;
         let dec_places = -exponent;
@@ -70,17 +63,16 @@ impl Decimal {
         s
     }
     pub fn to_f64(&self) -> f64 {
-        let (m, e) = self.decode();
-        let mut d = m as f64;
+        let mut d = self.mantissa as f64;
         // We probably don't want to call .cmp() because of performance loss
         #[allow(clippy::comparison_chain)]
-        if e < 0 {
-            for _ in e .. 0 {
+        if self.exponent < 0 {
+            for _ in self.exponent .. 0 {
                 d /= 10.;
             }
         }
-        else if e > 0 {
-            for _ in 0 .. e {
+        else if self.exponent > 0 {
+            for _ in 0 .. self.exponent {
                 d *= 10.;
             }
         }
