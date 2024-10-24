@@ -239,6 +239,15 @@ impl From<Vec<u8>> for RpcValue {
     }
 }
 
+impl<T> From<Option<T>> for RpcValue
+where
+    RpcValue: From<T>,
+{
+    fn from(value: Option<T>) -> Self {
+        value.map_or_else(RpcValue::null, RpcValue::from)
+    }
+}
+
 #[cfg(feature = "specialization")]
 mod with_specialization {
     use super::{
@@ -648,6 +657,23 @@ impl TryFrom<Value> for chrono::NaiveDateTime {
     }
 }
 
+impl TryFrom<&Value> for chrono::DateTime<chrono::FixedOffset> {
+    type Error = String;
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::DateTime(val) => Ok(val.to_chrono_datetime()),
+            _ => Err(format_err_try_from("DateTime", value.type_name()))
+        }
+    }
+}
+
+impl TryFrom<Value> for chrono::DateTime<chrono::FixedOffset> {
+    type Error = String;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Self::try_from(&value)
+    }
+}
+
 // Cannot use generic trait implementation here.
 // See `rustc --explain E0210`
 macro_rules! try_from_rpc_value_ref {
@@ -674,6 +700,7 @@ macro_rules! try_from_rpc_value {
 }
 
 try_from_rpc_value_ref!(());
+try_from_rpc_value!(());
 try_from_rpc_value_ref!(bool);
 try_from_rpc_value!(bool);
 try_from_rpc_value_ref!(&'a str);
@@ -713,7 +740,8 @@ try_from_rpc_value_ref!(datetime::DateTime);
 try_from_rpc_value!(datetime::DateTime);
 try_from_rpc_value_ref!(chrono::NaiveDateTime);
 try_from_rpc_value!(chrono::NaiveDateTime);
-
+try_from_rpc_value_ref!(chrono::DateTime<chrono::FixedOffset>);
+try_from_rpc_value!(chrono::DateTime<chrono::FixedOffset>);
 
 impl<T> TryFrom<&RpcValue> for Vec<T>
 where
