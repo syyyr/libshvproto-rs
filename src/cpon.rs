@@ -978,13 +978,25 @@ mod test
     fn test_read_too_long_numbers() {
         // read very long decimal without overflow error, value is capped
         assert_eq!(RpcValue::from_cpon("123456789012345678901234567890123456789012345678901234567890").unwrap().as_int(), i64::MAX);
+
         assert_eq!(RpcValue::from_cpon("9223372036854775806").unwrap().as_int(), 9223372036854775806_i64);
         assert_eq!(RpcValue::from_cpon("9223372036854775807").unwrap().as_int(), i64::MAX);
         assert_eq!(RpcValue::from_cpon("9223372036854775808").unwrap().as_int(), i64::MAX);
+
+        assert_eq!(RpcValue::from_cpon("0x7FFFFFFFFFFFFFFE").unwrap().as_int(), 0x7FFFFFFFFFFFFFFE_i64);
+        assert_eq!(RpcValue::from_cpon("0x7FFFFFFFFFFFFFFF").unwrap().as_int(), i64::MAX);
+        assert_eq!(RpcValue::from_cpon("0x8000000000000000").unwrap().as_int(), i64::MAX);
+
         assert_eq!(RpcValue::from_cpon("-123456789012345678901234567890123456789012345678901234567890").unwrap().as_int(), i64::MIN);
+
         assert_eq!(RpcValue::from_cpon("-9223372036854775807").unwrap().as_int(), -9223372036854775807_i64);
         assert_eq!(RpcValue::from_cpon("-9223372036854775808").unwrap().as_int(), i64::MIN);
         assert_eq!(RpcValue::from_cpon("-9223372036854775809").unwrap().as_int(), i64::MIN);
+
+        assert_eq!(RpcValue::from_cpon("-0x7FFFFFFFFFFFFFFF").unwrap().as_int(), -0x7FFFFFFFFFFFFFFF_i64);
+        assert_eq!(RpcValue::from_cpon("-0x8000000000000000").unwrap().as_int(), i64::MIN);
+        assert_eq!(RpcValue::from_cpon("-0x8000000000000001").unwrap().as_int(), i64::MIN);
+
         assert_eq!(RpcValue::from_cpon("1.23456789012345678901234567890123456789012345678901234567890").unwrap().as_decimal(), Decimal::new(1234567890123456789, -18));
         assert_eq!(RpcValue::from_cpon("12345678901234567890123456789012345678901234567890123456.7890").unwrap().as_decimal(), Decimal::new(i64::MAX, 0));
         assert_eq!(RpcValue::from_cpon("123456789012345678901234567890123456789012345678901234567890.").unwrap().as_decimal(), Decimal::new(i64::MAX, 0));

@@ -101,8 +101,8 @@ impl DateTime {
                             return Err(format!("Invalid DateTime TZ part: '{}, date time: {}", rest, iso_str))
                         }
                     }
-
-                    let dt = DateTime::from_epoch_msec_tz((ndt.and_utc().timestamp() - (offset as i64)) * 1000 + (msec as i64), offset);
+                    let epoch_msec = (ndt.and_utc().timestamp() - (offset as i64)) * 1000 + (msec as i64);
+                    let dt = DateTime::from_epoch_msec_tz(epoch_msec, offset);
                     return Ok(dt)
                 }
             }
