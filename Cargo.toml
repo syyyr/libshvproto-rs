@@ -2,7 +2,7 @@ workspace = { members = ["libshvproto-macros"] }
 
 [package]
 name = "shvproto"
-version = "3.0.16"
+version = "3.0.17"
 edition = "2021"
 
 [dependencies]
