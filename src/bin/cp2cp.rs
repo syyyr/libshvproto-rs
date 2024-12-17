@@ -7,6 +7,7 @@ use simple_logger::SimpleLogger;
 use shvproto::Reader;
 use shvproto::Writer;
 use clap::{Parser};
+use shvproto::reader::ReadErrorReason;
 
 #[derive(Parser, Debug)]
 #[structopt(name = "cp2cp", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "ChainPack to Cpon and back utility")]
@@ -17,6 +18,9 @@ struct Cli {
     cpon_input: bool,
     #[arg(long = "oc", help = "ChainPack output")]
     chainpack_output: bool,
+    /// Expect input data in RPC block transport format, https://silicon-heaven.github.io/shv-doc/rpctransportlayer/stream.html
+    #[arg(long)]
+    chainpack_rpc_block: bool,
     /// Verbose mode (module, .)
     #[arg(short = 'v', long = "verbose")]
     verbose: Option<String>,
@@ -27,7 +31,7 @@ struct Cli {
 
 fn main() {
     // Parse command line arguments
-    let opts = Cli::parse();
+    let mut opts = Cli::parse();
 
     let mut logger = SimpleLogger::new();
     logger = logger.with_level(LevelFilter::Error);
@@ -43,27 +47,46 @@ fn main() {
     }
     logger.init().unwrap();
 
-    //log::info!("=====================================================");
+    // log::info!("=====================================================");
     //log::info!("{} starting up!", std::module_path!());
     //log::info!("=====================================================");
     //log::info!("Verbosity levels: {}", verbosity_string);
+
+    if opts.chainpack_rpc_block {
+        opts.indent = None;
+        opts.chainpack_output = false;
+        opts.cpon_input = false;
+    }
 
     let mut reader: Box<dyn BufRead> = match opts.file {
         None => Box::new(BufReader::new(io::stdin())),
         Some(filename) => Box::new(BufReader::new(fs::File::open(filename).unwrap()))
     };
 
+    let mut chainpack_rpc_block_header = None;
     let res = if opts.cpon_input {
         let mut rd = CponReader::new(&mut reader);
         rd.read()
     } else {
         let mut rd = ChainPackReader::new(&mut reader);
+        if opts.chainpack_rpc_block {
+            let length = rd.read_uint_data().unwrap();
+            let proto = rd.read().unwrap().as_int();
+            chainpack_rpc_block_header = Some((length, proto));
+        }
         rd.read()
     };
     let rv = match res {
         Err(e) => {
-            eprintln!("Parse input error: {:?}", e);
-            process::exit(1);
+            match e.reason {
+                ReadErrorReason::UnexpectedEndOfStream => {
+                    process::exit(2);
+                }
+                ReadErrorReason::InvalidCharacter => {
+                    eprintln!("Parse input error: {:?}", e);
+                    process::exit(1);
+                }
+            }
         }
         Ok(rv) => rv,
     };
@@ -79,6 +102,10 @@ fn main() {
             } else {
                 wr.set_indent(s.as_bytes());
             }
+        }
+        if let Some((length, proto)) = chainpack_rpc_block_header {
+            println!("{length}");
+            println!("{proto}");
         }
         wr.write(&rv)
     };
