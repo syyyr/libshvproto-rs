@@ -1,8 +1,9 @@
 use std::{process, io, fs};
 use std::io::{BufReader, BufRead, BufWriter, stdout};
 use std::path::PathBuf;
+use std::process::ExitCode;
 use log::LevelFilter;
-use shvproto::{ChainPackReader, ChainPackWriter, CponReader, CponWriter};
+use shvproto::{ChainPackReader, ChainPackWriter, CponReader, CponWriter, ReadError};
 use simple_logger::SimpleLogger;
 use shvproto::Reader;
 use shvproto::Writer;
@@ -29,7 +30,22 @@ struct Cli {
     file: Option<PathBuf>,
 }
 
-fn main() {
+const CODE_READ_ERROR: i32 = 1;
+const CODE_NOT_ENOUGH_DATA: i32 = 2;
+const CODE_WRITE_ERROR: i32 = 4;
+
+fn process_read_error(error: &ReadError) -> ! {
+    match error.reason {
+        ReadErrorReason::UnexpectedEndOfStream => {
+            process::exit(CODE_NOT_ENOUGH_DATA);
+        }
+        ReadErrorReason::InvalidCharacter => {
+            eprintln!("Parse input error: {:?}", error);
+            process::exit(CODE_READ_ERROR);
+        }
+    }
+}
+fn main() -> ExitCode {
     // Parse command line arguments
     let mut opts = Cli::parse();
 
@@ -46,11 +62,6 @@ fn main() {
         }
     }
     logger.init().unwrap();
-
-    // log::info!("=====================================================");
-    //log::info!("{} starting up!", std::module_path!());
-    //log::info!("=====================================================");
-    //log::info!("Verbosity levels: {}", verbosity_string);
 
     if opts.chainpack_rpc_block {
         opts.indent = None;
@@ -70,24 +81,20 @@ fn main() {
     } else {
         let mut rd = ChainPackReader::new(&mut reader);
         if opts.chainpack_rpc_block {
-            let length = rd.read_uint_data().unwrap();
-            let proto = rd.read().unwrap().as_int();
-            chainpack_rpc_block_header = Some((length, proto));
+            let (block_length, frame_length) = match rd.read_uint_data() {
+                Ok(frame_length) => { (frame_length as usize + rd.position(), frame_length) }
+                Err(e) => { process_read_error(&e); }
+            };
+            let proto = match rd.read() {
+                Ok(proto) => { proto.as_int() }
+                Err(e) => { process_read_error(&e); }
+            };
+            chainpack_rpc_block_header = Some((block_length, frame_length, proto));
         }
         rd.read()
     };
     let rv = match res {
-        Err(e) => {
-            match e.reason {
-                ReadErrorReason::UnexpectedEndOfStream => {
-                    process::exit(2);
-                }
-                ReadErrorReason::InvalidCharacter => {
-                    eprintln!("Parse input error: {:?}", e);
-                    process::exit(1);
-                }
-            }
-        }
+        Err(e) => { process_read_error(&e); }
         Ok(rv) => rv,
     };
     let mut writer = BufWriter::new(stdout());
@@ -103,15 +110,17 @@ fn main() {
                 wr.set_indent(s.as_bytes());
             }
         }
-        if let Some((length, proto)) = chainpack_rpc_block_header {
-            println!("{length}");
+        if let Some((block_length, frame_length, proto)) = chainpack_rpc_block_header {
+            println!("{block_length}");
+            println!("{frame_length}");
             println!("{proto}");
         }
         wr.write(&rv)
     };
     if let Err(e) = res {
         eprintln!("Write output error: {:?}", e);
-        process::exit(1);
-    }
+        process::exit(CODE_WRITE_ERROR);
+    };
+    ExitCode::SUCCESS
 }
 
