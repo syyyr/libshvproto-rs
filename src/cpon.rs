@@ -296,7 +296,7 @@ impl<'a, W> CponWriter<'a, W>
     }
 }
 
-impl<'a, W> Writer for CponWriter<'a, W>
+impl<W> Writer for CponWriter<'_, W>
     where W: Write
 {
     fn write(&mut self, val: &RpcValue) -> WriteResult {
@@ -809,7 +809,7 @@ impl<'a, R> CponReader<'a, R>
 
 }
 
-impl<'a, R> Reader for CponReader<'a, R>
+impl<R> Reader for CponReader<'_, R>
     where R: Read
 {
     fn try_read_meta(&mut self) -> Result<Option<MetaMap>, ReadError> {

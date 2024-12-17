@@ -260,7 +260,7 @@ impl<'a, W> ChainPackWriter<'a, W>
     }
 }
 
-impl<'a, W> Writer for ChainPackWriter<'a, W>
+impl<W> Writer for ChainPackWriter<'_, W>
     where W: io::Write
 {
     fn write_meta(&mut self, map: &MetaMap) -> WriteResult {
@@ -512,7 +512,7 @@ impl<'a, R> ChainPackReader<'a, R>
     }
 }
 
-impl<'a, R> Reader for ChainPackReader<'a, R>
+impl<R> Reader for ChainPackReader<'_, R>
     where R: Read
 {
     fn try_read_meta(&mut self) -> Result<Option<MetaMap>, ReadError> {
