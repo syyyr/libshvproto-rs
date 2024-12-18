@@ -345,7 +345,9 @@ impl<'a, R> ChainPackReader<'a, R>
         else if (head &  64) == 0 {bytes_to_read_cnt = 1; num = (head & 63) as u64; bitlen = 6 + 8;}
         else if (head &  32) == 0 {bytes_to_read_cnt = 2; num = (head & 31) as u64; bitlen = 5 + 2*8;}
         else if (head &  16) == 0 {bytes_to_read_cnt = 3; num = (head & 15) as u64; bitlen = 4 + 3*8;}
-        else {
+        else if head == 0xFF {
+            return Err(self.make_error("TERM byte in unsigned int packed data", ReadErrorReason::InvalidCharacter))
+        } else {
             bytes_to_read_cnt = (head & 0xf) + 4;
             bitlen = bytes_to_read_cnt * 8;
         }

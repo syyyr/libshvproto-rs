@@ -86,7 +86,20 @@ fn main() -> ExitCode {
                 Err(e) => { process_read_error(&e); }
             };
             let proto = match rd.read() {
-                Ok(proto) => { proto.as_int() }
+                Ok(proto) => {
+                    let proto = proto.as_int();
+                    if proto == 0 || proto == 1 {
+                        proto
+                    } else {
+                        process_read_error(&ReadError{
+                            msg: "Invalid protocol number".to_string(),
+                            pos: 0,
+                            line: 0,
+                            col: 0,
+                            reason: ReadErrorReason::InvalidCharacter,
+                        });
+                    }
+                }
                 Err(e) => { process_read_error(&e); }
             };
             chainpack_rpc_block_header = Some((block_length, frame_length, proto));

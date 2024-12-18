@@ -61,4 +61,22 @@ mod test {
         assert_eq!(exit_code, 2);
         Ok(())
     }
+    #[test]
+    fn chainpack_rpc_block_invalid_length() -> Result<(), String> {
+        // <T:RpcMessage,id:4,method:"ls">i{}
+        let data = "FFFF";
+        let output = run_cp2cp(data)?;
+        let exit_code = output.status.code().unwrap();
+        assert_eq!(exit_code, 1);
+        Ok(())
+    }
+    #[test]
+    fn chainpack_rpc_block_invalid_protocol() -> Result<(), String> {
+        // <T:RpcMessage,id:4,method:"ls">i{}
+        let data = "0103";
+        let output = run_cp2cp(data)?;
+        let exit_code = output.status.code().unwrap();
+        assert_eq!(exit_code, 1);
+        Ok(())
+    }
 }
