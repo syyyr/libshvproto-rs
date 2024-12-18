@@ -103,7 +103,6 @@ where R: Read
 }
 
 pub type ReadResult = Result<RpcValue, ReadError>;
-//pub type ReadValueResult = Result<Value, ReadError>;
 
 pub trait Reader {
     fn read(&mut self) -> ReadResult {
@@ -115,3 +114,4 @@ pub trait Reader {
     fn try_read_meta(&mut self) -> Result<Option<MetaMap>, ReadError>;
     fn read_value(&mut self) -> Result<Value, ReadError>;
 }
+

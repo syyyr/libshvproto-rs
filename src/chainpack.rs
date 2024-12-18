@@ -1,10 +1,10 @@
-use crate::{RpcValue, MetaMap, metamap::MetaKey, Decimal, DateTime, WriteResult, Value};
-use std::io;
+use crate::reader::{ByteReader, ReadError, ReadErrorReason, Reader};
+use crate::rpcvalue::{IMap, Map};
 use crate::writer::{ByteWriter, Writer};
-use std::io::{Write, Read};
+use crate::{metamap::MetaKey, DateTime, Decimal, MetaMap, RpcValue, Value, WriteResult};
 use std::collections::BTreeMap;
-use crate::reader::{Reader, ByteReader, ReadError, ReadErrorReason};
-use crate::rpcvalue::{Map, IMap};
+use std::io;
+use std::io::{Read, Write};
 
 #[allow(clippy::upper_case_acronyms)]
 #[warn(non_camel_case_types)]
@@ -14,10 +14,10 @@ pub(crate) enum PackingSchema {
     UInt,
     Int,
     Double,
-    Bool,
+    BoolDeprecated, // deprecated
     Blob,
     String,
-    DateTimeEpochDepricated, // deprecated
+    DateTimeEpochDeprecated, // deprecated
     List,
     Map,
     IMap,
@@ -33,13 +33,15 @@ pub(crate) enum PackingSchema {
 const SHV_EPOCH_MSEC: i64 = 1517529600000;
 
 pub struct ChainPackWriter<'a, W>
-    where W: Write
+where
+    W: Write,
 {
     byte_writer: ByteWriter<'a, W>,
 }
 
 impl<'a, W> ChainPackWriter<'a, W>
-    where W: 'a + io::Write
+where
+    W: 'a + io::Write,
 {
     pub fn new(write: &'a mut W) -> Self {
         ChainPackWriter {
@@ -74,7 +76,7 @@ impl<'a, W> ChainPackWriter<'a, W>
             len += 4;
             n >>= 4;
         }
-        const SIG_TABLE_4BIT: [u8; 16] =  [ 0, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4 ];
+        const SIG_TABLE_4BIT: [u8; 16] = [0, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4];
         len += SIG_TABLE_4BIT[n as usize];
         len as u32
     }
@@ -113,10 +115,14 @@ impl<'a, W> ChainPackWriter<'a, W>
     fn write_uint_data_helper(&mut self, number: u64, bit_len: u32) -> WriteResult {
         const BYTE_CNT_MAX: u32 = 32;
         let byte_cnt = Self::bytes_needed(bit_len);
-        assert!(byte_cnt <= BYTE_CNT_MAX, "Max int byte size {} exceeded", BYTE_CNT_MAX);
+        assert!(
+            byte_cnt <= BYTE_CNT_MAX,
+            "Max int byte size {} exceeded",
+            BYTE_CNT_MAX
+        );
         let mut bytes: [u8; BYTE_CNT_MAX as usize] = [0; BYTE_CNT_MAX as usize];
         let mut num = number;
-        for i in (0 .. byte_cnt).rev() {
+        for i in (0..byte_cnt).rev() {
             let r = (num & 255) as u8;
             bytes[i as usize] = r;
             num >>= 8;
@@ -126,12 +132,11 @@ impl<'a, W> ChainPackWriter<'a, W>
             bytes[0] &= !mask;
             mask <<= 1;
             bytes[0] |= mask;
-        }
-        else {
+        } else {
             bytes[0] = (0xf0 | (byte_cnt - 5)) as u8;
         }
         let cnt = self.byte_writer.count();
-        for i in 0 .. byte_cnt {
+        for i in 0..byte_cnt {
             let r = bytes[i as usize];
             self.write_byte(r)?;
         }
@@ -167,8 +172,7 @@ impl<'a, W> ChainPackWriter<'a, W>
         let cnt = self.byte_writer.count();
         if (0..64).contains(&n) {
             self.write_byte(((n % 64) + 64) as u8)?;
-        }
-        else {
+        } else {
             self.write_byte(PackingSchema::Int as u8)?;
             self.write_int_data(n)?;
         }
@@ -178,8 +182,7 @@ impl<'a, W> ChainPackWriter<'a, W>
         let cnt = self.byte_writer.count();
         if n < 64 {
             self.write_byte((n % 64) as u8)?;
-        }
-        else {
+        } else {
             self.write_byte(PackingSchema::UInt as u8)?;
             self.write_uint_data(n)?;
         }
@@ -261,7 +264,8 @@ impl<'a, W> ChainPackWriter<'a, W>
 }
 
 impl<W> Writer for ChainPackWriter<'_, W>
-    where W: io::Write
+where
+    W: io::Write,
 {
     fn write_meta(&mut self, map: &MetaMap) -> WriteResult {
         let cnt = self.byte_writer.count();
@@ -289,11 +293,13 @@ impl<W> Writer for ChainPackWriter<'_, W>
         let cnt = self.byte_writer.count();
         match val {
             Value::Null => self.write_byte(PackingSchema::Null as u8)?,
-            Value::Bool(b) => if *b {
-                self.write_byte(PackingSchema::TRUE as u8)?
-            } else {
-                self.write_byte(PackingSchema::FALSE as u8)?
-            },
+            Value::Bool(b) => {
+                if *b {
+                    self.write_byte(PackingSchema::TRUE as u8)?
+                } else {
+                    self.write_byte(PackingSchema::FALSE as u8)?
+                }
+            }
             Value::Int(n) => self.write_int(*n)?,
             Value::UInt(n) => self.write_uint(*n)?,
             Value::String(s) => self.write_string(s)?,
@@ -310,16 +316,20 @@ impl<W> Writer for ChainPackWriter<'_, W>
 }
 
 pub struct ChainPackReader<'a, R>
-    where R: Read
+where
+    R: Read,
 {
     byte_reader: ByteReader<'a, R>,
 }
 
 impl<'a, R> ChainPackReader<'a, R>
-    where R: Read
+where
+    R: Read,
 {
     pub fn new(read: &'a mut R) -> Self {
-        ChainPackReader { byte_reader: ByteReader::new(read) }
+        ChainPackReader {
+            byte_reader: ByteReader::new(read),
+        }
     }
     pub fn position(&self) -> usize {
         self.byte_reader.pos
@@ -331,7 +341,8 @@ impl<'a, R> ChainPackReader<'a, R>
         self.byte_reader.get_byte()
     }
     fn make_error(&self, msg: &str, reason: ReadErrorReason) -> ReadError {
-        self.byte_reader.make_error(&format!("ChainPack read error - {}", msg), reason)
+        self.byte_reader
+            .make_error(&format!("ChainPack read error - {}", msg), reason)
     }
 
     /// return (n, bitlen)
@@ -341,17 +352,32 @@ impl<'a, R> ChainPackReader<'a, R>
         let head = self.get_byte()?;
         let bytes_to_read_cnt;
         let bitlen;
-        if (head & 128) == 0 {bytes_to_read_cnt = 0; num = (head & 127) as u64; bitlen = 7;}
-        else if (head &  64) == 0 {bytes_to_read_cnt = 1; num = (head & 63) as u64; bitlen = 6 + 8;}
-        else if (head &  32) == 0 {bytes_to_read_cnt = 2; num = (head & 31) as u64; bitlen = 5 + 2*8;}
-        else if (head &  16) == 0 {bytes_to_read_cnt = 3; num = (head & 15) as u64; bitlen = 4 + 3*8;}
-        else if head == 0xFF {
-            return Err(self.make_error("TERM byte in unsigned int packed data", ReadErrorReason::InvalidCharacter))
+        if (head & 128) == 0 {
+            bytes_to_read_cnt = 0;
+            num = (head & 127) as u64;
+            bitlen = 7;
+        } else if (head & 64) == 0 {
+            bytes_to_read_cnt = 1;
+            num = (head & 63) as u64;
+            bitlen = 6 + 8;
+        } else if (head & 32) == 0 {
+            bytes_to_read_cnt = 2;
+            num = (head & 31) as u64;
+            bitlen = 5 + 2 * 8;
+        } else if (head & 16) == 0 {
+            bytes_to_read_cnt = 3;
+            num = (head & 15) as u64;
+            bitlen = 4 + 3 * 8;
+        } else if head == 0xFF {
+            return Err(self.make_error(
+                "TERM byte in unsigned int packed data",
+                ReadErrorReason::InvalidCharacter,
+            ));
         } else {
             bytes_to_read_cnt = (head & 0xf) + 4;
             bitlen = bytes_to_read_cnt * 8;
         }
-        for _ in 0 .. bytes_to_read_cnt {
+        for _ in 0..bytes_to_read_cnt {
             let r = self.get_byte()?;
             num = (num << 8) + (r as u64);
         }
@@ -398,26 +424,32 @@ impl<'a, R> ChainPackReader<'a, R>
         let s = std::str::from_utf8(&buff);
         match s {
             Ok(s) => Ok(Value::from(s)),
-            Err(e) => Err(self.make_error(&format!("Invalid string, Utf8 error: {}", e), ReadErrorReason::InvalidCharacter)),
+            Err(e) => Err(self.make_error(
+                &format!("Invalid string, Utf8 error: {}", e),
+                ReadErrorReason::InvalidCharacter,
+            )),
         }
     }
     fn read_string_data(&mut self) -> Result<Value, ReadError> {
         let len = self.read_uint_data()?;
         let mut buff: Vec<u8> = Vec::new();
-        for _ in 0 .. len {
+        for _ in 0..len {
             let b = self.get_byte()?;
             buff.push(b);
         }
         let s = std::str::from_utf8(&buff);
         match s {
             Ok(s) => Ok(Value::from(s)),
-            Err(e) => Err(self.make_error(&format!("Invalid string, Utf8 error: {}", e), ReadErrorReason::InvalidCharacter)),
+            Err(e) => Err(self.make_error(
+                &format!("Invalid string, Utf8 error: {}", e),
+                ReadErrorReason::InvalidCharacter,
+            )),
         }
     }
     fn read_blob_data(&mut self) -> Result<Value, ReadError> {
         let len = self.read_uint_data()?;
         let mut buff: Vec<u8> = Vec::new();
-        for _ in 0 .. len {
+        for _ in 0..len {
             let b = self.get_byte()?;
             buff.push(b);
         }
@@ -448,9 +480,11 @@ impl<'a, R> ChainPackReader<'a, R>
             let key;
             if k.is_string() {
                 key = k.as_str();
-            }
-            else {
-                return Err(self.make_error(&format!("Invalid Map key '{}'", k), ReadErrorReason::InvalidCharacter))
+            } else {
+                return Err(self.make_error(
+                    &format!("Invalid Map key '{}'", k),
+                    ReadErrorReason::InvalidCharacter,
+                ));
             }
             let val = self.read()?;
             map.insert(key.to_string(), val);
@@ -469,9 +503,11 @@ impl<'a, R> ChainPackReader<'a, R>
             let key;
             if k.is_int() {
                 key = k.as_i32();
-            }
-            else {
-                return Err(self.make_error(&format!("Invalid IMap key '{}'", k), ReadErrorReason::InvalidCharacter))
+            } else {
+                return Err(self.make_error(
+                    &format!("Invalid IMap key '{}'", k),
+                    ReadErrorReason::InvalidCharacter,
+                ));
             }
             let val = self.read()?;
             map.insert(key, val);
@@ -488,7 +524,6 @@ impl<'a, R> ChainPackReader<'a, R>
             offset = (d & 0x7F) as i8;
             offset <<= 1;
             offset >>= 1; // sign extension
-            //log::debug!("1----------> offset: {}", offset);
             d >>= 7;
         }
         if has_not_msec {
@@ -499,9 +534,9 @@ impl<'a, R> ChainPackReader<'a, R>
         Ok(Value::from(dt))
     }
     fn read_double_data(&mut self) -> Result<Value, ReadError> {
-        let mut buff: [u8;8] = [0;8];
+        let mut buff: [u8; 8] = [0; 8];
         if let Err(e) = self.byte_reader.read.read(&mut buff) {
-            return Err(self.make_error(&format!("{}", e), ReadErrorReason::InvalidCharacter))
+            return Err(self.make_error(&format!("{}", e), ReadErrorReason::InvalidCharacter));
         }
         let d = f64::from_le_bytes(buff);
         Ok(Value::from(d))
@@ -515,12 +550,13 @@ impl<'a, R> ChainPackReader<'a, R>
 }
 
 impl<R> Reader for ChainPackReader<'_, R>
-    where R: Read
+where
+    R: Read,
 {
     fn try_read_meta(&mut self) -> Result<Option<MetaMap>, ReadError> {
         let b = self.peek_byte();
         if b != PackingSchema::MetaMap as u8 {
-            return Ok(None)
+            return Ok(None);
         }
         self.get_byte()?;
         let mut map = MetaMap::new();
@@ -540,7 +576,13 @@ impl<R> Reader for ChainPackReader<'_, R>
                     map.insert(&**s.clone(), val);
                 }
                 _ => {
-                    return Err(self.make_error(&format!("MetaMap key must be int or string, got: {}", key.type_name()), ReadErrorReason::InvalidCharacter))
+                    return Err(self.make_error(
+                        &format!(
+                            "MetaMap key must be int or string, got: {}",
+                            key.type_name()
+                        ),
+                        ReadErrorReason::InvalidCharacter,
+                    ))
                 }
             }
         }
@@ -548,50 +590,84 @@ impl<R> Reader for ChainPackReader<'_, R>
     }
     fn read_value(&mut self) -> Result<Value, ReadError> {
         let b = self.get_byte()?;
-        let v =
-            if b < 128 {
-                if (b & 64) == 0 {
-                    // tiny UInt
-                    Value::from((b & 63) as u64)
-                }
-                else {
-                    // tiny Int
-                    Value::from((b & 63) as i64)
-                }
-            } else if b == PackingSchema::Int as u8 {
-                let n = self.read_int_data()?;
-                Value::from(n)
-            } else if b == PackingSchema::UInt as u8 {
-                let n = self.read_uint_data()?;
-                Value::from(n)
-            } else if b == PackingSchema::Double as u8 {
-                self.read_double_data()?
-            } else if b == PackingSchema::Decimal as u8 {
-                self.read_decimal_data()?
-            } else if b == PackingSchema::DateTime as u8 {
-                self.read_datetime_data()?
-            } else if b == PackingSchema::String as u8 {
-                self.read_string_data()?
-            } else if b == PackingSchema::CString as u8 {
-                self.read_cstring_data()?
-            } else if b == PackingSchema::Blob as u8 {
-                self.read_blob_data()?
-            } else if b == PackingSchema::List as u8 {
-                self.read_list_data()?
-            } else if b == PackingSchema::Map as u8 {
-                self.read_map_data()?
-            } else if b == PackingSchema::IMap as u8 {
-                self.read_imap_data()?
-            } else if b == PackingSchema::TRUE as u8 {
-                Value::from(true)
-            } else if b == PackingSchema::FALSE as u8 {
-                Value::from(false)
-            } else if b == PackingSchema::Null as u8 {
-                Value::from(())
+        let v = if b < 128 {
+            if (b & 64) == 0 {
+                // tiny UInt
+                Value::from((b & 63) as u64)
             } else {
-                return Err(self.make_error(&format!("Invalid Packing schema: {}", b), ReadErrorReason::InvalidCharacter))
-            };
+                // tiny Int
+                Value::from((b & 63) as i64)
+            }
+        } else if b == PackingSchema::Int as u8 {
+            let n = self.read_int_data()?;
+            Value::from(n)
+        } else if b == PackingSchema::UInt as u8 {
+            let n = self.read_uint_data()?;
+            Value::from(n)
+        } else if b == PackingSchema::Double as u8 {
+            self.read_double_data()?
+        } else if b == PackingSchema::Decimal as u8 {
+            self.read_decimal_data()?
+        } else if b == PackingSchema::DateTime as u8 {
+            self.read_datetime_data()?
+        } else if b == PackingSchema::String as u8 {
+            self.read_string_data()?
+        } else if b == PackingSchema::CString as u8 {
+            self.read_cstring_data()?
+        } else if b == PackingSchema::Blob as u8 {
+            self.read_blob_data()?
+        } else if b == PackingSchema::List as u8 {
+            self.read_list_data()?
+        } else if b == PackingSchema::Map as u8 {
+            self.read_map_data()?
+        } else if b == PackingSchema::IMap as u8 {
+            self.read_imap_data()?
+        } else if b == PackingSchema::TRUE as u8 {
+            Value::from(true)
+        } else if b == PackingSchema::FALSE as u8 {
+            Value::from(false)
+        } else if b == PackingSchema::Null as u8 {
+            Value::from(())
+        } else {
+            return Err(self.make_error(
+                &format!("Invalid Packing schema: {}", b),
+                ReadErrorReason::InvalidCharacter,
+            ));
+        };
 
         Ok(v)
     }
+}
+
+#[test]
+fn test_try_read_meta_complete() {
+    // <T:RpcMessage,id:4,method:"ls">i{}
+    let buff = hex::decode("8B414148444A86026C73FF8AFF").unwrap();
+    let mut data = &buff[..];
+    let mut rd = ChainPackReader::new(&mut data);
+    let meta = rd.try_read_meta().unwrap().unwrap();
+    assert_eq!(meta.get(8).unwrap().as_int(), 4);
+    assert_eq!(meta.get(10).unwrap().as_str(), "ls");
+    let val = rd.read().unwrap();
+    assert!(val.is_imap());
+}
+#[test]
+fn test_try_read_meta_incomplete() {
+    // <T:RpcMessage,id:4,method:"ls">i{}
+    let buff = hex::decode("8B414148444A86026C73").unwrap();
+    let mut data = &buff[..];
+    let mut rd = ChainPackReader::new(&mut data);
+    let meta = rd.try_read_meta();
+    assert!(meta.is_err());
+}
+#[test]
+fn test_try_read_meta_missing() {
+    // i{}
+    let buff = hex::decode("8AFF").unwrap();
+    let mut data = &buff[..];
+    let mut rd = ChainPackReader::new(&mut data);
+    let meta = rd.try_read_meta().unwrap();
+    assert!(meta.is_none());
+    let val = rd.read().unwrap();
+    assert!(val.is_imap());
 }
