@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod test {
-    use std::process::{Command, Output, Stdio};
-    use std::{thread};
+    use shvproto::RpcValue;
     use std::io::Write;
-    use shvproto::{RpcValue};
+    use std::process::{Command, Output, Stdio};
+    use std::thread;
 
     fn run_cp2cp(data: &str) -> Result<Output, String> {
         let block = hex::decode(data).expect("HEX decoding failed");
