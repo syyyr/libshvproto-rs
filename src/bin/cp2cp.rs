@@ -1,14 +1,14 @@
-use std::{process, io, fs};
-use std::io::{BufReader, BufRead, BufWriter, stdout};
-use std::path::PathBuf;
-use std::process::ExitCode;
+use clap::Parser;
 use log::LevelFilter;
-use shvproto::{ChainPackReader, ChainPackWriter, CponReader, CponWriter, ReadError};
-use simple_logger::SimpleLogger;
+use shvproto::reader::ReadErrorReason;
 use shvproto::Reader;
 use shvproto::Writer;
-use clap::{Parser};
-use shvproto::reader::ReadErrorReason;
+use shvproto::{ChainPackReader, ChainPackWriter, CponReader, CponWriter};
+use simple_logger::SimpleLogger;
+use std::fmt::Display;
+use std::io::{stdout, BufRead, BufReader, BufWriter};
+use std::path::PathBuf;
+use std::{fs, io, process};
 
 #[derive(Parser, Debug)]
 #[structopt(name = "cp2cp", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "ChainPack to Cpon and back utility")]
@@ -30,22 +30,83 @@ struct Cli {
     file: Option<PathBuf>,
 }
 
+const CODE_SUCCESS: i32 = 0;
 const CODE_READ_ERROR: i32 = 1;
 const CODE_NOT_ENOUGH_DATA: i32 = 2;
 const CODE_WRITE_ERROR: i32 = 4;
 
-fn process_read_error(error: &ReadError) -> ! {
-    match error.reason {
-        ReadErrorReason::UnexpectedEndOfStream => {
-            process::exit(CODE_NOT_ENOUGH_DATA);
+struct ChainPackRpcBlockResult {
+    block_length: Option<usize>,
+    frame_length: Option<u64>,
+    proto: Option<i64>,
+    cpon: String,
+}
+fn print_option<T: Display>(n: Option<T>) {
+    if let Some(n) = n {
+        println!("{}", n);
+    } else {
+        println!();
+    }
+}
+fn exit_with_result_and_code(result: &ChainPackRpcBlockResult, error: Option<ReadErrorReason>) -> ! {
+    let exit_code = if let Some(error) = &error {
+        match error {
+            ReadErrorReason::UnexpectedEndOfStream => CODE_NOT_ENOUGH_DATA,
+            ReadErrorReason::InvalidCharacter => {
+                eprintln!("Parse input error: {:?}", error);
+                CODE_READ_ERROR
+            }
         }
-        ReadErrorReason::InvalidCharacter => {
-            eprintln!("Parse input error: {:?}", error);
-            process::exit(CODE_READ_ERROR);
+    } else {
+        CODE_SUCCESS
+    };
+    print_option(result.block_length);
+    print_option(result.frame_length);
+    print_option(result.proto);
+    println!("{}", result.cpon);
+    process::exit(exit_code);
+}
+fn process_chainpack_rpc_block(mut reader: Box<dyn BufRead>) -> ! {
+    let mut result = ChainPackRpcBlockResult {
+        block_length: None,
+        frame_length: None,
+        proto: None,
+        cpon: "".to_string(),
+    };
+    let mut rd = ChainPackReader::new(&mut reader);
+    match rd.read_uint_data() {
+        Ok(frame_length) => {
+            result.block_length = Some(frame_length as usize + rd.position());
+            result.frame_length = Some(frame_length);
+        }
+        Err(e) => {
+            exit_with_result_and_code(&result, Some(e.reason));
+        }
+    };
+    match rd.read() {
+        Ok(proto) => {
+            let proto = proto.as_int();
+            if proto == 0 || proto == 1 {
+                result.proto = Some(proto);
+            } else {
+                exit_with_result_and_code(&result, Some(ReadErrorReason::InvalidCharacter));
+            }
+        }
+        Err(e) => {
+            exit_with_result_and_code(&result, Some(e.reason));
+        }
+    };
+    match rd.read() {
+        Ok(rv) => {
+            result.cpon = rv.to_cpon().to_string();
+            exit_with_result_and_code(&result, None);
+        }
+        Err(e) => {
+            exit_with_result_and_code(&result, Some(e.reason));
         }
     }
 }
-fn main() -> ExitCode {
+fn main() {
     // Parse command line arguments
     let mut opts = Cli::parse();
 
@@ -71,43 +132,23 @@ fn main() -> ExitCode {
 
     let mut reader: Box<dyn BufRead> = match opts.file {
         None => Box::new(BufReader::new(io::stdin())),
-        Some(filename) => Box::new(BufReader::new(fs::File::open(filename).unwrap()))
+        Some(filename) => Box::new(BufReader::new(fs::File::open(filename).unwrap())),
     };
 
-    let mut chainpack_rpc_block_header = None;
     let res = if opts.cpon_input {
         let mut rd = CponReader::new(&mut reader);
         rd.read()
+    } else if opts.chainpack_rpc_block {
+        process_chainpack_rpc_block(reader)
     } else {
         let mut rd = ChainPackReader::new(&mut reader);
-        if opts.chainpack_rpc_block {
-            let (block_length, frame_length) = match rd.read_uint_data() {
-                Ok(frame_length) => { (frame_length as usize + rd.position(), frame_length) }
-                Err(e) => { process_read_error(&e); }
-            };
-            let proto = match rd.read() {
-                Ok(proto) => {
-                    let proto = proto.as_int();
-                    if proto == 0 || proto == 1 {
-                        proto
-                    } else {
-                        process_read_error(&ReadError{
-                            msg: "Invalid protocol number".to_string(),
-                            pos: 0,
-                            line: 0,
-                            col: 0,
-                            reason: ReadErrorReason::InvalidCharacter,
-                        });
-                    }
-                }
-                Err(e) => { process_read_error(&e); }
-            };
-            chainpack_rpc_block_header = Some((block_length, frame_length, proto));
-        }
         rd.read()
     };
     let rv = match res {
-        Err(e) => { process_read_error(&e); }
+        Err(e) => {
+            eprintln!("Parse input error: {:?}", e);
+            process::exit(CODE_READ_ERROR);
+        }
         Ok(rv) => rv,
     };
     let mut writer = BufWriter::new(stdout());
@@ -123,17 +164,10 @@ fn main() -> ExitCode {
                 wr.set_indent(s.as_bytes());
             }
         }
-        if let Some((block_length, frame_length, proto)) = chainpack_rpc_block_header {
-            println!("{block_length}");
-            println!("{frame_length}");
-            println!("{proto}");
-        }
         wr.write(&rv)
     };
     if let Err(e) = res {
         eprintln!("Write output error: {:?}", e);
         process::exit(CODE_WRITE_ERROR);
     };
-    ExitCode::SUCCESS
 }
-

@@ -477,15 +477,14 @@ where
                 break;
             }
             let k = self.read()?;
-            let key;
-            if k.is_string() {
-                key = k.as_str();
+            let key = if k.is_string() {
+                k.as_str()
             } else {
                 return Err(self.make_error(
                     &format!("Invalid Map key '{}'", k),
                     ReadErrorReason::InvalidCharacter,
                 ));
-            }
+            };
             let val = self.read()?;
             map.insert(key.to_string(), val);
         }
@@ -500,15 +499,14 @@ where
                 break;
             }
             let k = self.read()?;
-            let key;
-            if k.is_int() {
-                key = k.as_i32();
+            let key = if k.is_int() {
+                k.as_i32()
             } else {
                 return Err(self.make_error(
                     &format!("Invalid IMap key '{}'", k),
                     ReadErrorReason::InvalidCharacter,
                 ));
-            }
+            };
             let val = self.read()?;
             map.insert(key, val);
         }
