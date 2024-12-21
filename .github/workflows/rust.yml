@@ -37,7 +37,7 @@ jobs:
     - name: Build and Install Binary
       run: |
         mkdir -p install_dir
-        cargo install --path . --root install_dir --target ${{ matrix.target }}
+        cargo install --path ${{github.workspace}} --root install_dir --target ${{ matrix.target }}
         ls -l install_dir/bin
       shell: bash
 
