@@ -3,12 +3,10 @@ name: Rust Build and Artifact Creation
 on:
   push:
     branches:
-      - main
-      - win-build
+      - master
   pull_request:
     branches:
-      - main
-      - win-build
+      - master
 
 jobs:
   build:
@@ -36,13 +34,12 @@ jobs:
 
     - name: Build and Install Binary
       run: |
-        mkdir -p install_dir
-        cargo install --path ${{github.workspace}} --root install_dir --target ${{ matrix.target }}
-        ls -l install_dir/bin
+        mkdir -p ${{github.workspace}}/install
+        cargo install --path '${{github.workspace}}' --root '${{github.workspace}}/install' --target ${{ matrix.target }}
       shell: bash
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.os }}-${{ matrix.toolchain }}-binary
-        path: install_dir/bin
+        path: ${{github.workspace}}/install/bin
