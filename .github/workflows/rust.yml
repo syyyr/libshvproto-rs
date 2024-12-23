@@ -47,3 +47,44 @@ jobs:
       with:
         name: ${{ matrix.os }}-${{ matrix.toolchain }}-binary
         path: ${{github.workspace}}/install/bin
+
+  create-nightly-release:
+    name: Create nightly
+    if: github.ref == 'refs/heads/master'
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consolidate artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-latest-nightly-binary'
+          merge-multiple: true
+
+      - name: Rename artifacts
+        run: |
+          CP2CP_FILE_NAME="$(printf "cp2cp-nightly-g%s" "$(head -c 7 <<< '${{github.sha}}')")"
+          mv cp2cp "${CP2CP_FILE_NAME}"
+          mv cp2cp.exe "${CP2CP_FILE_NAME}.exe"
+
+      - name: Remove previous Nightly assets
+        run: |
+          REPO='${{github.repository}}'
+          readarray -t PREVIOUS_ASSETS < <(gh release --repo "$REPO" view nightly --json assets --jq .assets[].name)
+          for PREVIOUS_ASSET in "${PREVIOUS_ASSETS[@]}"; do
+            gh release --repo "$REPO" delete-asset nightly "${PREVIOUS_ASSET}" --yes
+          done
+        env:
+          GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Nightly
+          tag_name: nightly
+          fail_on_unmatched_files: true
+          body: |
+            The latest and greatest.
+
+            This is a nightly release. If you find any bugs, please report them to the repository's issue tracker.
+          files: |
+             cp2cp*
