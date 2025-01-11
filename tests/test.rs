@@ -231,6 +231,13 @@ mod test {
     }
 
     #[test]
+    fn unit_variants_enum_representation() {
+        let x = shvproto::RpcValue::from("variant1");
+        let y: UnitVariantsOnlyEnum = x.clone().try_into().unwrap();
+        assert_eq!(x, y.into());
+    }
+
+    #[test]
     #[should_panic]
     fn unit_variants_enum_failing() {
         let rv = shvproto::RpcValue::from("foo");
