@@ -303,9 +303,9 @@ pub fn derive_from_rpcvalue(item: TokenStream) -> TokenStream {
                     syn::Fields::Unit => {
                         let variant_ident_name = variant_ident.to_string().to_case(Case::Camel);
                         match_arms_ser.extend(quote!{
-                            #struct_identifier::#variant_ident => shvproto::RpcValue::from(stringify!(#variant_ident_name)),
+                            #struct_identifier::#variant_ident => shvproto::RpcValue::from(#variant_ident_name),
                         });
-                        add_type_matcher(&mut match_arms_de, quote!{String(s) if s.as_str() == stringify!(#variant_ident_name)}, quote!{#variant_ident}, quote!());
+                        add_type_matcher(&mut match_arms_de, quote!{String(s) if s.as_str() == #variant_ident_name}, quote!{#variant_ident}, quote!());
                     },
                     syn::Fields::Named(variant_fields) => {
                         if let Some((matched_variant_ident, matched_variant_type)) = map_has_been_matched_as_map {
